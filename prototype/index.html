@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>terra-town プロトタイプ (Gate P)</title>
+<style>
+  :root{
+    --bg:#1b1f2a;
+    --panel:#242938;
+    --panel2:#2c3244;
+    --text:#e8ecf4;
+    --muted:#9aa3b8;
+    --accent:#4fd1c5;
+    --accent2:#f6ad55;
+    --danger:#f56565;
+    --fog:#12141c;
+    --border:#3a4156;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Segoe UI","Hiragino Kaku Gothic ProN",sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:16px;
+    gap:12px;
+  }
+  h1{font-size:20px;margin:0;}
+  .sub{color:var(--muted);font-size:12px;margin-top:-8px;}
+
+  .layout{
+    display:flex;
+    gap:16px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+    justify-content:center;
+  }
+
+  /* ---- HUD ---- */
+  .hud{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px 14px;
+  }
+  .stat{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:14px;
+    background:var(--panel2);
+    border-radius:8px;
+    padding:4px 10px;
+    min-width:64px;
+    justify-content:center;
+  }
+  .stat b{font-size:15px;}
+
+  /* ---- Grid ---- */
+  #grid{
+    display:grid;
+    gap:1px;
+    background:var(--border);
+    border:2px solid var(--border);
+    border-radius:6px;
+    overflow:hidden;
+    user-select:none;
+  }
+  .cell{
+    width:34px;
+    height:34px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    position:relative;
+    background:var(--fog);
+    cursor:pointer;
+    transition:background .15s;
+  }
+  .cell.fog{ background:repeating-linear-gradient(45deg,#12141c,#12141c 6px,#181c26 6px,#181c26 12px); }
+  .cell.fog:hover{ filter:brightness(1.3); }
+  .cell.revealed.plain{ background:#3a4a2e; }
+  .cell.revealed.forest{ background:#254a2b; }
+  .cell.revealed.mountain{ background:#4a4438; }
+  .cell.revealed.water{ background:#1f3d5c; cursor:not-allowed; }
+  .cell.revealed.urban{ background:#4a3b52; }
+  .cell.visited::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
+  }
+  .cell.buildable-hint{ outline:2px solid var(--accent2); outline-offset:-2px; }
+  .cell.player{ box-shadow: inset 0 0 0 2px #fff; }
+  .cell .badge{
+    position:absolute;
+    bottom:-2px;
+    right:-1px;
+    font-size:10px;
+    background:rgba(0,0,0,0.55);
+    border-radius:4px;
+    padding:0 2px;
+    line-height:1.3;
+  }
+
+  /* ---- Controls ---- */
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:12px 14px;
+    width:260px;
+    font-size:13px;
+  }
+  .panel h2{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+  .modes{display:flex;gap:6px;margin-bottom:10px;}
+  .modes button{
+    flex:1;
+    padding:8px 4px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background:var(--panel2);
+    color:var(--text);
+    cursor:pointer;
+    font-size:12px;
+  }
+  .modes button.active{
+    background:var(--accent);
+    color:#0b1220;
+    border-color:var(--accent);
+    font-weight:bold;
+  }
+  .hint{color:var(--muted);font-size:12px;line-height:1.5;margin:6px 0 12px;}
+  .buildbtn{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    width:100%;
+    padding:8px 10px;
+    margin-bottom:6px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background:var(--panel2);
+    color:var(--text);
+    cursor:pointer;
+    font-size:12px;
+    text-align:left;
+  }
+  .buildbtn:disabled{opacity:.4;cursor:not-allowed;}
+  .buildbtn .cost{color:var(--accent2);font-size:11px;}
+  .legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:11px;color:var(--muted);}
+  .legend span{background:var(--panel2);border-radius:6px;padding:2px 6px;}
+  .movepad{
+    display:grid;
+    grid-template-columns:repeat(3,36px);
+    grid-template-rows:repeat(2,36px);
+    gap:4px;
+    justify-content:center;
+    margin-top:10px;
+  }
+  .movepad button{
+    border-radius:8px;
+    border:1px solid var(--border);
+    background:var(--panel2);
+    color:var(--text);
+    font-size:16px;
+    cursor:pointer;
+  }
+  #regen{
+    width:100%;
+    margin-top:10px;
+    padding:8px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background:var(--panel2);
+    color:var(--muted);
+    cursor:pointer;
+    font-size:12px;
+  }
+  #log{
+    margin-top:8px;
+    font-size:11px;
+    color:var(--accent);
+    min-height:32px;
+    line-height:1.4;
+  }
+</style>
+</head>
+<body>
+
+<h1>🌍 terra-town プロトタイプ (Gate P / Find the Fun)</h1>
+<div class="sub">疑似移動で探索ループを検証する使い捨てプロトタイプ ― GPS・地図タイルは未使用</div>
+
+<div class="hud" id="hud"></div>
+
+<div class="layout">
+  <div id="grid"></div>
+
+  <div class="panel">
+    <h2>操作モード</h2>
+    <div class="modes">
+      <button id="mode-move" class="active">🚶 移動</button>
+      <button id="mode-build">🏗️ 建設</button>
+      <button id="mode-reveal">✨ P開拓</button>
+    </div>
+    <div class="hint" id="modehint"></div>
+
+    <div id="buildpanel" style="display:none;">
+      <h2>建設メニュー(選択マス)</h2>
+      <div id="buildoptions"></div>
+    </div>
+
+    <div class="movepad">
+      <span></span>
+      <button id="btn-up">↑</button>
+      <span></span>
+      <button id="btn-left">←</button>
+      <button id="btn-down">↓</button>
+      <button id="btn-right">→</button>
+    </div>
+
+    <button id="regen">🔄 マップを作り直す</button>
+    <div id="log"></div>
+
+    <div class="legend">
+      <span>🌾 平地</span>
+      <span>🌲 森=木</span>
+      <span>⛰️ 山=石</span>
+      <span>💧 水辺=水(通行不可)</span>
+      <span>🏙️ 市街=部品</span>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================
+   CORE ― 探索/開示/資材/建設ロジック(疑似 core/ 相当)
+   ※ 本番では GPS 入力を持つ location/ 層から呼ばれる想定。
+   このファイルはプロトタイプなので同一ファイル内に同居させるが、
+   Core は「入力手段」を一切知らない関数群として分離してある。
+   ========================================================= */
+const Core = (() => {
+  const COLS = 18, ROWS = 13;
+  const REVEAL_RADIUS = 1;      // 歩行時に開示される半径
+  const POINT_REVEAL_COST = 15; // ポイント開拓1マスのコスト
+
+  const TERRAIN = {
+    plain:    { emoji:"🌾", passable:true,  resource:null,   amount:0 },
+    forest:   { emoji:"🌲", passable:true,  resource:"wood", amount:2 },
+    mountain: { emoji:"⛰️", passable:true,  resource:"stone",amount:2 },
+    water:    { emoji:"💧", passable:false, resource:"water",amount:2 },
+    urban:    { emoji:"🏙️", passable:true,  resource:"parts",amount:2 },
+  };
+
+  const BUILDINGS = {
+    house:{
+      name:"🏠 家",
+      levels:[
+        {cost:{wood:3,stone:1}, points:5},
+        {cost:{wood:6,stone:3}, points:10},
+        {cost:{wood:10,stone:6,parts:2}, points:20},
+      ]
+    },
+    workshop:{
+      name:"🏭 工房",
+      levels:[
+        {cost:{stone:3,parts:1}, points:8},
+        {cost:{stone:6,parts:3}, points:16},
+        {cost:{stone:10,parts:6,wood:4}, points:30},
+      ]
+    },
+    farm:{
+      name:"🌻 農場",
+      levels:[
+        {cost:{wood:2,water:3}, points:6},
+        {cost:{wood:4,water:6}, points:14},
+        {cost:{wood:7,water:10,parts:3}, points:25},
+      ]
+    },
+  };
+
+  function makeState(){
+    return {
+      cols:COLS, rows:ROWS,
+      grid:[], // grid[y][x] = {terrain, revealed, visited, building:{type,level}|null}
+      player:{x:0,y:0},
+      resources:{wood:0,stone:0,water:0,parts:0},
+      points:0,
+      revealedCount:0,
+    };
+  }
+
+  function weightedTerrain(){
+    const r = Math.random();
+    if (r < 0.40) return "plain";
+    if (r < 0.65) return "forest";
+    if (r < 0.80) return "mountain";
+    if (r < 0.90) return "water";
+    return "urban";
+  }
+
+  function generateGrid(state){
+    const g = [];
+    for(let y=0;y<state.rows;y++){
+      const row=[];
+      for(let x=0;x<state.cols;x++){
+        row.push({terrain:weightedTerrain(), revealed:false, visited:false, building:null});
+      }
+      g.push(row);
+    }
+    // クラスタリング用のスムージング(2パス): 地物っぽい塊を作る
+    for(let pass=0; pass<2; pass++){
+      for(let y=0;y<state.rows;y++){
+        for(let x=0;x<state.cols;x++){
+          const counts = {};
+          let total=0;
+          for(let dy=-1;dy<=1;dy++){
+            for(let dx=-1;dx<=1;dx++){
+              if(dx===0&&dy===0) continue;
+              const nx=x+dx, ny=y+dy;
+              if(nx<0||ny<0||nx>=state.cols||ny>=state.rows) continue;
+              const t = g[ny][nx].terrain;
+              counts[t]=(counts[t]||0)+1;
+              total++;
+            }
+          }
+          let best=null, bestN=0;
+          for(const t in counts){ if(counts[t]>bestN){best=t; bestN=counts[t];} }
+          if(best && bestN>=4 && Math.random()<0.5){
+            g[y][x].terrain = best;
+          }
+        }
+      }
+    }
+    state.grid = g;
+
+    // プレイヤー開始位置は中央付近の平地(通行可能)に補正
+    const cx = Math.floor(state.cols/2), cy = Math.floor(state.rows/2);
+    g[cy][cx].terrain = "plain";
+    state.player = {x:cx, y:cy};
+    state.resources = {wood:0,stone:0,water:0,parts:0};
+    state.points = 0;
+    state.revealedCount = 0;
+
+    revealAround(state, cx, cy, REVEAL_RADIUS);
+    return state;
+  }
+
+  function inBounds(state,x,y){
+    return x>=0 && y>=0 && x<state.cols && y<state.rows;
+  }
+
+  // 半径 r 内のマスを開示し、新規開示分の資材を付与。戻り値: 新規開示マス数
+  function revealAround(state, cx, cy, r){
+    let newly=0;
+    for(let dy=-r; dy<=r; dy++){
+      for(let dx=-r; dx<=r; dx++){
+        const x=cx+dx, y=cy+dy;
+        if(!inBounds(state,x,y)) continue;
+        const cell = state.grid[y][x];
+        if(!cell.revealed){
+          cell.revealed = true;
+          state.revealedCount++;
+          newly++;
+          const t = TERRAIN[cell.terrain];
+          if(t.resource){
+            state.resources[t.resource] += t.amount;
+          }
+        }
+      }
+    }
+    return newly;
+  }
+
+  // 徒歩移動を試みる。成功時 true。
+  function tryMove(state, dx, dy){
+    const nx = state.player.x+dx, ny = state.player.y+dy;
+    if(!inBounds(state,nx,ny)) return {ok:false, reason:"範囲外です"};
+    const cell = state.grid[ny][nx];
+    if(!cell.revealed) return {ok:false, reason:"まだ見えていないマスです"};
+    if(!TERRAIN[cell.terrain].passable) return {ok:false, reason:"💧 水辺は歩いて渡れません"};
+    state.player = {x:nx, y:ny};
+    cell.visited = true;
+    const newly = revealAround(state, nx, ny, REVEAL_RADIUS);
+    return {ok:true, newly};
+  }
+
+  // ポイント消費でマス開示(隣接不要)
+  function tryPointReveal(state, x, y){
+    if(!inBounds(state,x,y)) return {ok:false, reason:"範囲外です"};
+    const cell = state.grid[y][x];
+    if(cell.revealed) return {ok:false, reason:"既に開示済みです"};
+    if(state.points < POINT_REVEAL_COST) return {ok:false, reason:`ポイント不足(必要 ${POINT_REVEAL_COST})`};
+    state.points -= POINT_REVEAL_COST;
+    cell.revealed = true;
+    state.revealedCount++;
+    const t = TERRAIN[cell.terrain];
+    if(t.resource) state.resources[t.resource]+=t.amount;
+    return {ok:true};
+  }
+
+  function canAfford(state, cost){
+    for(const k in cost){ if((state.resources[k]||0) < cost[k]) return false; }
+    return true;
+  }
+
+  function tryBuild(state, x, y, type){
+    if(!inBounds(state,x,y)) return {ok:false, reason:"範囲外"};
+    const cell = state.grid[y][x];
+    if(!cell.revealed) return {ok:false, reason:"未開示マスには建設できません"};
+    if(!TERRAIN[cell.terrain].passable) return {ok:false, reason:"水辺には建設できません"};
+    const def = BUILDINGS[type];
+    const curLevel = cell.building && cell.building.type===type ? cell.building.level : 0;
+    if(cell.building && cell.building.type!==type) return {ok:false, reason:"このマスには既に別の建物があります"};
+    if(curLevel >= def.levels.length) return {ok:false, reason:"最大レベルです"};
+    const spec = def.levels[curLevel];
+    if(!canAfford(state, spec.cost)) return {ok:false, reason:"資材が足りません"};
+    for(const k in spec.cost) state.resources[k]-=spec.cost[k];
+    state.points += spec.points;
+    cell.building = {type, level:curLevel+1};
+    return {ok:true, level:curLevel+1, pointsGained:spec.points};
+  }
+
+  return { COLS, ROWS, TERRAIN, BUILDINGS, POINT_REVEAL_COST, REVEAL_RADIUS,
+           makeState, generateGrid, tryMove, tryPointReveal, tryBuild, canAfford, inBounds };
+})();
+
+
+/* =========================================================
+   INPUT / RENDER ― 疑似 GPS(矢印キー・クリック) = location/ 相当
+   Core の関数を呼ぶだけで、Core は入力手段を知らない。
+   ========================================================= */
+(() => {
+  const gridEl = document.getElementById("grid");
+  const hudEl = document.getElementById("hud");
+  const logEl = document.getElementById("log");
+  const buildPanel = document.getElementById("buildpanel");
+  const buildOptions = document.getElementById("buildoptions");
+  const modeHint = document.getElementById("modehint");
+
+  let state = Core.makeState();
+  let mode = "move"; // move | build | reveal
+  let selected = null; // {x,y} for build panel
+
+  const MODE_HINTS = {
+    move:   "矢印キー / WASD / 隣接マスをクリックで1マスずつ移動します。歩くと周囲の霧が晴れます。",
+    build:  "開示済みの陸地マスをクリックして建物メニューを開きます。",
+    reveal: `任意の霧マスをクリックしてポイント消費(${Core.POINT_REVEAL_COST}pt)で開示します。隣接していなくてもOK。`,
+  };
+
+  function log(msg){ logEl.textContent = msg; }
+
+  function setMode(m){
+    mode = m;
+    document.querySelectorAll(".modes button").forEach(b=>b.classList.remove("active"));
+    document.getElementById("mode-"+m).classList.add("active");
+    modeHint.textContent = MODE_HINTS[m];
+    if(m!=="build"){ buildPanel.style.display="none"; selected=null; }
+    render();
+  }
+
+  function buildGridDOM(){
+    gridEl.style.gridTemplateColumns = `repeat(${state.cols}, 34px)`;
+    gridEl.innerHTML = "";
+    for(let y=0;y<state.rows;y++){
+      for(let x=0;x<state.cols;x++){
+        const d = document.createElement("div");
+        d.className = "cell fog";
+        d.dataset.x = x; d.dataset.y = y;
+        d.addEventListener("click", onCellClick);
+        gridEl.appendChild(d);
+      }
+    }
+  }
+
+  function onCellClick(e){
+    const x = parseInt(e.currentTarget.dataset.x, 10);
+    const y = parseInt(e.currentTarget.dataset.y, 10);
+
+    if(mode === "move"){
+      const dx = x - state.player.x, dy = y - state.player.y;
+      if(Math.abs(dx)<=1 && Math.abs(dy)<=1 && !(dx===0&&dy===0)){
+        const res = Core.tryMove(state, dx, dy);
+        log(res.ok ? `移動しました(新規開示 ${res.newly} マス)` : `⚠️ ${res.reason}`);
+      } else {
+        log("⚠️ 隣接マスのみ移動できます(矢印キーも使えます)");
+      }
+    } else if(mode === "reveal"){
+      const cell = state.grid[y][x];
+      if(cell.revealed){ log("⚠️ 既に開示済みです"); return; }
+      const res = Core.tryPointReveal(state, x, y);
+      log(res.ok ? `✨ ポイントで開示しました(-${Core.POINT_REVEAL_COST}pt)` : `⚠️ ${res.reason}`);
+    } else if(mode === "build"){
+      const cell = state.grid[y][x];
+      if(!cell.revealed){ log("⚠️ 未開示マスには建設できません"); return; }
+      if(!Core.TERRAIN[cell.terrain].passable){ log("⚠️ 水辺には建設できません"); return; }
+      selected = {x,y};
+      openBuildPanel();
+    }
+    render();
+  }
+
+  function openBuildPanel(){
+    buildPanel.style.display = "block";
+    buildOptions.innerHTML = "";
+    const cell = state.grid[selected.y][selected.x];
+    for(const type in Core.BUILDINGS){
+      const def = Core.BUILDINGS[type];
+      const curLevel = cell.building && cell.building.type===type ? cell.building.level : 0;
+      const btn = document.createElement("button");
+      btn.className = "buildbtn";
+      if(cell.building && cell.building.type!==type){
+        btn.disabled = true;
+        btn.innerHTML = `<span>${def.name}</span><span class="cost">別の建物あり</span>`;
+      } else if(curLevel >= def.levels.length){
+        btn.disabled = true;
+        btn.innerHTML = `<span>${def.name} MAX</span><span class="cost">Lv${curLevel}</span>`;
+      } else {
+        const spec = def.levels[curLevel];
+        const costStr = Object.entries(spec.cost).map(([k,v])=>`${resIcon(k)}${v}`).join(" ");
+        const affordable = Core.canAfford(state, spec.cost);
+        btn.disabled = !affordable;
+        btn.innerHTML = `<span>${def.name} Lv${curLevel}→${curLevel+1}</span><span class="cost">${costStr} / +${spec.points}pt</span>`;
+        btn.addEventListener("click", ()=>{
+          const res = Core.tryBuild(state, selected.x, selected.y, type);
+          if(res.ok){ log(`${def.name} Lv${res.level} 完成!(+${res.pointsGained}pt)`); openBuildPanel(); render(); }
+          else { log(`⚠️ ${res.reason}`); }
+        });
+      }
+      buildOptions.appendChild(btn);
+    }
+  }
+
+  function resIcon(k){
+    return {wood:"🌲",stone:"⛰️",water:"💧",parts:"🏙️"}[k] || k;
+  }
+
+  function render(){
+    // HUD
+    const r = state.resources;
+    const total = state.cols*state.rows;
+    const pct = ((state.revealedCount/total)*100).toFixed(1);
+    hudEl.innerHTML = `
+      <div class="stat">🌲 <b>${r.wood}</b></div>
+      <div class="stat">⛰️ <b>${r.stone}</b></div>
+      <div class="stat">💧 <b>${r.water}</b></div>
+      <div class="stat">🏙️ <b>${r.parts}</b></div>
+      <div class="stat">✨ <b>${state.points}</b>pt</div>
+      <div class="stat">🗺️ <b>${pct}%</b></div>
+    `;
+
+    // Grid cells
+    const cells = gridEl.children;
+    for(let y=0;y<state.rows;y++){
+      for(let x=0;x<state.cols;x++){
+        const cell = state.grid[y][x];
+        const el = cells[y*state.cols+x];
+        el.className = "cell";
+        if(!cell.revealed){
+          el.classList.add("fog");
+          el.textContent = "";
+        } else {
+          el.classList.add("revealed", cell.terrain);
+          if(cell.visited) el.classList.add("visited");
+          let content = cell.building
+            ? Core.BUILDINGS[cell.building.type].name.split(" ")[0]
+            : Core.TERRAIN[cell.terrain].emoji;
+          el.innerHTML = content;
+          if(cell.building){
+            const badge = document.createElement("span");
+            badge.className="badge";
+            badge.textContent = "Lv"+cell.building.level;
+            el.appendChild(badge);
+          }
+          if(mode==="build" && Core.TERRAIN[cell.terrain].passable){
+            el.classList.add("buildable-hint");
+          }
+        }
+        if(x===state.player.x && y===state.player.y){
+          el.classList.add("player");
+          if(!cell.building){
+            el.innerHTML = "🧑" + (el.innerHTML||"");
+          }
+        }
+      }
+    }
+  }
+
+  function move(dx,dy){
+    const res = Core.tryMove(state, dx, dy);
+    log(res.ok ? `移動しました(新規開示 ${res.newly} マス)` : `⚠️ ${res.reason}`);
+    render();
+  }
+
+  // --- 疑似 GPS 入力: キーボード ---
+  window.addEventListener("keydown", (e)=>{
+    const map = {
+      ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
+      w:[0,-1], s:[0,1], a:[-1,0], d:[1,0],
+      W:[0,-1], S:[0,1], A:[-1,0], D:[1,0],
+    };
+    if(map[e.key]){
+      e.preventDefault();
+      move(map[e.key][0], map[e.key][1]);
+    }
+  });
+
+  // --- 疑似 GPS 入力: 移動パッド(クリック) ---
+  document.getElementById("btn-up").addEventListener("click", ()=>move(0,-1));
+  document.getElementById("btn-down").addEventListener("click", ()=>move(0,1));
+  document.getElementById("btn-left").addEventListener("click", ()=>move(-1,0));
+  document.getElementById("btn-right").addEventListener("click", ()=>move(1,0));
+
+  document.getElementById("mode-move").addEventListener("click", ()=>setMode("move"));
+  document.getElementById("mode-build").addEventListener("click", ()=>setMode("build"));
+  document.getElementById("mode-reveal").addEventListener("click", ()=>setMode("reveal"));
+
+  document.getElementById("regen").addEventListener("click", ()=>{
+    state = Core.generateGrid(Core.makeState());
+    setMode("move");
+    log("🔄 マップを再生成しました");
+    render();
+  });
+
+  // --- init ---
+  state = Core.generateGrid(state);
+  buildGridDOM();
+  setMode("move");
+  render();
+})();
+</script>
+</body>
+</html>
