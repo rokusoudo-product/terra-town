@@ -17,6 +17,7 @@
 | ドキュメント | 内容 |
 |--------------|------|
 | [docs/concept.md](docs/concept.md) | 初期コンセプトメモ（2026-07-08 起草、2026-07-20 コンセプト確定） |
+| [docs/terrain.md](docs/terrain.md) | エリア（ヘクス）の形状・地形タイプ定義（2026-07-23、Issue #3） |
 | `specs/` | spec-kit による spec.md / plan.md / tasks.md（導入予定） |
 
 ## アーキテクチャ / 構成図
