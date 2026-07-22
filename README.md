@@ -17,6 +17,7 @@
 | ドキュメント | 内容 |
 |--------------|------|
 | [docs/concept.md](docs/concept.md) | 初期コンセプトメモ（2026-07-08 起草、2026-07-20 コンセプト確定） |
+| [docs/opening_points.md](docs/opening_points.md) | 開放ポイント（未踏破エリアの開放手段）定義（Issue #4） |
 | `specs/` | spec-kit による spec.md / plan.md / tasks.md（導入予定） |
 
 ## アーキテクチャ / 構成図
