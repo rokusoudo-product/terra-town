@@ -17,6 +17,7 @@
 | ドキュメント | 内容 |
 |--------------|------|
 | [docs/concept.md](docs/concept.md) | 初期コンセプトメモ（2026-07-08 起草、2026-07-20 コンセプト確定） |
+| [docs/opening_points.md](docs/opening_points.md) | 開放ポイント（未踏破エリアの開放手段）定義（Issue #4） |
 | [docs/terrain.md](docs/terrain.md) | エリア（ヘクス）の形状・地形タイプ定義（2026-07-23、Issue #3） |
 | `specs/` | spec-kit による spec.md / plan.md / tasks.md（導入予定） |
 
