@@ -23,7 +23,7 @@ flowchart TB
             health["Health Connect（オプトイン）"]
         end
         subgraph store["端末内ストレージ"]
-            gamedb[("ゲーム状態 SQLite<br/>開示メッシュ(bitmap)・資材・建物・区画・図鑑")]
+            gamedb[("ゲーム状態 SQLite<br/>開示ヘクス(bitmap)・資材・建物・区画・図鑑")]
             pack[("地域パック（読取専用）<br/>MBTiles ＋ mesh_terrain ＋ 行政区域 ＋ POI")]
         end
         exp["エクスポート/インポート<br/>（機種変更対策・端末内/共有シート）"]
@@ -34,7 +34,7 @@ flowchart TB
     end
 
     subgraph ci["🛠 CI / ビルド時のみ（実行時サーバではない）"]
-        planetiler["Planetiler / osmium<br/>OSM日本抽出→ベクタタイル＋メッシュ地形属性 事前計算"]
+        planetiler["Planetiler / osmium<br/>OSM日本抽出→ベクタタイル＋ヘクス地形属性 事前計算"]
         osm["OpenStreetMap (ODbL)<br/>国土数値情報 N03（行政区域）"]
     end
 
