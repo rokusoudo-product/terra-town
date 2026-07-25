@@ -23,6 +23,7 @@
 | [docs/architecture.md](docs/architecture.md) | 環境構成図（Mermaid・詳細版） |
 | [docs/opening_points.md](docs/opening_points.md) | 開放ポイント（未踏破エリアの開放手段）定義（Issue #4） |
 | [docs/terrain.md](docs/terrain.md) | エリア（ヘクス）の形状・地形タイプ定義（2026-07-23、Issue #3） |
+| [docs/landmark_objects.md](docs/landmark_objects.md) | 名所・固有オブジェクト（大量配置POI）システム定義（2026-07-26、Issue #6） |
 
 ## アーキテクチャ / 構成図
 
