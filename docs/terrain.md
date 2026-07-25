@@ -4,7 +4,7 @@ project: terra-town
 doc: エリア（ヘクス）の形状・地形タイプ定義
 status: approved            # 2026-07-22 代表回答により決定事項として確定（数値バランスはplan/tasks工程で確定）
 created: 2026-07-23
-updated: 2026-07-23
+updated: 2026-07-26         # §9 に docs/buildings.md（Issue #5）への参照を追記
 related:
   - specs/001-mvp/spec.md
   - https://github.com/rokusoudo-product/terra-town/issues/3
@@ -134,7 +134,7 @@ supersedes: null
 
 - **道の情報**（OSM `highway=*` 等を用いたリアルタイム経路表現・道沿いボーナス等）は MVPスコープ外。将来Issueで再検討する。
 - 具体的な数値（人口閾値・伐採コスト・スポーン補正半径・ヘクスサイズの最終値等）は balance 検討として plan/tasks 工程で確定する。
-- 建物の種類・レベル・強化ロジックの詳細（建築状態軸の「建築後」を更に細分化するかどうか）は別途、建物システムとして定義する。
+- 建物の種類・レベル・強化ロジックの詳細（建築状態軸の「建築後」を更に細分化するかどうか）は別途、建物システムとして定義する。→ **[docs/buildings.md](buildings.md)（Issue #5）で定義済み**。§8 の人口ボーナス仮値（1施設最大1000人・総人口10000でx1.1）も同書に引き継がれている。
 
 ## 10. 受け入れ基準チェック（Issue #3 対応表）
 
