@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analyze-and-test:
+    name: analyze / test / import-direction
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter version
+        run: flutter --version
+
+      # GPS_ARCHITECTURE: core は location/Flutter/地図SDK に依存しない。
+      # 規約ではなく仕組みで守る（plan.md §1-D・§2）。
+      # pub get より前に実行して、違反を最短で検出する。
+      - name: Check dependency direction (core does not depend on location)
+        run: bash tools/check_import_direction.sh
+
+      - name: Resolve dependencies
+        run: |
+          flutter pub get -C packages/core
+          flutter pub get -C packages/location
+          flutter pub get -C app
+
+      - name: Analyze
+        run: |
+          flutter analyze packages/core
+          flutter analyze packages/location
+          flutter analyze app
+
+      # core は純粋 Dart パッケージなので dart test だけで回る
+      # （Flutter/GPS なしで単体テストできることが分離の狙い）
+      - name: Test core (pure Dart)
+        run: dart test
+        working-directory: packages/core
+
+      - name: Test location
+        run: flutter test
+        working-directory: packages/location
+
+      - name: Test app
+        run: flutter test
+        working-directory: app
