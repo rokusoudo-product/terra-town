@@ -1,0 +1,24 @@
+name: terra_town_core
+description: >-
+  terra-town のゲームロジックを純粋 Dart で実装するパッケージ。
+  開示判定・資材・建設・経済・区画集計を担う。
+version: 0.1.0
+publish_to: none
+
+# 【重要】GPS_ARCHITECTURE 準拠（plan.md §1-D・§2）
+#   本パッケージは location（GPS・地図）・Flutter・地図SDK に依存してはならない。
+#   依存は常に location -> core の一方向。
+#   Flutter に依存させないため、本パッケージは flutter create ではなく
+#   dart create（純粋 Dart パッケージ）で作成している。
+#   違反は tools/check_import_direction.sh が CI で検出する。
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  # GPS/地図/Flutter への依存を追加しないこと。
+  # 追加する場合は純粋な計算・データ構造のライブラリに限る。
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

@@ -1,0 +1,28 @@
+name: terra_town_location
+description: >-
+  terra-town の GPS・地図・測位レイヤー。
+  terra_town_core が定義する抽象（PositionProvider・RegionPack 等）を実装する。
+version: 0.1.0
+publish_to: none
+
+# 【重要】GPS_ARCHITECTURE 準拠（plan.md §1-D・§2）
+#   依存方向は location -> core の一方向のみ。
+#   core 側から本パッケージを参照してはならない。
+#   地図SDK（MapLibre）や位置取得プラグインへの依存は、必ず本パッケージ側に置く。
+
+environment:
+  sdk: ^3.12.2
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  terra_town_core:
+    path: ../core
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:

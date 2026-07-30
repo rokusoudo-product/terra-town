@@ -1,0 +1,46 @@
+# --- Dart / Flutter ---
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.dart_tool
+pubspec_overrides.yaml
+
+# アプリ（app/）は lock をコミットする方針だが、
+# ライブラリパッケージ（packages/*）の lock はコミットしない（pub の推奨）
+packages/*/pubspec.lock
+
+# --- Android ---
+app/android/local.properties
+app/android/.gradle/
+app/android/captures/
+app/android/app/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+key.properties
+
+# --- iOS（将来） ---
+app/ios/Pods/
+app/ios/.symlinks/
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+
+# --- IDE ---
+.idea/
+*.iml
+*.iws
+.vscode/
+!.vscode/settings.json
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- 地域パック（生成物・巨大バイナリ） ---
+# tools/pack-builder/ の生成物はリポジトリに入れない（plan.md §3・CI で生成）
+tools/pack-builder/out/
+*.mbtiles
+*.pmtiles
