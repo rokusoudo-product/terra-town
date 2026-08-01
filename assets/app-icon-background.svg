@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  terra-town アプリアイコン — Adaptive Icon 背景レイヤー
+  正本: 本 SVG。PNG は変換して生成する（DESIGN.md「アセット」節を参照）
+
+  Adaptive Icon の背景レイヤーは全面を塗りつぶす。角丸は付けない
+  （ランチャーが円・しずく・角丸などのマスクを適用するため）。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>terra-town app icon background</title>
+  <!-- token: primary #2E7D32 — 自分の街の象徴色（探索の緑）。60-30-10 のベース60% -->
+  <rect width="512" height="512" fill="#2E7D32"/>
+</svg>
