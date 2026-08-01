@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  terra-town アプリアイコン — Adaptive Icon 前景レイヤー（背景は透過）
+  正本: 本 SVG。PNG は変換して生成する（DESIGN.md「アセット」節を参照）
+
+  ■ 構図の根拠（specs/001-mvp/spec.md ／ docs/terrain.md ／ DESIGN.md）
+    - 六角形タイル      : docs/terrain.md §4「UI表示のみヘクスとして描画する」
+    - 立体（厚み）表現   : タイルの地形が読み取れるようにするための表現（代表フィードバック 2026-08-01）
+    - 中央の街・建物     : spec.md §4 コアループ「資材で建物を建設・強化 → 街が育つ」
+    - 森／山／農地       : docs/terrain.md §2 地形タイプ（森=木、山=石・鉄、農地=野菜・フルーツ）
+    - 暗幕（右側2枚）    : DESIGN.md トークン fog。spec.md §4「通った場所の霧が晴れ実地図が開示される」
+    - 右下＝半分だけ暗幕 : DESIGN.md「開示で穴を開ける表現」。開拓が進行中であることを示す
+    - 歩く人            : spec.md §4「歩く（GPS で移動を記録）」。歩いて広げる主体を明示
+    - 黄の点線（軌跡）   : 街から現在地までの移動経路
+
+  ■ Adaptive Icon の安全域
+    108dp キャンバスのうち中央 66dp（本 SVG では中心 (256,256) 半径 156.4）が
+    マスク後も必ず見える領域。すべての要素をこの内側に収めている。
+    タイル群の外接範囲: x 144〜368 / y 162.2〜366.8（中心からの最大距離 146）
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>terra-town app icon foreground</title>
+  <desc>立体的な六角形タイル5枚。中央に街、左上に森、左下に山、右上は霧、右下は霧が晴れかけており人が霧の側へ歩いている。</desc>
+
+  <defs>
+    <!-- ヘクスタイルの上面。俯瞰のため縦方向を 0.58 倍に圧縮している -->
+    <polygon id="hex" points="0,-37.5 -56,-18.75 -56,18.75 0,37.5 56,18.75 56,-18.75"/>
+    <g id="tree">
+      <rect x="-2.6" y="4.5" width="5.2" height="9" fill="#00695C"/><!-- token: secondary -->
+      <polygon points="0,-18 -11,3 11,3" fill="#2E7D32"/><!-- token: primary -->
+      <polygon points="0,-25.5 -8,-7.5 8,-7.5" fill="#2E7D32"/><!-- token: primary -->
+    </g>
+  </defs>
+
+  <!-- 左上: 森（産出=木） -->
+  <g transform="translate(200,199.7)">
+    <use href="#hex" y="17" fill="#00695C"/><!-- token: secondary — タイルの厚み -->
+    <use href="#hex" fill="#FFFFFF"/><!-- token: surface — タイル上面 -->
+    <use href="#tree" x="-24" y="8"/><use href="#tree" x="2" y="-4"/><use href="#tree" x="24" y="11"/>
+  </g>
+
+  <!-- 右上: 未開示（霧） -->
+  <g transform="translate(312,199.7)">
+    <use href="#hex" y="17" fill="#00695C"/><!-- token: secondary -->
+    <use href="#hex" fill="#FFFFFF"/><!-- token: surface -->
+    <use href="#hex" fill="rgba(20,22,16,0.62)"/><!-- token: fog -->
+  </g>
+
+  <!-- 左下: 山（産出=石・鉄） -->
+  <g transform="translate(200,312.3)">
+    <use href="#hex" y="17" fill="#00695C"/><!-- token: secondary -->
+    <use href="#hex" fill="#FFFFFF"/><!-- token: surface -->
+    <polygon points="-11,-23 -34,15 12,15" fill="#00695C"/><!-- token: secondary -->
+    <polygon points="-11,-23 -19,-8.5 -2.5,-8.5" fill="#FFFFFF"/><!-- token: surface -->
+    <polygon points="15,-11 -4.5,16 34.5,16" fill="#4A4B45"/><!-- token: text-secondary -->
+    <polygon points="15,-11 9,-1.5 21,-1.5" fill="#FFFFFF"/><!-- token: surface -->
+  </g>
+
+  <!-- 中央: 自分の街（建設済み） -->
+  <g transform="translate(256,256)">
+    <use href="#hex" y="17" fill="#00695C"/><!-- token: secondary -->
+    <use href="#hex" fill="#FFFFFF"/><!-- token: surface -->
+    <rect x="-39" y="-12" width="22" height="33" fill="#00695C"/><!-- token: secondary -->
+    <polygon points="-43,-12 -28,-28.5 -13,-12" fill="#F9A825"/><!-- token: accent — 差し色（10%） -->
+    <rect x="-10" y="-22.5" width="22" height="43" fill="#2E7D32"/><!-- token: primary -->
+    <polygon points="-13.5,-22.5 1.5,-39 16.5,-22.5" fill="#F9A825"/><!-- token: accent -->
+    <rect x="19.5" y="-4.5" width="19.5" height="25.5" fill="#00695C"/><!-- token: secondary -->
+    <polygon points="15.75,-4.5 29.25,-19.5 42.75,-4.5" fill="#00695C"/><!-- token: secondary -->
+    <g fill="#FFFFFF"><!-- token: surface — 窓 -->
+      <rect x="-33" y="-4" width="7" height="7"/><rect x="-33" y="8" width="7" height="7"/>
+      <rect x="-4.5" y="-14" width="7.5" height="7.5"/><rect x="-4.5" y="-1" width="7.5" height="7.5"/><rect x="-4.5" y="12" width="7.5" height="7.5"/>
+      <rect x="25" y="4" width="7" height="7"/>
+    </g>
+  </g>
+
+  <!-- 右下: 開示の途中（右半分だけ霧が残る） -->
+  <g transform="translate(312,312.3)">
+    <use href="#hex" y="17" fill="#00695C"/><!-- token: secondary -->
+    <use href="#hex" fill="#FFFFFF"/><!-- token: surface -->
+    <path d="M0,-37.5 L56,-18.75 L56,18.75 L0,37.5 Z" fill="rgba(20,22,16,0.62)"/><!-- token: fog -->
+  </g>
+
+  <!-- 歩行の軌跡（街 → 現在地） -->
+  <path d="M274,284 q-4,20 20,26" fill="none" stroke="#F9A825" stroke-width="10" stroke-linecap="round" stroke-dasharray="2 23"/><!-- token: accent -->
+
+  <!-- 歩く人（霧の側へ向かう） -->
+  <g transform="translate(306,318)" fill="none" stroke="#1B1C18" stroke-width="9" stroke-linecap="round"><!-- token: text-primary -->
+    <circle cx="0" cy="-58" r="10.5" fill="#1B1C18" stroke="none"/>
+    <path d="M0,-47 L1.6,-21"/>
+    <path d="M0.8,-42 L17.6,-30.4"/>
+    <path d="M0,-40 L-14.4,-25.6"/>
+    <path d="M1.6,-21 L16,0"/>
+    <path d="M1.6,-21 L-12.8,-3"/>
+  </g>
+</svg>

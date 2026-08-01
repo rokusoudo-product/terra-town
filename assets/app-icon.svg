@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  terra-town アプリアイコン — 合成版（背景＋前景）
+  用途: Google Play ストア掲載画像（512x512 PNG・透過なし・角丸なし）／
+        Adaptive Icon 非対応端末向けの legacy ic_launcher
+
+  角丸を付けていないのは意図的。Play ストアもランチャーも配信側が角丸・マスクを適用するため、
+  こちらで丸めると二重に丸まる。
+
+  内容は app-icon-background.svg ＋ app-icon-foreground.svg と同一。
+  **修正する場合はこの3ファイルすべてを合わせて更新すること**（前景の定義が正）。
+  構図の根拠とトークン対応は app-icon-foreground.svg のコメントを参照。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>terra-town app icon</title>
+  <desc>緑を背景に、立体的な六角形タイル5枚。中央に街、左上に森、左下に山、右上は霧、右下は霧が晴れかけており人が霧の側へ歩いている。</desc>
+
+  <defs>
+    <polygon id="hex" points="0,-37.5 -56,-18.75 -56,18.75 0,37.5 56,18.75 56,-18.75"/>
+    <g id="tree">
+      <rect x="-2.6" y="4.5" width="5.2" height="9" fill="#00695C"/><!-- token: secondary -->
+      <polygon points="0,-18 -11,3 11,3" fill="#2E7D32"/><!-- token: primary -->
+      <polygon points="0,-25.5 -8,-7.5 8,-7.5" fill="#2E7D32"/><!-- token: primary -->
+    </g>
+  </defs>
+
+  <rect width="512" height="512" fill="#2E7D32"/><!-- token: primary -->
+
+  <g transform="translate(200,199.7)">
+    <use href="#hex" y="17" fill="#00695C"/><use href="#hex" fill="#FFFFFF"/>
+    <use href="#tree" x="-24" y="8"/><use href="#tree" x="2" y="-4"/><use href="#tree" x="24" y="11"/>
+  </g>
+
+  <g transform="translate(312,199.7)">
+    <use href="#hex" y="17" fill="#00695C"/><use href="#hex" fill="#FFFFFF"/>
+    <use href="#hex" fill="rgba(20,22,16,0.62)"/><!-- token: fog -->
+  </g>
+
+  <g transform="translate(200,312.3)">
+    <use href="#hex" y="17" fill="#00695C"/><use href="#hex" fill="#FFFFFF"/>
+    <polygon points="-11,-23 -34,15 12,15" fill="#00695C"/>
+    <polygon points="-11,-23 -19,-8.5 -2.5,-8.5" fill="#FFFFFF"/>
+    <polygon points="15,-11 -4.5,16 34.5,16" fill="#4A4B45"/><!-- token: text-secondary -->
+    <polygon points="15,-11 9,-1.5 21,-1.5" fill="#FFFFFF"/>
+  </g>
+
+  <g transform="translate(256,256)">
+    <use href="#hex" y="17" fill="#00695C"/><use href="#hex" fill="#FFFFFF"/>
+    <rect x="-39" y="-12" width="22" height="33" fill="#00695C"/>
+    <polygon points="-43,-12 -28,-28.5 -13,-12" fill="#F9A825"/><!-- token: accent -->
+    <rect x="-10" y="-22.5" width="22" height="43" fill="#2E7D32"/>
+    <polygon points="-13.5,-22.5 1.5,-39 16.5,-22.5" fill="#F9A825"/><!-- token: accent -->
+    <rect x="19.5" y="-4.5" width="19.5" height="25.5" fill="#00695C"/>
+    <polygon points="15.75,-4.5 29.25,-19.5 42.75,-4.5" fill="#00695C"/>
+    <g fill="#FFFFFF">
+      <rect x="-33" y="-4" width="7" height="7"/><rect x="-33" y="8" width="7" height="7"/>
+      <rect x="-4.5" y="-14" width="7.5" height="7.5"/><rect x="-4.5" y="-1" width="7.5" height="7.5"/><rect x="-4.5" y="12" width="7.5" height="7.5"/>
+      <rect x="25" y="4" width="7" height="7"/>
+    </g>
+  </g>
+
+  <g transform="translate(312,312.3)">
+    <use href="#hex" y="17" fill="#00695C"/><use href="#hex" fill="#FFFFFF"/>
+    <path d="M0,-37.5 L56,-18.75 L56,18.75 L0,37.5 Z" fill="rgba(20,22,16,0.62)"/><!-- token: fog -->
+  </g>
+
+  <path d="M274,284 q-4,20 20,26" fill="none" stroke="#F9A825" stroke-width="10" stroke-linecap="round" stroke-dasharray="2 23"/><!-- token: accent -->
+
+  <g transform="translate(306,318)" fill="none" stroke="#1B1C18" stroke-width="9" stroke-linecap="round"><!-- token: text-primary -->
+    <circle cx="0" cy="-58" r="10.5" fill="#1B1C18" stroke="none"/>
+    <path d="M0,-47 L1.6,-21"/>
+    <path d="M0.8,-42 L17.6,-30.4"/>
+    <path d="M0,-40 L-14.4,-25.6"/>
+    <path d="M1.6,-21 L16,0"/>
+    <path d="M1.6,-21 L-12.8,-3"/>
+  </g>
+</svg>
