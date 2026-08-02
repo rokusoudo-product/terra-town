@@ -63,3 +63,4 @@ flowchart TB
 ```
 
 > 依存方向: `core/`（純粋ロジック）は `location/`（GPS・地図SDK）を import しない一方向依存（[GPS_ARCHITECTURE 準拠](docs/architecture.md)）。
+
