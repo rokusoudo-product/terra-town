@@ -1,30 +1,133 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// テーマ（DESIGN.md のデザイントークン）が正しく適用されていることを検証するテスト。
+// Issue #25: カウンターデモの smoke test をトークン検証に置き換え。
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:terra_town/design/app_theme.dart';
+import 'package:terra_town/design/color_tokens.dart';
 import 'package:terra_town/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  group('AppTheme light', () {
+    final theme = AppTheme.light();
+
+    test('useMaterial3 が有効', () {
+      expect(theme.useMaterial3, isTrue);
+    });
+
+    test('カラートークンが DESIGN.md のライト値と一致する', () {
+      expect(theme.colorScheme.brightness, Brightness.light);
+      expect(theme.colorScheme.primary, ColorTokens.primaryLight);
+      expect(theme.colorScheme.secondary, ColorTokens.secondaryLight);
+      expect(theme.colorScheme.tertiary, ColorTokens.accentLight); // accent
+      expect(theme.colorScheme.surface, ColorTokens.surfaceLight);
+      expect(theme.colorScheme.onSurface, ColorTokens.textPrimaryLight);
+      expect(
+        theme.colorScheme.onSurfaceVariant,
+        ColorTokens.textSecondaryLight,
+      );
+      expect(theme.colorScheme.error, ColorTokens.errorLight);
+      expect(theme.scaffoldBackgroundColor, ColorTokens.backgroundLight);
+    });
+
+    test('semantic トークン（success/warning/info/fog）が DESIGN.md と一致する', () {
+      final semantic = theme.semanticColors;
+      expect(semantic.success, ColorTokens.successLight);
+      expect(semantic.warning, ColorTokens.warningLight);
+      expect(semantic.info, ColorTokens.infoLight);
+      expect(semantic.fog, ColorTokens.fog);
+    });
+  });
+
+  group('AppTheme dark', () {
+    final theme = AppTheme.dark();
+
+    test('useMaterial3 が有効', () {
+      expect(theme.useMaterial3, isTrue);
+    });
+
+    test('カラートークンが DESIGN.md のダーク値と一致する', () {
+      expect(theme.colorScheme.brightness, Brightness.dark);
+      expect(theme.colorScheme.primary, ColorTokens.primaryDark);
+      expect(theme.colorScheme.secondary, ColorTokens.secondaryDark);
+      expect(theme.colorScheme.tertiary, ColorTokens.accentDark);
+      expect(theme.colorScheme.surface, ColorTokens.surfaceDark);
+      expect(theme.colorScheme.onSurface, ColorTokens.textPrimaryDark);
+      expect(theme.colorScheme.onSurfaceVariant, ColorTokens.textSecondaryDark);
+      expect(theme.colorScheme.error, ColorTokens.errorDark);
+      expect(theme.scaffoldBackgroundColor, ColorTokens.backgroundDark);
+    });
+
+    test('fog は地図がライトのみ MVP のため単一値のまま', () {
+      expect(theme.semanticColors.fog, ColorTokens.fog);
+    });
+  });
+
+  test('タイポスケールが DESIGN.md の 12/14/16/20/24/32 のみで構成され、行間が1.5〜1.7', () {
+    final validSizes = {12.0, 14.0, 16.0, 20.0, 24.0, 32.0};
+    final textTheme = AppTheme.light().textTheme;
+    final styles = <TextStyle?>[
+      textTheme.displayLarge,
+      textTheme.displayMedium,
+      textTheme.displaySmall,
+      textTheme.headlineLarge,
+      textTheme.headlineMedium,
+      textTheme.headlineSmall,
+      textTheme.titleLarge,
+      textTheme.titleMedium,
+      textTheme.titleSmall,
+      textTheme.bodyLarge,
+      textTheme.bodyMedium,
+      textTheme.bodySmall,
+      textTheme.labelLarge,
+      textTheme.labelMedium,
+      textTheme.labelSmall,
+    ];
+
+    for (final style in styles) {
+      expect(style, isNotNull);
+      expect(
+        validSizes.contains(style!.fontSize),
+        isTrue,
+        reason: 'fontSize ${style.fontSize} は DESIGN.md のスケールに含まれない',
+      );
+      expect(style.height, inInclusiveRange(1.5, 1.7));
+    }
+
+    // 本文16・補助12（DESIGN.md「タイポグラフィ」）。
+    expect(textTheme.bodyLarge!.fontSize, 16);
+    expect(textTheme.bodySmall!.fontSize, 12);
+  });
+
+  testWidgets('MaterialApp に light/dark 両テーマが Material3 で適用されている', (
+    tester,
+  ) async {
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(materialApp.theme!.useMaterial3, isTrue);
+    expect(materialApp.darkTheme!.useMaterial3, isTrue);
+    expect(materialApp.theme!.colorScheme.primary, ColorTokens.primaryLight);
+    expect(materialApp.darkTheme!.colorScheme.primary, ColorTokens.primaryDark);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  testWidgets('下部ナビは地図/建設/図鑑/設定の4タブで構成される', (tester) async {
+    await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    expect(find.text('地図'), findsWidgets);
+    expect(find.text('建設'), findsOneWidget);
+    expect(find.text('図鑑'), findsOneWidget);
+    expect(find.text('設定'), findsOneWidget);
+  });
+
+  testWidgets('タブ切り替えでカウンターデモは存在しない（+ボタン・カウンター文言なし）', (tester) async {
+    await tester.pumpWidget(const MyApp());
+
+    expect(find.byIcon(Icons.add), findsNothing);
+    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.textContaining('pushed the button'), findsNothing);
   });
 }
