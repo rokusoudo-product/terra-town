@@ -44,3 +44,9 @@ Thumbs.db
 tools/pack-builder/out/
 *.mbtiles
 *.pmtiles
+
+# --- SVG→PNG 変換ツール（Issue #28） ---
+# tools/rasterize_assets.py 専用の venv。リポジトリ専用のため他プロジェクトと共有しない
+tools/.venv/
+# tools/rasterize_assets.py の生成物（再生成可能なため未コミット）
+build/rasterized/

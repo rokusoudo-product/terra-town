@@ -4,7 +4,7 @@ project: terra-town
 doc: 開発環境セットアップ手順
 status: approved
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-08-12
 related:
   - specs/001-mvp/plan.md
   - specs/001-mvp/tasks.md
@@ -160,7 +160,56 @@ bash tools/check_import_direction.sh
 cd app && flutter build apk --debug
 ```
 
-## 8. 未確定事項
+## 8. SVG→PNG 変換環境（Issue #28）
+
+`assets/*.svg`（アプリアイコン等）は SVG が正本だが、Android の mipmap と Google Play 掲載画像には
+PNG が必要。2026-08-01 時点で WSL に変換手段がなかったため、以下の方針で整備した。
+
+### 採用方式（2026-08-01 代表決定）
+
+**cairosvg（A案）を採用。** `<use>` / `<defs>` / `clipPath` を正しく解釈できるため
+（本リポジトリの SVG アセットはこれらを多用している）。rsvg-convert / Inkscape /
+ImageMagick は不採用（未検証・追加導入コストが高い）。
+
+### 前提条件
+
+```bash
+sudo apt install libcairo2 libcairo-gobject2   # 代表が導入済み（2026-08-01時点で確認済み）
+```
+
+system の `python3` には pip が入っておらず、Ubuntu 24.04 は PEP 668 により
+system Python への直接 `pip install` も制限される。そのため **`tools/.venv`（リポジトリ専用の venv）**
+に cairosvg を導入する方式にした。他プロジェクトの venv と共有しない理由は、
+terra-town 専用のビルドツールが別プロジェクトの venv に依存する事態を避けるため。
+
+### セットアップ手順
+
+```bash
+cd ~/terra-town   # WSLネイティブパス。/mnt/c/... は既知の罠（別ツールの遅延・パス解決不具合）につながるため避ける
+python3 -m venv tools/.venv
+tools/.venv/bin/pip install --upgrade pip
+tools/.venv/bin/pip install cairosvg
+```
+
+`tools/.venv/` は `.gitignore` 済み（各開発者のローカルで作成する）。
+
+### 使い方
+
+```bash
+# assets/*.svg すべてを mipmap 5段階（mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi）+ Play掲載用512pxに変換
+tools/.venv/bin/python tools/rasterize_assets.py
+
+# 対象を絞る場合
+tools/.venv/bin/python tools/rasterize_assets.py --asset app-icon
+
+# 出力先を変える場合（デフォルト build/rasterized/。これも .gitignore 済み・再生成可能なため未コミット）
+tools/.venv/bin/python tools/rasterize_assets.py --out-dir /tmp/out
+```
+
+Android実機への実際の反映（`mipmap-*/ic_launcher.png` の差し替え・`mipmap-anydpi-v26/ic_launcher.xml`
+の追加・`flutter_launcher_icons` の導入）は別 Issue（#29）の範囲。本節はビルド環境の整備のみ。
+
+## 9. 未確定事項
 
 - **applicationId が `jp.rokusoudo.terra_town` で仮置き**（`app/android/app/build.gradle.kts`）。
   Google Play では**公開後に変更できない**ため、初回リリース前に代表が確定すること。
