@@ -159,13 +159,19 @@
 - 合成版 `app-icon.svg` も角丸なし（Play ストアが角丸を適用する）
 - 3ファイルは内容が重複している。**修正時は3つとも更新すること**（前景の定義が正）
 
-### PNG 化（未整備）
+### PNG 化（[#28](https://github.com/rokusoudo-product/terra-town/issues/28) で整備済み）
 
-SVG が正本。Android の mipmap と Play 掲載画像には PNG が必要だが、
-**2026-08-01 時点で WSL に SVG→PNG の変換手段がない**（cairosvg / rsvg-convert / Inkscape いずれも未導入）。
+SVG が正本。Android の mipmap と Play 掲載画像には PNG が必要。
 
-- 変換手段の選定と `mipmap-anydpi-v26/ic_launcher.xml` の追加、`flutter_launcher_icons` の導入は**別タスク**
-- 現状の `app/android/app/src/main/res/mipmap-*/ic_launcher.png` は Flutter のデフォルトのまま（未差し替え）
+- **変換手段**: cairosvg（Python）。`<use>` / `<defs>` / `clipPath` を正しく解釈できるため採用（本アセットは `<use>` を多用）。
+  rsvg-convert / Inkscape / ImageMagick は不採用
+- **導入先**: リポジトリ専用の venv（`tools/.venv`。`.gitignore` 済み）。導入手順は `docs/dev-setup.md` §8
+- **変換スクリプト**: `tools/rasterize_assets.py`。`assets/*.svg` を mipmap 5段階（mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi）
+  + Play 掲載用 512px の PNG に変換する（出力先はデフォルト `build/rasterized/`、再生成可能なため未コミット）
+- `assets/app-icon.svg` → 512×512 PNG で立体表現・霧の半透明・歩く人の欠けがないことを確認済み
+- 現状の `app/android/app/src/main/res/mipmap-*/ic_launcher.png` は Flutter のデフォルトのまま（未差し替え）。
+  実機への反映（mipmap 差し替え・`mipmap-anydpi-v26/ic_launcher.xml` の追加・`flutter_launcher_icons` の導入）は
+  別Issue（[#29](https://github.com/rokusoudo-product/terra-town/issues/29)）の範囲
 
 ## プロジェクト固有ルール
 - **地図はライトテーマのみ MVP**（ダークは将来）。地図以外の UI はライト/ダーク両対応。
