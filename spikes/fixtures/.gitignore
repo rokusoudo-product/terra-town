@@ -1,3 +1,0 @@
-# fetch_fixtures.sh が取得するバイナリはコミットしない。
-*.mbtiles
-*.pmtiles
