@@ -12,9 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # JDK: docs/dev-setup.md §2 の実測値（OpenJDK 17）と揃える。
+      # Flutter バージョンを上げるときは docs/dev-setup.md §2 も同じ PR で更新する。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # flutter-version は docs/dev-setup.md §2 の実測値と一致させる（固定）。
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: "3.44.8"
 
       - name: Flutter version
         run: flutter --version
@@ -49,4 +58,11 @@ jobs:
 
       - name: Test app
         run: flutter test
+        working-directory: app
+
+      # tasks.md T005 の完了条件、docs/dev-setup.md §7 の常用コマンド。
+      # flutter analyze / test は Dart 側しか見ないため、Gradle 設定・
+      # AndroidManifest.xml・res/ リソースの破損はここで初めて検出できる。
+      - name: Build Android debug APK
+        run: flutter build apk --debug
         working-directory: app
