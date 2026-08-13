@@ -107,10 +107,10 @@ class SourceBuildResult {
         '①geometry=${geometryMs!.toStringAsFixed(1)}ms '
         '②addSource=${addSourceMs!.toStringAsFixed(1)}ms '
         '③addLayer=${addLayerMs!.toStringAsFixed(1)}ms '
-        '④観測ウィンドウ=${settleWindowMs!.toStringAsFixed(0)}ms中 '
-        '(frames=$frameCountInWindow jank=$jankFrameCountInWindow '
-        'maxFrame=${maxFrameMsInWindow!.toStringAsFixed(1)}ms) '
-        '⑤合計=${totalMs!.toStringAsFixed(1)}ms';
+        '④観測ウィンドウ${settleWindowMs!.toStringAsFixed(0)}ms中の'
+        'maxFrame=${maxFrameMsInWindow!.toStringAsFixed(1)}ms '
+        '(frames=$frameCountInWindow jank=$jankFrameCountInWindow) '
+        '⑤合計(①+②+③+④maxFrame)=${totalMs!.toStringAsFixed(1)}ms';
   }
 }
 
@@ -159,6 +159,10 @@ class _FogFeatureStateBenchmarkPageState
   void _appendLog(String message) {
     final line = '[${DateTime.now().toIso8601String()}] $message';
     developer.log(line, name: 'map_spike_gl.fog_fs');
+    // developer.log は VM service 経由のため、`flutter run` を使わず
+    // 単体起動した端末の `adb logcat` には出てこない。仕様どおり debugPrint
+    // でも出しておく（`adb logcat` から追えるようにするため）。
+    debugPrint(line);
     if (!mounted) return;
     setState(() {
       _log.insert(0, line);
@@ -285,8 +289,12 @@ class _FogFeatureStateBenchmarkPageState
       await Future.delayed(settleWindow);
 
       final frameStats = buildCollector.stop();
+      // ⑤合計は①+②+③+④の値。④の「値」は観測ウィンドウの長さ（固定の待機時間）ではなく
+      // その中で観測された最大フレーム時間（maxFrame）であることに注意
+      // （観測ウィンドウの長さはヘクス数の階層で決め打ちの定数のため、それを合計に混ぜると
+      // 合計がヘクス数の実測コストではなく階層の境界でジャンプするだけの数値になってしまう）。
       final totalMs =
-          geometryMs + addSourceMs + addLayerMs + settleWindow.inMilliseconds;
+          geometryMs + addSourceMs + addLayerMs + frameStats.maxFrameMs;
 
       final result = SourceBuildResult(
         hexCount: hexCount,
@@ -602,10 +610,10 @@ class _FogFeatureStateBenchmarkPageState
                             Text('② addGeoJsonSource: ${r.addSourceMs!.toStringAsFixed(1)}ms'),
                             Text('③ addLayer: ${r.addLayerMs!.toStringAsFixed(1)}ms'),
                             Text(
-                                '④ 観測ウィンドウ ${r.settleWindowMs!.toStringAsFixed(0)}ms中: '
-                                'frames=${r.frameCountInWindow} jank=${r.jankFrameCountInWindow} '
-                                'maxFrame=${r.maxFrameMsInWindow!.toStringAsFixed(1)}ms'),
-                            Text('⑤ 合計（①+②+③+④の観測ウィンドウ長）: '
+                                '④ 観測ウィンドウ ${r.settleWindowMs!.toStringAsFixed(0)}ms中の '
+                                'maxFrame=${r.maxFrameMsInWindow!.toStringAsFixed(1)}ms '
+                                '(frames=${r.frameCountInWindow} jank=${r.jankFrameCountInWindow})'),
+                            Text('⑤ 合計（①+②+③+④のmaxFrame）: '
                                 '${r.totalMs!.toStringAsFixed(1)}ms',
                                 style: const TextStyle(fontWeight: FontWeight.bold)),
                           ],
