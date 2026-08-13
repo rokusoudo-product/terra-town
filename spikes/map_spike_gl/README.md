@@ -22,7 +22,8 @@
 | タブ①「④ PMTiles読込」 | §6.2 のフォールバック候補 |
 | タブ①「⑤ addSource/addLayer 疎通」 | §6.3 T013/R1 |
 | タブ①「⑥ feature-state プローブ」 | §6.3 T013/R1（feature-stateの可否） |
-| タブ②「fog of war 性能」 | §6.4 T014/R2（plan.md §8 の数値基準） |
+| タブ②「fog of war 性能(第一案:再エンコード)」 | §6.4 T014/R2（plan.md §8 の数値基準） |
+| タブ③「fog of war 性能(第二案:feature-state)」 | §6.4 T014/R2 再検証（第一案FAIL後の代替案） |
 
 ## 代表向けの実行手順
 
@@ -70,7 +71,23 @@ cd ~/terra-town/spikes/map_spike_gl
 5. **⑥ feature-state プローブ**: `setFeatureState` を呼び出す。0.26.2（pub.dev安定版）では
    `UnimplementedError` が投げられる想定（research.md §3.2）。例外の型・メッセージがそのまま画面に出る。
 
-## タブ②: fog of war 性能計測
+## fog of war 性能計測: 第一案と第二案（タブ②・③）
+
+fog of war の実装方式を2つ用意し、両方とも同じ指標（計測A: 更新レイテンシ min/median/max/avg、
+計測B: フレーム統計）・同じ表示形式（PASS/FAIL判定含む）で比較できるようにしてある。
+
+- **タブ②（第一案・再エンコード方式）**: 穴あきポリゴン1枚のGeoJSONを、ヘクスを開示するたびに
+  **まるごと再エンコード**して `setGeoJsonSource` で差し替える。1回の更新がO(n)、全体でO(n²)。
+  **実機計測済み・FAIL**（0.26.2: median 310.4ms/max 7,911ms/jank 99.6% / 0.27.0: median 341.3ms/
+  max 6,875ms/jank 70.3%。いずれも200ms基準を超過）。
+- **タブ③（第二案・feature-state方式）**: 全ヘクスを**最初に1回だけ**ソースとして追加し、
+  以後は各ヘクスの `feature-state` をトグルして開示を表現する。更新コストが開示済み数に
+  依存しない**O(1)**になることが期待される。0.26.2ではAndroid未実装
+  （`UnimplementedError`）で検証不能だったが、0.27.0でAndroid実装が入ったため、
+  このハーネスで初めて計測できる。**この方式が本来の狙い**であり、タブ②はその前段階の
+  比較対象として残してある。
+
+## タブ②: fog of war 性能計測（第一案・再エンコード方式）
 
 1. ヘクス数（1,000 / 5,000 / 10,000）を選択する。
 2. 「fog生成 + 更新ベンチマーク実行」を押す。穴あきポリゴン1枚のGeoJSONを作り、
@@ -94,6 +111,39 @@ cd ~/terra-town/spikes/map_spike_gl
   これは「Dartのawaitが返るまでの時間」であり、プラットフォームチャネルの往復・ネイティブ側の
   再テッセレーション・再描画のどこまでを含むかの内訳は分解できていない（Issue #366 の指摘する
   `jsonEncode` のメインアイソレート占有時間は、この所要時間に含まれるはず）。
+
+## タブ③: fog of war 性能計測（第二案・feature-state方式）
+
+1. ヘクス数（1,000 / 5,000 / 10,000）を選択する。
+2. 「ソース準備(初回のみ) + setFeatureStateベンチマーク実行」を押す。
+   - 選択したヘクス数ぶんの全ヘクスを1つのFeatureCollectionとして構築し、`addGeoJsonSource`で
+     **一度だけ**ソースに追加する（このソース構築自体は計測対象外の準備作業。ログに
+     「計測対象外」と明記して出力する）。同じヘクス数で再実行する場合はソースを作り直さず、
+     `removeFeatureState` で前回の開示状態だけをリセットしてから計測する。
+   - 以後は各ヘクスを `setFeatureState(sourceId, featureId, {'revealed': true})` で1つずつ
+     「開示」していく。**この setFeatureState 呼び出し1回ぶんの所要時間だけを計測A対象にする**
+     （ソース構築やGeoJSON再エンコードは含まない）。
+   - 計測A・B・PASS/FAIL判定・目標値（更新200ms以内・55fps以上）はタブ②と完全に同じ算出方法・
+     表示形式。並べて比較できることを最優先にしてある。
+3. ループ完了後、タブ②と同様に「③ 手動パン・ズームfps計測」で代表が地図をパン・ズーム操作する。
+
+### Feature id の付与方式（実装上の注意）
+
+`setFeatureState` は features に id が付いていないと対象を特定できない。maplibre_gl の
+ソースコード（`controller.dart` の `setFeatureState` doc comment）によると、`addGeoJsonSource`
+の `promoteId` パラメータは**Web専用**で、Androidでは無視される
+（"Android has no promoteId, so there the GeoJSON itself must contain a top-level id"）。
+そのため `properties.hexId` のような形でIDを持たせる方式は使えず、**各Featureの直下
+（`properties`の外）に整数の`id`を持たせる必要がある**。本ハーネスではヘクス配列のインデックス
+（0起点の連番）をそのままFeature直下の`id`にしている。`setFeatureState`の`featureId`引数は
+`String`型なので、呼び出し時に`.toString()`で変換して渡す。
+
+### 例外処理
+
+`setFeatureState`が例外を投げた場合（版数を安定版0.26.2に戻したときの`UnimplementedError`等）は、
+タブ①⑥のfeature-stateプローブと同じ方針で、クラッシュさせずに例外の型とメッセージをそのまま
+ログ・画面に表示する。ループ途中で例外が出た場合は、そこまでに計測できた分だけで
+min/median/max/avgを計算し、部分結果として表示する（全滅として握りつぶさない）。
 
 ## バージョン切り替え（pub.dev安定版 ⇔ git main）
 
@@ -155,13 +205,19 @@ fog of war 性能計測（タブ②・最重要項目）はMBTilesなしで実�
 ## 環境
 
 - Flutter 3.44.8 / Dart 3.12.2（`docs/dev-setup.md` §2 準拠）
-- `maplibre_gl: ^0.26.2`（pub.dev安定版）
+- `maplibre_gl`: 現在の既定は git依存 `release-0.27.0`（`pubspec.yaml`参照。pub.dev安定版
+  `^0.26.2`はコメントアウトで併記。切り替え方法は下記「バージョン切り替え」参照）
 - Android minSdk はFlutterのデフォルト値をそのまま使用（`maplibre_gl` の要求 minSdk 21 を上回る）
 - ビルド時にAndroid SDK Platform 35が自動インストールされる（`maplibre_gl` の要求）。
   `docs/dev-setup.md` §2 記載の環境にはPlatform 36のみが入っていたため、初回ビルド時に追加された。
 
-## コンパイル確認（実施済み・実機実行は未実施）
+## コンパイル・起動確認（feature-state方式追加時点）
 
-- `flutter analyze`: 実施済み（結果はPR本文参照）
-- `flutter build apk --debug`: 実施済み（結果はPR本文参照）
-- **実機での起動・動作確認はしていません。** 実機が接続されていない環境で作業したため。
+- `flutter analyze`: 実施済み・問題なし
+- `flutter build apk --debug`: 実施済み・ビルド成功
+  （既知の`maplibre_gl`のKGP警告は出るが、ビルド自体は成功する。無関係な既存の警告）
+- `adb install -r` でPixel 7a（`3B101JEHN11229`）にインストール済み
+- `adb shell am start` で起動し、`adb logcat` でFATAL EXCEPTION/AndroidRuntimeのクラッシュが
+  ないこと、プロセスが起動後も生存し続けていることを確認済み
+- **ベンチマークボタンの実行・数値の読み取りは代表が行う**（本ハーネスの方針どおり、
+  自動化していない）。

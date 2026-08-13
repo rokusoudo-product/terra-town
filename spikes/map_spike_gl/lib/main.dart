@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 
 import 'fog_benchmark_page.dart';
+import 'fog_feature_state_benchmark_page.dart';
 import 'map_probe_page.dart';
 import 'plugin_info.dart';
 
@@ -38,7 +39,7 @@ class _SpikeHome extends StatefulWidget {
 }
 
 class _SpikeHomeState extends State<_SpikeHome> with SingleTickerProviderStateMixin {
-  late final TabController _tabController = TabController(length: 2, vsync: this);
+  late final TabController _tabController = TabController(length: 3, vsync: this);
 
   @override
   void dispose() {
@@ -55,7 +56,8 @@ class _SpikeHomeState extends State<_SpikeHome> with SingleTickerProviderStateMi
           controller: _tabController,
           tabs: const [
             Tab(text: '① 地図/MBTiles/feature-state'),
-            Tab(text: '② fog of war 性能'),
+            Tab(text: '② fog of war 性能(第一案:再エンコード)'),
+            Tab(text: '③ fog of war 性能(第二案:feature-state)'),
           ],
         ),
       ),
@@ -90,6 +92,7 @@ class _SpikeHomeState extends State<_SpikeHome> with SingleTickerProviderStateMi
               children: const [
                 MapProbePage(),
                 FogBenchmarkPage(),
+                FogFeatureStateBenchmarkPage(),
               ],
             ),
           ),
