@@ -9,7 +9,8 @@ const String kPluginLabel = 'maplibre_gl';
 /// pubspec.yaml の現在の状態と必ず一致させること。
 /// - pub.dev 安定版を使っている場合: 'maplibre_gl 0.26.2 (pub.dev stable)'
 /// - git 依存で main を参照している場合: 'maplibre_gl main@`<commit>` (git, unreleased)'
-const String kPluginVersionLabel = 'maplibre_gl 0.26.2 (pub.dev stable)';
+const String kPluginVersionLabel =
+    'maplibre_gl release-0.27.0@0024af65 (git, unreleased)';
 
 /// 代表がこの版で research.md に記録する際の注意書き。
 const String kPluginVersionNote =

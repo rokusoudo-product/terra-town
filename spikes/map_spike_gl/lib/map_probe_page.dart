@@ -7,9 +7,20 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'hex_grid.dart';
+
+// 【2026-08-13 変更】path_provider への依存を外した。
+// maplibre_gl 0.27.0 (release-0.27.0) を AGP 9 で使うには android.builtInKotlin=true が
+// 必要だが、path_provider_android が引き込む jni パッケージが org.jetbrains.kotlin.android
+// を適用するため、AGP 9 の built-in Kotlin と衝突してビルドできない:
+//   A problem occurred evaluating project ':jni'.
+//   > The 'org.jetbrains.kotlin.android' plugin is no longer required for Kotlin support
+//     since AGP 9.0.
+// builtInKotlin=false に戻すと今度は maplibre_gl 0.27.0 側が kotlin() 未定義で落ちるため、
+// AGP 9 では両立しない。fog of war ベンチマーク（本ハーネスの最重要項目）は
+// path_provider を必要としないので、書き込み先を Directory.systemTemp に置き換えて回避した。
+// Android では systemTemp はアプリ専有のキャッシュ領域を指すため、用途上は同等。
 
 class MapProbePage extends StatefulWidget {
   const MapProbePage({super.key});
@@ -67,7 +78,7 @@ class _MapProbePageState extends State<MapProbePage> {
       return;
     }
     try {
-      final cacheDir = await getApplicationCacheDirectory();
+      final cacheDir = Directory.systemTemp;
       final fileName = srcPath.split(Platform.pathSeparator).last;
       final destPath = '${cacheDir.path}/mbtiles_copy_$fileName';
       final srcFile = File(srcPath);
