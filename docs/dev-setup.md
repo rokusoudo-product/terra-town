@@ -4,7 +4,7 @@ project: terra-town
 doc: 開発環境セットアップ手順
 status: approved
 created: 2026-07-30
-updated: 2026-08-12
+updated: 2026-08-13
 related:
   - specs/001-mvp/plan.md
   - specs/001-mvp/tasks.md
@@ -47,6 +47,11 @@ related:
 - ✅ Android toolchain
 - ✅ Network resources
 - ❌ Chrome / Linux desktop → **本プロジェクトでは不要**（Android 先行のモバイルアプリのため）
+
+**CI（`.github/workflows/ci.yml`）はこの表の Flutter / JDK バージョンを固定値として参照している。**
+Flutter バージョンを上げる（例: stable channel の更新に追従する）場合は、
+`ci.yml` の `flutter-version` とこの表を **同じ PR で** 更新すること。片方だけ更新すると、
+ローカルと CI で異なるバージョンのまま乖離する。
 
 ## 3. セットアップ手順（新しい環境で再現する場合）
 
