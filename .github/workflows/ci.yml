@@ -34,6 +34,11 @@ jobs:
       - name: Check dependency direction (core does not depend on location)
         run: bash tools/check_import_direction.sh
 
+      # DESIGN.md: カラーコードの直書き禁止・トークン経由（CLAUDE.md / color_tokens.dart）。
+      # 規約ではなく仕組みで守る（Issue #47）。pub get より前に実行して最短で検出する。
+      - name: Check design token usage (no raw color literals outside design/)
+        run: bash tools/check_design_tokens.sh
+
       - name: Resolve dependencies
         run: |
           flutter pub get -C packages/core

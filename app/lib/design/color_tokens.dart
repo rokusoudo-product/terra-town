@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 ///
 /// このファイル以外で `Color(0x...)` / `Colors.*` のリテラルを書かないこと
 /// （Issue #25 受け入れ基準）。値を変更する場合は DESIGN.md 側も同一 PR で更新する。
+/// 違反は `tools/check_design_tokens.sh` が CI で機械的に検出する（Issue #47）。
 class ColorTokens {
   const ColorTokens._();
 
