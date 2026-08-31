@@ -174,6 +174,7 @@ SVG が正本。Android の mipmap と Play 掲載画像には PNG が必要。
   別Issue（[#29](https://github.com/rokusoudo-product/terra-town/issues/29)）の範囲
 
 ## プロジェクト固有ルール
+- **対応ロケールは日本語（`ja`）のみ**。UI 文言はコード内に日本語で直書きし、多言語化（ARB/`intl` 導入）は MVP 外とする（[#51](https://github.com/rokusoudo-product/terra-town/issues/51)）。
 - **地図はライトテーマのみ MVP**（ダークは将来）。地図以外の UI はライト/ダーク両対応。
 - 地図オーバーレイのテキストは視認性のため縁取り（ハロー）を許可＝DESIGN_STANDARDS の「直書き禁止」の例外として、地図ラベル専用トークンを用いる。
 - fog of war の暗幕はトークン `fog` を用い、開示で「穴を開ける」表現（plan §8）。

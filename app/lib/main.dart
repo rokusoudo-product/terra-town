@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'design/app_theme.dart';
 
@@ -15,6 +16,18 @@ class MyApp extends StatelessWidget {
       title: 'terra-town',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
+      // UI は日本語で作られているため、Material/Widgets/Cupertino の組み込み文言
+      // （テキスト選択メニュー・日付/時刻ピッカー・ダイアログの既定ボタン、
+      // TalkBack 等スクリーンリーダー向けセマンティクスを含む）も日本語で出す（Issue #51）。
+      // MVP は日本語直書き UI のみのため、端末ロケールに関わらず ja に固定する
+      // （サブエージェントの判断による暫定対応。将来の多言語対応時は要見直し）。
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('ja')],
+      locale: const Locale('ja'),
       home: const RootScaffold(),
     );
   }
