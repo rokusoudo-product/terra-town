@@ -8,10 +8,19 @@
 #
 # 規約ではなく仕組みで守るため、CI（.github/workflows/ci.yml）から実行し、
 # 違反があれば exit 1 で落とす。
+#
+# Issue #50: シングルクォートのみを要求する正規表現だったため、
+#   `import "package:terra_town_location/...";` のような二重引用符の import が
+#   すり抜けていた。引用符スタイルに依存しない検出に修正済み。
+#   このスクリプト自体の回帰は tools/check_import_direction_test.sh が検証する。
+#
+# 引数: 検査対象の core ディレクトリ（省略時は packages/core）。
+#   tools/check_import_direction_test.sh がフィクスチャディレクトリを渡して
+#   自己テストするために差し替え可能にしてある。
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CORE_DIR="$REPO_ROOT/packages/core"
+CORE_DIR="${1:-$REPO_ROOT/packages/core}"
 
 if [ ! -d "$CORE_DIR" ]; then
   echo "SKIP: $CORE_DIR がまだ存在しません"
@@ -23,15 +32,30 @@ fail=0
 # --- 1. core のソースが禁止パッケージを import していないか ---
 FORBIDDEN='package:terra_town_location|package:location|package:flutter/|package:maplibre|package:mapbox|package:google_maps|package:geolocator|dart:ui'
 
-echo "== 1. import チェック (packages/core) =="
-hits=$(grep -rnE "^[[:space:]]*(import|export)[[:space:]]+'($FORBIDDEN)" \
-        "$CORE_DIR/lib" "$CORE_DIR/test" 2>/dev/null || true)
-if [ -n "$hits" ]; then
-  echo "NG: packages/core が禁止パッケージを import/export しています"
-  echo "$hits"
-  fail=1
+# 検査対象を lib/test だけでなく bin/example/tool にも広げる。
+# 存在しないディレクトリは個別に SKIP する（黙って対象外になるのを防ぐため列挙する）。
+SCAN_DIRS=()
+for d in lib test bin example tool; do
+  if [ -d "$CORE_DIR/$d" ]; then
+    SCAN_DIRS+=("$CORE_DIR/$d")
+  fi
+done
+
+echo "== 1. import チェック (packages/core: ${SCAN_DIRS[*]:-対象ディレクトリなし}) =="
+if [ "${#SCAN_DIRS[@]}" -eq 0 ]; then
+  echo "SKIP: 検査対象ディレクトリ(lib/test/bin/example/tool)が見つかりません"
 else
-  echo "OK: 禁止 import なし"
+  # シングルクォート('...')・二重引用符("...")のどちらの import/export もすり抜けないよう
+  # ["'] で両方の引用符を許容する（Issue #50）。
+  hits=$(grep -rnE "^[[:space:]]*(import|export)[[:space:]]+[\"']($FORBIDDEN)" \
+          "${SCAN_DIRS[@]}" 2>/dev/null || true)
+  if [ -n "$hits" ]; then
+    echo "NG: packages/core が禁止パッケージを import/export しています"
+    echo "$hits"
+    fail=1
+  else
+    echo "OK: 禁止 import なし"
+  fi
 fi
 
 # --- 2. pubspec の依存に禁止パッケージが入っていないか ---

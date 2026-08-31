@@ -1,4 +1,11 @@
 include: package:flutter_lints/flutter.yaml
 
+# Issue #50: packages/core 側の引用符スタイル lint (prefer_single_quotes) と
+# 揃えるため location 側にも同じルールを追加する（防御の二重化）。
+
+linter:
+  rules:
+    - prefer_single_quotes
+
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

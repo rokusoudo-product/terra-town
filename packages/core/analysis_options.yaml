@@ -13,11 +13,12 @@
 
 include: package:lints/recommended.yaml
 
-# Uncomment the following section to specify additional rules.
-
-# linter:
-#   rules:
-#     - camel_case_types
+# Issue #50: 依存方向チェック(tools/check_import_direction.sh)は引用符スタイルに
+# 依存しない検出に修正済みだが、レビュー時の一貫性のため引用符スタイルも lint で揃える
+# (防御の二重化。ガード本体が引用符に依らないことが本筋)。既存コードは全て単一引用符。
+linter:
+  rules:
+    - prefer_single_quotes
 
 # analyzer:
 #   exclude:

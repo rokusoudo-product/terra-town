@@ -10,7 +10,8 @@ publish_to: none
 #   依存は常に location -> core の一方向。
 #   Flutter に依存させないため、本パッケージは flutter create ではなく
 #   dart create（純粋 Dart パッケージ）で作成している。
-#   違反は tools/check_import_direction.sh が CI で検出する。
+#   違反は tools/check_import_direction.sh が CI で検出する
+#   （シングルクォート／二重引用符どちらの import・export も検出対象。Issue #50）。
 
 environment:
   sdk: ^3.12.2
