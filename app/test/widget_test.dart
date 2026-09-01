@@ -130,4 +130,44 @@ void main() {
     expect(find.byType(FloatingActionButton), findsNothing);
     expect(find.textContaining('pushed the button'), findsNothing);
   });
+
+  group('日本語ロケール（Issue #51）', () {
+    testWidgets('端末ロケールが日本語なら Material 標準文言は日本語', (tester) async {
+      tester.platformDispatcher.localeTestValue = const Locale('ja', 'JP');
+      tester.platformDispatcher.localesTestValue = const [Locale('ja', 'JP')];
+      addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+
+      await tester.pumpWidget(const MyApp());
+      await tester.pumpAndSettle();
+
+      final context = tester.element(find.byType(NavigationBar));
+      expect(Localizations.localeOf(context), const Locale('ja'));
+      expect(
+        MaterialLocalizations.of(context).cancelButtonLabel,
+        'キャンセル',
+      );
+    });
+
+    testWidgets('端末ロケールが英語でも locale 固定により Material 標準文言は日本語のまま', (
+      tester,
+    ) async {
+      // MVP は UI 文言が日本語直書きのため、MaterialApp.locale を ja に固定している
+      // （main.dart 参照）。端末設定が英語でも表示が英日混在にならないことを確認する。
+      tester.platformDispatcher.localeTestValue = const Locale('en', 'US');
+      tester.platformDispatcher.localesTestValue = const [Locale('en', 'US')];
+      addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+
+      await tester.pumpWidget(const MyApp());
+      await tester.pumpAndSettle();
+
+      final context = tester.element(find.byType(NavigationBar));
+      expect(Localizations.localeOf(context), const Locale('ja'));
+      expect(
+        MaterialLocalizations.of(context).cancelButtonLabel,
+        'キャンセル',
+      );
+    });
+  });
 }
