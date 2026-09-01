@@ -7,7 +7,7 @@ GPS×実地図の街育成ゲーム。Android 先行・将来 iOS。spec-kit（�
 - 実装計画（どう作るか）: [`specs/001-mvp/plan.md`](specs/001-mvp/plan.md)（ゲート②承認済み）
 - 地形・エリア定義の正: [`docs/terrain.md`](docs/terrain.md)（ヘクス約50m折衷方式）
 - 環境構成図: [`docs/architecture.md`](docs/architecture.md)
-- **UIは [`DESIGN.md`](DESIGN.md) に準拠する**（Material 3 ＋ 独自トークン。カラーコード・サイズの直書き禁止、トークン経由）
+- **UIは [`DESIGN.md`](DESIGN.md) に準拠する**（Material 3 ＋ 独自トークン。カラーコード・サイズの直書き禁止、トークン経由）。色リテラルの直書き違反は `tools/check_design_tokens.sh` が CI で検出する（サイズ・余白は grep での機械判定が難しいため対象外）
 
 ## アーキテクチャ制約（必守）
 - `core/`（ゲームロジックの純粋実装）は `location/`（GPS・地図SDK）を **import しない**一方向依存（`C:\Users\moets\.claude\GPS_ARCHITECTURE.md` 準拠）。core は別 Dart パッケージ（`packages/core`）で物理分離する。
