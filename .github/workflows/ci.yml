@@ -28,6 +28,12 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
+      # 依存方向チェック自身の検出ロジックが壊れていないかを検証する自己テスト（Issue #50）。
+      # 過去にシングルクォートのみを要求する正規表現の穴があり、CI は常に green のまま
+      # ガードが機能しなくなっていたことがある。チェック本体より前に実行する。
+      - name: Self-test import-direction guard
+        run: bash tools/check_import_direction_test.sh
+
       # GPS_ARCHITECTURE: core は location/Flutter/地図SDK に依存しない。
       # 規約ではなく仕組みで守る（plan.md §1-D・§2）。
       # pub get より前に実行して、違反を最短で検出する。
