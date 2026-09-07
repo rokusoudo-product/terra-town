@@ -40,6 +40,13 @@ jobs:
       - name: Check dependency direction (core does not depend on location)
         run: bash tools/check_import_direction.sh
 
+      # デザイントークンガード自身の検出ロジックが壊れていないかを検証する自己テスト（Issue #58）。
+      # check_design_tokens.sh は現在の main ではNGケースを一度も踏まないため、
+      # 自己テストが無いと PATTERN を丸ごと壊しても CI は常に green のままだった
+      # （Issue #50 と同じ「静かに壊れるガード」の構造）。チェック本体より前に実行する。
+      - name: Self-test design-token guard
+        run: bash tools/check_design_tokens_test.sh
+
       # DESIGN.md: カラーコードの直書き禁止・トークン経由（CLAUDE.md / color_tokens.dart）。
       # 規約ではなく仕組みで守る（Issue #47）。pub get より前に実行して最短で検出する。
       - name: Check design token usage (no raw color literals outside design/)
