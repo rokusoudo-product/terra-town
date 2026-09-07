@@ -95,7 +95,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 ### core の抽象と値オブジェクト（plan.md §5・§2）
 
 - [x] T020 [P] `packages/core/lib/src/geo/hex_id.dart` に `HexId`（決定論的な緯度経度→ID変換の**結果**を保持する値オブジェクト）を実装。ヘクス幾何や地図SDKには依存しない（Issue #33・整数表現・`toInt()` を実装済み — Issue #33 2026-08-13コメントの制約に対応）
-- [x] T021 [P] `packages/core/lib/src/geo/tile_id.dart` に `TileId`、`packages/core/lib/src/geo/distance.dart` に `Distance` を実装（Issue #33: `TileId` は `docs/terrain.md` §4 の矩形細分グリッドセルの識別子として実装し、別名の `CellId` 型は追加不要と判断。`Distance` は単位メートル固定・型に単位情報を持たせない）
+- [x] T021 [P] `packages/core/lib/src/geo/tile_id.dart` に `TileId`、`packages/core/lib/src/geo/distance.dart` に `Distance` を実装（Issue #33: `TileId` を `docs/terrain.md` §4 の矩形細分グリッドセルの識別子として実装し、別名の `CellId` 型は追加不要と判断 — ただし Issue 本文は「HexId/TileId/Distance しかなく細分グリッドセルの型が挙がっていない」としており、この解釈自体は要確認。PR参照のうえ結論が覆れば本行を更新すること。`Distance` は単位メートル固定・型に単位情報を持たせない）
 - [x] T022 [P] `packages/core/lib/src/terrain/terrain_type.dart` に `TerrainType`（空き地/森/山/水辺/海/農地/市街 — `docs/terrain.md` §2）を実装
 - [ ] T023 [P] `packages/core/lib/src/position/position_provider.dart` に `PositionProvider` 抽象インターフェースを定義（実装は `location/`。テストではフェイクを注入 — plan.md §10）
 - [ ] T024 [P] `packages/core/lib/src/pack/region_pack.dart` に `RegionPack` 抽象（地形属性・区画・POI の読み取り口）と `pack_version` を定義
