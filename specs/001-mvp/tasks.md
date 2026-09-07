@@ -122,12 +122,12 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ### 地域パック生成パイプライン（plan.md §3・§4）
 
-- [ ] T039 `tools/pack-builder/` に Planetiler/osmium ベースの生成スクリプトを実装（OSM日本抽出 → ベクタタイル MBTiles）
+- [ ] T039 `tools/pack-builder/` に Planetiler/osmium ベースの生成スクリプトを実装（OSM日本抽出 → ベクタタイル MBTiles）。1エリアのヘクス数が暫定上限 **30,000**（plan.md §3.5・fog of war ソース構築2秒以内が主基準）を超える場合はエリア分割を行うこと
 - [ ] T040 `tools/pack-builder/` に **地形属性の事前計算**を実装（`docs/terrain.md` §5 の OSMタグ→地形タイプ判定ルールを細分グリッドセルに適用 → §4 の多数決でヘクスに集約 → SQLite `cell_terrain`/`hex_terrain`）
 - [ ] T041 [P] `tools/pack-builder/` に行政区域ポリゴン（国土数値情報 N03・トポロジ保持簡略化）の取り込みを実装
 - [ ] T042 [P] `tools/pack-builder/` に名所 POI 抽出（OSM 観光POI → SQLite `poi`）を実装
 - [ ] T043 [P] `tools/pack-builder/` にパックメタ（`pack_version`）の付与を実装
-- [ ] T044 バーティカルスライス対象エリア（**代表の生活圏を含む約5km四方**・水辺/緑地/農地/市街が混在 — plan.md §15）のパックを生成し、`app/assets/` に**同梱**する
+- [ ] T044 バーティカルスライス対象エリア（**代表の生活圏を含む約5km四方**・水辺/緑地/農地/市街が混在 — plan.md §15）のパックを生成し、`app/assets/` に**同梱**する。ヘクス数が暫定上限 **30,000**（plan.md §3.5）を超える場合はエリア分割して同梱すること
 - [ ] T045 [P] パック生成を CI で再現可能にする（`.github/workflows/pack-build.yml`）
 
 ### 位置記録パイプライン（plan.md §7・#10）
