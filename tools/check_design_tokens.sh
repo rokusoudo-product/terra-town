@@ -13,18 +13,31 @@
 #   リテラルのみを検出する。MapLibre のスタイル JSON 等に渡す "#141610" のような
 #   文字列リテラルの色、およびサイズ・余白の数値リテラルは grep による機械判定が
 #   困難なため対象外（将来必要になれば別Issueで拡張する）。
+#
+# Issue #58: 検査対象ディレクトリが TARGET_DIRS にハードコードされており、
+#   フィクスチャを差し込んで自己テストすることができなかった。かつ
+#   自己テストが無かったため、PATTERN が壊れても CI は常に green のままだった
+#   （Issue #50 と同じ「静かに壊れるガード」の構造）。
+#   このスクリプト自体の回帰は tools/check_design_tokens_test.sh が検証する。
+#
+# 引数: 検査対象ルートを可変長で渡せる（省略時は app/lib と packages/location/lib
+#   の2ディレクトリ）。allowlist（design/）は渡された各ルート基準で再解決する
+#   （"$root/design" を除外する）。
+#   tools/check_design_tokens_test.sh がフィクスチャディレクトリを渡して
+#   自己テストするために差し替え可能にしてある。
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# 検査対象ディレクトリ（存在しなければ SKIP）
-TARGET_DIRS=(
-  "$REPO_ROOT/app/lib"
-  "$REPO_ROOT/packages/location/lib"
-)
-
-# トークン層のみリテラル定義を許可する allowlist。ここだけ検査対象から除外する。
-ALLOWLIST_DIR="$REPO_ROOT/app/lib/design"
+# 検査対象ディレクトリ（存在しなければ SKIP）。引数があればそれを使う。
+if [ "$#" -gt 0 ]; then
+  TARGET_DIRS=("$@")
+else
+  TARGET_DIRS=(
+    "$REPO_ROOT/app/lib"
+    "$REPO_ROOT/packages/location/lib"
+  )
+fi
 
 # Color(0x...) / Colors.xxx / Color.fromARGB(...) / Color.fromRGBO(...)
 PATTERN='Color\(0x|Colors\.[A-Za-z]|Color\.fromARGB|Color\.fromRGBO'
@@ -41,15 +54,19 @@ for dir in "${TARGET_DIRS[@]}"; do
   fi
   any_target_found=1
 
+  # トークン層のみリテラル定義を許可する allowlist。渡されたルート基準で
+  # 再解決する（固定の絶対パスにしない。Issue #58）。
+  allowlist_dir="$dir/design"
+
   hits=$(grep -rnE --include='*.dart' "$PATTERN" "$dir" \
-          | grep -v -F "$ALLOWLIST_DIR/" || true)
+          | grep -v -F "$allowlist_dir/" || true)
 
   if [ -n "$hits" ]; then
     echo "NG: $dir に色リテラルの直書きがあります"
     echo "$hits"
     fail=1
   else
-    echo "OK: $dir に直書きなし（$ALLOWLIST_DIR/ を除く）"
+    echo "OK: $dir に直書きなし（$allowlist_dir/ を除く）"
   fi
 done
 
@@ -67,4 +84,4 @@ if [ "$fail" -ne 0 ]; then
   echo "      color_tokens.dart にトークンを新設してください。"
   exit 1
 fi
-echo "=== PASSED: 色リテラルの直書きはありません（$ALLOWLIST_DIR/ のトークン層を除く） ==="
+echo "=== PASSED: 色リテラルの直書きはありません（各ルートの design/ のトークン層を除く） ==="
