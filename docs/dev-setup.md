@@ -97,6 +97,23 @@ flutter doctor
 - **`dart create --no-pub` は使わない。** クラッシュする。`--no-pub` なしで実行する。
 - sdkmanager は deprecated 警告を出すが、現時点では動作する（将来 `android` CLI へ移行）。
 
+### ⚠️ `android.builtInKotlin`（Issue #55 / PR #66・追跡 #67）
+
+`app/android/gradle.properties` の `android.builtInKotlin` は、Flutter 3.44.8 の既定である
+`false` から **暫定的に `true` に変更している**（コメント参照）。
+
+- **理由**: `maplibre_gl` 0.27.0 が AGP 9 系（本プロジェクトは AGP 9.0.1）＋
+  `android.builtInKotlin=false` の組み合わせだと `flutter build apk` 時に
+  `Could not find method kotlin()`（`:maplibre_gl` の `build.gradle` 評価失敗）で落ちる。
+  `true` にすると KGP 非推奨警告は出るがビルドは通る。
+- **恒久対応ではない。** Flutter は将来のバージョンで KGP を適用するプラグインのビルドを失敗させる
+  方針を明言している。上流 `maplibre_gl` が Built-in Kotlin（AGP 9+ で KGP 不要）に対応し次第、
+  `false` に戻すこと。撤去条件・進捗は **Issue #67** で追跡する。
+- **Flutter をアップグレードする際は必ず Issue #67 を確認すること。** 特に AGP バージョンが変わる
+  Flutter アップデートでは本件が別の形で再発しうる（あるいは解消しうる）。上記 §2 の
+  `tools/check_toolchain_versions.sh`（Issue #59, Flutter/JDK のバージョン整合チェック）を
+  Flutter バージョン変更時に実行する運用と合わせて、本フラグの要否もそのタイミングで再評価する。
+
 ## 4. PATH の永続化
 
 `~/.bashrc` に以下が追記済み（マーカー `# >>> terra-town flutter env >>>` で囲まれている）:
