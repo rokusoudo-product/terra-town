@@ -230,7 +230,12 @@ terra-town/
 | R5 | モック/速度判定の誤検出率 | 正規歩行で報酬没収が起きないか | #9 |
 | R6 | Health Connect 疎通 | 読み取り＋オプトインUX | #13 |
 
-**R1 追記（2026-09-08、Issue #55 / PR #66 / 追跡 #67）**: R1 は「ローカルMBTiles読込・動的レイヤ操作・feature-state という必要APIが露出しているか」を検証対象として想定していたが、`maplibre_gl` 0.27.0 を実際に組み込んで最初に詰まったのはその手前の**ビルド統合**だった（AGP 9.0.1 ＋ `android.builtInKotlin=false` の組み合わせで `flutter build apk --debug` が `Could not find method kotlin()` で失敗）。暫定対応として `app/android/gradle.properties` の `android.builtInKotlin` を `true` に変更し、ビルド成功（APK生成）を確認済み。ただしこれは Flutter が非推奨として案内する互換シムであり恒久対応ではないため、撤去条件・撤去タイミングは Issue #67 で追跡する。R1 本来の検証項目（API成熟度）は本対応の範囲外で、未実施のまま。
+**R1 追記（2026-09-08、Issue #55 / PR #66 / 追跡 #67）**: R1 は「ローカルMBTiles読込・動的レイヤ操作・feature-state という必要APIが露出しているか」を検証対象として想定していたが、`maplibre_gl` 0.27.0 を実際に組み込んで最初に詰まったのはその手前の**ビルド統合**だった。しかもビルド統合には独立した2つの詰まりどころ（Blocker）があることが判明した。
+
+- **Blocker A（対応済み）**: AGP 9.0.1 ＋ `android.builtInKotlin=false` の組み合わせで `flutter build apk --debug` が `Could not find method kotlin()` で失敗。暫定対応として `app/android/gradle.properties` の `android.builtInKotlin` を `true` に変更し解消。Flutter が非推奨として案内する互換シムであり恒久対応ではないため、撤去条件・撤去タイミングは Issue #67 で追跡する。
+- **Blocker B（未解決）**: `maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを AGP バージョンに関係なく無条件で `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、JDK 21 でのビルドが別途必須。本プロジェクトが正本とする JDK 17（`ci.yml`）ではビルドできず、**CI は本PR時点でも依然 red**。Issue #67（Blocker A の撤去）とは独立した制約で、JDK をプロジェクト既定として21に上げるかどうかは別途代表判断が必要（詳細は research.md §6.1、PR #66）。
+
+R1 本来の検証項目（API成熟度）は本対応の範囲外で、未実施のまま。
 
 ## 15. バーティカルスライス（最初に完成品質で作る1エリア）
 

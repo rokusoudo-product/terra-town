@@ -105,7 +105,7 @@ flutter doctor
 - **理由**: `maplibre_gl` 0.27.0 が AGP 9 系（本プロジェクトは AGP 9.0.1）＋
   `android.builtInKotlin=false` の組み合わせだと `flutter build apk` 時に
   `Could not find method kotlin()`（`:maplibre_gl` の `build.gradle` 評価失敗）で落ちる。
-  `true` にすると KGP 非推奨警告は出るがビルドは通る。
+  `true` にすると KGP 非推奨警告は出るが、この**評価エラー自体**は解消する。
 - **恒久対応ではない。** Flutter は将来のバージョンで KGP を適用するプラグインのビルドを失敗させる
   方針を明言している。上流 `maplibre_gl` が Built-in Kotlin（AGP 9+ で KGP 不要）に対応し次第、
   `false` に戻すこと。撤去条件・進捗は **Issue #67** で追跡する。
@@ -113,6 +113,28 @@ flutter doctor
   Flutter アップデートでは本件が別の形で再発しうる（あるいは解消しうる）。上記 §2 の
   `tools/check_toolchain_versions.sh`（Issue #59, Flutter/JDK のバージョン整合チェック）を
   Flutter バージョン変更時に実行する運用と合わせて、本フラグの要否もそのタイミングで再評価する。
+
+### ⚠️⚠️ `maplibre_gl` 0.27.0 は JDK 21 を要求する（未解決・2026-09-08・CIはred）
+
+`android.builtInKotlin=true`（上記）だけでは `flutter build apk` は通らない。
+`maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを
+**AGPのバージョンに関係なく無条件で** `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、
+本項目の §2 が正本とする JDK 17（sdkman管理・`ci.yml` の `java-version: "17"`）でビルドすると
+
+```
+Execution failed for task ':maplibre_gl:compileDebugJavaWithJavac'.
+> Java compilation initialization error
+    error: invalid source release: 21
+```
+
+で失敗する。WSL環境の `java` コマンドが `update-alternatives` 経由でシステムJDK 21 に
+解決される場合はこのエラーに気づかず「ビルドが通った」ように見えてしまう罠がある
+（本項目のsdkman管理JDK 17を明示的に使わないと再現しない）ので注意。**これは
+Issue #67（`builtInKotlin` の撤去条件）とは独立した別の制約**で、上流が Built-in Kotlin に
+対応しても解消しない。JDK をプロジェクト既定として 21 に上げるべきかどうかは
+`ci.yml` と本表（§2）を同一PRで変更する規模の判断であり、代表判断が必要
+（詳細: `specs/001-mvp/research.md` §6.1、PR #66）。**現時点でこの依存を組み込んだ状態の
+CIビルドは red のまま。**
 
 ## 4. PATH の永続化
 
