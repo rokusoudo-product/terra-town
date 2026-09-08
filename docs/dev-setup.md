@@ -140,8 +140,8 @@ terra-town/
   pub のパッケージ名は **`terra_town_core` / `terra_town_location`** とした。
   理由 = `location` は pub.dev に同名の実在パッケージ（位置情報プラグイン）があり、
   将来それを依存に加えたときに名前が衝突するため。
-- **`android/` の配置**: plan.md §2 のツリーはリポジトリ直下に `android/` を置いているが、
-  `flutter create` の標準に合わせて **`app/android/`** とした。plan.md §2 は要追記修正。
+- **`android/` の配置**: `flutter create` の標準に合わせて **`app/android/`** とした（`app/ios/` は将来・未着手）。
+  plan.md §2 のツリーは当初リポジトリ直下に `android/` を置く記述だったが、**Issue #35（2026-09-08）で実態に合わせて修正済み**。
 
 ## 7. よく使うコマンド
 

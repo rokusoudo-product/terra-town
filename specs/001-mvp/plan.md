@@ -49,17 +49,20 @@ advisor_reviewed: 2026-07-25   # Flutter+MapLibre構成を検証。地域パッ�
 ```
 terra-town/
 ├── app/                      # Flutter アプリ（composition root・画面・状態管理）
+│   ├── android/              # Kotlin ネイティブ（foreground service・モック検出・Play Integrity・Health Connect・歩数）
+│   └── ios/                  # 将来。Pigeon 契約に沿って CoreLocation/App Attest/HealthKit を実装
 ├── packages/
-│   ├── core/                 # 【純粋】開示判定・資材・建設・経済・区画集計。GPS/地図を import しない
+│   ├── core/                 # terra_town_core：【純粋】開示判定・資材・建設・経済・区画集計。GPS/地図を import しない
 │   │                         #   抽象: PositionProvider / TileId / Distance / TerrainType / RegionPack
-│   └── location/             # GPS・地図・測位。core の抽象を実装（location → core の一方向）
-├── android/                  # Kotlin ネイティブ（foreground service・モック検出・Play Integrity・Health Connect・歩数）
-├── ios/                      # 将来。Pigeon 契約に沿って CoreLocation/App Attest/HealthKit を実装
+│   └── location/             # terra_town_location：GPS・地図・測位。core の抽象を実装（location → core の一方向）
 ├── tools/pack-builder/       # 地域パック生成パイプライン（Planetiler/osmium）※ビルド時のみ・実行時サーバではない
 ├── specs/001-mvp/            # spec.md / plan.md / tasks.md / balance.csv
 ├── docs/architecture.md      # 環境構成図（Mermaid）
 └── DESIGN.md
 ```
+
+> ✅ **実態反映（2026-09-08・Issue #35）**: 当初案は `android/` `ios/` をリポジトリ**ルート**に置く構成だったが、`flutter create` の標準に合わせて実際は **`app/android/`**（`app/ios/` は将来・未着手）とした。経緯・判断根拠は `docs/dev-setup.md` §6。
+> また、`packages/core` / `packages/location` の pub パッケージ名は **`terra_town_core` / `terra_town_location`** とした。理由 = `location` は pub.dev に同名の実在パッケージ（位置情報プラグイン）があり、将来それを依存に加えたときの名前衝突を避けるため（`docs/dev-setup.md` §6）。
 
 - **依存方向（GPS_ARCHITECTURE §2）**: `location/ → core/` の一方向。`core/` は `location/` を import しない。pubspec 依存で物理強制し、CI で import 方向チェック（Dart は `dart analyze` + カスタム lint / import_lint）。
 - **位置記録は最初から Kotlin 側**（foreground service → ローカルDB書込 → Dart は読むだけ）。Dart isolate はバックグラウンドで信頼できないため、将来「画面OFFでも記録」を足すときの作り直しを防ぐ。
