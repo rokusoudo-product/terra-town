@@ -12,14 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # JDK: docs/dev-setup.md §2 の実測値（OpenJDK 17）と揃える。
+      # JDK: この値が正本（enforced value）。docs/dev-setup.md §2 は実測値の記録であり、
+      # 乖離時は docs/dev-setup.md 側をこの値に合わせて更新する。
       # Flutter バージョンを上げるときは docs/dev-setup.md §2 も同じ PR で更新する。
+      # ci.yml と docs/dev-setup.md §2 の乖離は tools/check_toolchain_versions.sh が機械的に検出する（Issue #59）。
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # flutter-version は docs/dev-setup.md §2 の実測値と一致させる（固定）。
+      # flutter-version: この値が正本（enforced value）。docs/dev-setup.md §2 の実測値と
+      # 一致させる（固定）。乖離時は docs/dev-setup.md 側をこの値に合わせて更新する。
+      # ci.yml と docs/dev-setup.md §2 の乖離は tools/check_toolchain_versions.sh が機械的に検出する（Issue #59）。
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -51,6 +55,19 @@ jobs:
       # 規約ではなく仕組みで守る（Issue #47）。pub get より前に実行して最短で検出する。
       - name: Check design token usage (no raw color literals outside design/)
         run: bash tools/check_design_tokens.sh
+
+      # ツールチェーンバージョンガード自身の検出ロジックが壊れていないかを検証する自己テスト（Issue #59）。
+      # 抽出用の正規表現や docs/dev-setup.md §2 セクションの切り出しロジックが壊れても
+      # CI が常に green のままガードが機能しなくなる、という Issue #50 / #58 と同じ
+      # 「静かに壊れるガード」の構造を防ぐ。チェック本体より前に実行する。
+      - name: Self-test toolchain-version guard
+        run: bash tools/check_toolchain_versions_test.sh
+
+      # Flutter/JDK のバージョンが ci.yml（正本）と docs/dev-setup.md §2 の間で
+      # 乖離していないかを検査する。規約ではなく仕組みで守る（Issue #59）。
+      # pub get より前に実行して、乖離を最短で検出する。
+      - name: Check toolchain version consistency (ci.yml vs docs/dev-setup.md §2)
+        run: bash tools/check_toolchain_versions.sh
 
       - name: Resolve dependencies
         run: |

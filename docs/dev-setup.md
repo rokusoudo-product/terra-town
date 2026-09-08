@@ -52,6 +52,8 @@ related:
 Flutter バージョンを上げる（例: stable channel の更新に追従する）場合は、
 `ci.yml` の `flutter-version` とこの表を **同じ PR で** 更新すること。片方だけ更新すると、
 ローカルと CI で異なるバージョンのまま乖離する。
+この乖離は `tools/check_toolchain_versions.sh` が CI で機械的に検出する（Issue #59）。
+**正本（enforced value）は `ci.yml` 側であり、乖離時はこの表を `ci.yml` の値に合わせて修正すること。**
 
 ## 3. セットアップ手順（新しい環境で再現する場合）
 
