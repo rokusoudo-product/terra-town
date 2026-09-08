@@ -2,9 +2,9 @@
 project: terra-town
 doc: tasks.md (実装タスク分解)
 feature: 001-mvp
-status: draft
+status: in-progress          # Phase 1（T001〜T010）完了・Phase 2以降は未完了（frontmatter status の値そのものの規約はIssue #35で未確定のまま残置。要確認）
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-09-08
 related:
   - specs/001-mvp/spec.md
   - specs/001-mvp/plan.md
@@ -41,7 +41,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - `app/android/` — Kotlin ネイティブ（foreground service・モック検出・歩数・Health Connect）
 - `tools/pack-builder/` — 地域パック生成パイプライン（ビルド時のみ・実行時サーバではない）
 
-> ⚠️ **plan.md §2 との差異（要確認）**: plan.md §2 のツリーは `android/` `ios/` をリポジトリ**ルート**に置いているが、`flutter create` は `app/android/` `app/ios/` に生成する。本 tasks.md は Flutter 標準（`app/android/`）を採用する。T004 で確定し、必要なら plan.md §2 を追記修正する（ドキュメントが常に正）。
+> ✅ **plan.md §2 との差異は解消済み**（2026-09-08・Issue #35）: plan.md §2 のツリーは `android/` `ios/` をリポジトリルートに置く記述だったが、`flutter create` の標準どおり実際は `app/android/`（`app/ios/` は未着手）。T002 で確定した実態に合わせて plan.md §2 のツリーを修正済み。詳細は `docs/dev-setup.md` §6。
 
 ---
 
@@ -49,20 +49,20 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 **Purpose**: ビルドできる空のプロジェクトを用意し、依存方向を仕組みで強制する
 
-> 🔴 **前提ブロッカー**: Flutter SDK が未インストール（WSL・Windows いずれにも無し。Android SDK は Windows 側に存在）。T001 の完了が Phase 1 以降すべての前提。
+> ✅ **完了（2026-09-08 実態反映・Issue #35）**: 旧ブロッカー（SDK 未導入）は解消済み。Flutter 3.44.8 を WSL 側に導入し、`docs/dev-setup.md`（status: approved）に導入手順・実測バージョンを記録済み。Phase 1（T001〜T010）は全項目完了。
 
-- [ ] T001 Flutter SDK（stable）と Android SDK/cmdline-tools を導入し、`flutter doctor` が Android toolchain で green になる状態にする（インストール先OS＝Windows/WSL の選択は代表判断。決定を `docs/dev-setup.md` に記録）
-- [ ] T002 `flutter create` で `app/` を生成し、リポジトリ構成を plan.md §2 に合わせる（`app/`・`app/android/`）
-- [ ] T003 [P] `packages/core/` を**純粋 Dart パッケージ**として作成（`packages/core/pubspec.yaml`・Flutter に依存させない）
-- [ ] T004 [P] `packages/location/` を Flutter パッケージとして作成し、`pubspec.yaml` の dependencies に `core` のみを追加（逆向き依存を作らない）
-- [ ] T005 `app/pubspec.yaml` に `core`・`location` を path 依存で追加し、`flutter build apk --debug` が通ることを確認
-- [ ] T006 [P] `analysis_options.yaml` をリポジトリルートに配置し、lint ルール（`flutter_lints` ベース）を全パッケージに適用
-- [ ] T007 **依存方向の機械的強制**: `packages/core/` から `location`・`flutter`・地図SDK を import できないことを検査する仕組みを導入（`import_lint` 等）し、`tools/check_import_direction.sh` として実行可能にする
-- [ ] T008 [P] GitHub Actions ワークフロー `.github/workflows/ci.yml` を作成（`dart analyze`・`flutter test`・T007 の import 方向チェックを実行）
-- [ ] T009 [P] `.gitignore` を Flutter/Android/Dart 向けに整備（`build/`・`.dart_tool/`・`local.properties`・APK 等）
-- [ ] T010 [P] `docs/dev-setup.md` を新規作成し、開発環境構築手順（SDK バージョン・Android SDK パス・実機/エミュレータ接続方法）を記録
+- [x] T001 Flutter SDK（stable）と Android SDK/cmdline-tools を導入し、`flutter doctor` が Android toolchain で green になる状態にする（インストール先OS＝Windows/WSL の選択は代表判断。決定を `docs/dev-setup.md` に記録）→ WSL に導入（`docs/dev-setup.md` §1・§2、Flutter 3.44.8）
+- [x] T002 `flutter create` で `app/` を生成し、リポジトリ構成を plan.md §2 に合わせる（`app/`・`app/android/`）→ `app/`・`app/android/` を確認（`app/ios/` は未着手）。plan.md §2 は Issue #35 で実態に合わせて修正済み
+- [x] T003 [P] `packages/core/` を**純粋 Dart パッケージ**として作成（`packages/core/pubspec.yaml`・Flutter に依存させない）→ `packages/core/pubspec.yaml`（`name: terra_town_core`）に Flutter 依存なしを確認
+- [x] T004 [P] `packages/location/` を Flutter パッケージとして作成し、`pubspec.yaml` の dependencies に `core` のみを追加（逆向き依存を作らない）→ `packages/location/pubspec.yaml`（`name: terra_town_location`）の dependencies が `flutter`・`terra_town_core` のみであることを確認
+- [x] T005 `app/pubspec.yaml` に `core`・`location` を path 依存で追加し、`flutter build apk --debug` が通ることを確認 → `app/pubspec.yaml` に path 依存あり。`flutter build apk --debug` は CI（`.github/workflows/ci.yml`、PR #45）で実行・green
+- [x] T006 [P] `analysis_options.yaml` を**各パッケージ（`app/`・`packages/core/`・`packages/location/`）配下**に配置し、lint ルール（`flutter_lints`/`lints` ベース）を適用する → **実態に合わせて記述を修正（2026-09-08）**。当初案の「リポジトリルートに1つ配置」ではなく、パッケージ単位配置を正とする（ルート集約は現時点でコード変更を伴うため対象外。Issue #35 の未解決の質問を参照）
+- [x] T007 **依存方向の機械的強制**: `packages/core/` から `location`・`flutter`・地図SDK を import できないことを検査する仕組みを導入（`import_lint` 等）し、`tools/check_import_direction.sh` として実行可能にする → `tools/check_import_direction.sh` と自己テスト `tools/check_import_direction_test.sh`（Issue #50）が CI に組み込み済み
+- [x] T008 [P] GitHub Actions ワークフロー `.github/workflows/ci.yml` を作成（`dart analyze`・`flutter test`・T007 の import 方向チェックを実行）→ 作成済み（import方向チェック・デザイントークンチェック・analyze・testを実行）
+- [x] T009 [P] `.gitignore` を Flutter/Android/Dart 向けに整備（`build/`・`.dart_tool/`・`local.properties`・APK 等）→ 整備済み
+- [x] T010 [P] `docs/dev-setup.md` を新規作成し、開発環境構築手順（SDK バージョン・Android SDK パス・実機/エミュレータ接続方法）を記録 → 作成済み（status: approved）
 
-**Checkpoint**: 空の Flutter アプリが実機/エミュレータで起動し、CI が green
+**Checkpoint**: 空の Flutter アプリが実機/エミュレータで起動し、CI が green → CI green は確認済み（2026-09-08 時点で main の直近 CI 実行が success）。実機起動は Phase 2 のスパイク（research.md §6.4・Pixel 7a 実機計測）で間接的に裏付けられているが、Phase 1 完了時点そのものでの実機起動確認記録は見当たらないため「要確認」として残す。
 
 ---
 
@@ -338,9 +338,9 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ## 未確定・要確認（実装中に確定させる）
 
-1. **Flutter SDK のインストール先OS**（Windows / WSL）— T001。リポジトリは WSL、Android SDK は Windows 側にある現状を踏まえて代表判断が必要
-2. **plan.md §2 の `android/` 配置** — ルート直下 vs `app/android/`（T002 で確定し plan.md を追記修正）
-3. **plan.md §1・§14 の「Issue #1」参照** — GitHub の Issue #1 は「spec-kit 導入」で既にクローズ済み。技術検証スパイク（Phase 2）に対応する Issue が**未起票**のため、起票するか本 tasks.md で代替するかを決める
+1. ~~**Flutter SDK のインストール先OS**（Windows / WSL）— T001~~ → **解決済み（2026-07-30 代表判断）**: WSL に導入。詳細は `docs/dev-setup.md` §1
+2. ~~**plan.md §2 の `android/` 配置** — ルート直下 vs `app/android/`（T002 で確定し plan.md を追記修正）~~ → **解決済み（2026-09-08・Issue #35）**: `app/android/`（Flutter 標準）を正とし、plan.md §2 のツリーを修正済み。経緯は `docs/dev-setup.md` §6
+3. ~~**plan.md §1・§14 の「Issue #1」参照**~~ → **解決済み**: PR #31（`a8b4787`）で実在する Issue への参照に修正済み。Phase 2 スパイクに対応する Issue は #24 として起票済み
 4. Flutter 地図プラグインの最終選定（T011・plan.md §16）
 5. 距離しきい値・`balance.csv` の数値（T015・T106）
 6. 地域パックの静的ホスティング先（MVP は同梱のため拡張時に決定）
