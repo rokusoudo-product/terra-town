@@ -96,7 +96,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 - [x] T020 [P] `packages/core/lib/src/geo/hex_id.dart` に `HexId`（決定論的な緯度経度→ID変換の**結果**を保持する値オブジェクト）を実装。ヘクス幾何や地図SDKには依存しない（Issue #33・整数表現・`toInt()` を実装済み — Issue #33 2026-08-13コメントの制約に対応）
 - [x] T021 [P] `packages/core/lib/src/geo/tile_id.dart` に `TileId`、`packages/core/lib/src/geo/distance.dart` に `Distance` を実装（Issue #33: `TileId` を `docs/terrain.md` §4 の矩形細分グリッドセルの識別子として実装し、別名の `CellId` 型は追加不要と判断 — ただし Issue 本文は「HexId/TileId/Distance しかなく細分グリッドセルの型が挙がっていない」としており、この解釈自体は要確認。PR参照のうえ結論が覆れば本行を更新すること。`Distance` は単位メートル固定・型に単位情報を持たせない）
-- [x] T022 [P] `packages/core/lib/src/terrain/terrain_type.dart` に `TerrainType`（空き地/森/山/水辺/海/農地/市街 — `docs/terrain.md` §2）を実装
+- [x] T022 [P] `packages/core/lib/src/terrain/terrain_type.dart` に `TerrainType`（空き地/森/山/水辺/海 — `docs/terrain.md` §2。Issue #70〔2026-09-08〕により農地/市街を除外し7種から5種に改訂）を実装
 - [ ] T023 [P] `packages/core/lib/src/position/position_provider.dart` に `PositionProvider` 抽象インターフェースを定義（実装は `location/`。テストではフェイクを注入 — plan.md §10）
 - [ ] T024 [P] `packages/core/lib/src/pack/region_pack.dart` に `RegionPack` 抽象（地形属性・区画・POI の読み取り口）と `pack_version` を定義
 - [x] T025 [P] `packages/core/test/geo/hex_id_test.dart` に `HexId` の決定論テスト（同一入力→同一ID）を作成
@@ -105,7 +105,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 - [ ] T026 [P] `packages/core/lib/src/economy/resource.dart` に資材種別を実装（建設系: 木・石・鉄 / 食料系: 塩・水・野菜・フルーツ・**肉**）
 - [ ] T027 [P] `packages/core/lib/src/economy/inventory.dart` に `Inventory`（資材の加算・消費・上限）を実装
-- [ ] T028 [P] `packages/core/lib/src/terrain/terrain_yield.dart` に地形→資材の一次産出マッピング（森→木、山→石/鉄、水辺→水、海→塩、農地→野菜/フルーツ、市街→産出なし）を実装
+- [ ] T028 [P] `packages/core/lib/src/terrain/terrain_yield.dart` に地形→資材の一次産出マッピング（森→木、山→石/鉄、水辺→水、海→塩、空き地→産出なし）を実装（Issue #70〔2026-09-08〕により農地・市街を地形タイプから除外。野菜/フルーツ/肉は建物産出専用〔`docs/buildings.md` §6〕）
 - [ ] T029 [P] `packages/core/test/economy/terrain_yield_test.dart` に地形→資材マッピングのテーブル駆動テストを作成
 
 ### データ永続化（plan.md §6）
@@ -177,7 +177,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 **Goal**: その土地の地形に応じた資材が手に入り、実在の名所が地図上に現れて「行ってみたい」と思える
 
-**Independent Test**: 森・水辺・市街を含む経路を歩き、地形に応じた資材が付与され、名所オブジェクトが図鑑に記録されること
+**Independent Test**: 森・水辺・山を含む経路を歩き、地形に応じた資材が付与され、名所オブジェクトが図鑑に記録されること（Issue #70〔2026-09-08〕により地形タイプから市街を除外したため、例示を5種の地形に更新）
 
 ### Tests for US2
 
@@ -217,7 +217,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 ### Implementation for US3
 
 - [ ] T082 [US3] `packages/core/lib/src/building/building_type.dart` に建物3系統7種を実装（住宅・マンション / 畑・農場・工場 / リゾート・ミュージアム — `docs/buildings.md` §2）
-- [ ] T083 [US3] `packages/core/lib/src/building/build_rule_service.dart` に建築可否判定を実装（**開示済みかつ空き地**・1マス1建物・**リゾートは海に隣接**・**ミュージアムは市街に隣接**）
+- [ ] T083 [US3] `packages/core/lib/src/building/build_rule_service.dart` に建築可否判定を実装（**開示済みかつ空き地**・1マス1建物・**リゾートは海に隣接**・**ミュージアムはプレイヤーが建設した住宅系建物〔住宅・マンション〕に隣接**〔2026-09-08 代表決定・Issue #70。`docs/buildings.md` §2参照〕）
 - [ ] T084 [US3] `packages/core/lib/src/building/build_cost_service.dart` に建設コスト（建設系資材のみ消費）とアップグレード（Lv.1〜3）を実装（`docs/buildings.md` §4）
 - [ ] T085 [US3] `packages/core/lib/src/population/population_service.dart` に人口メカニクスを実装（建物ごとの人口上限・時間経過で漸増・総人口の閾値到達で産出倍率ボーナス — `docs/buildings.md` §5）
 - [ ] T086 [US3] 生産系建物の産出を実装（畑→野菜/フルーツ、農場→**肉**、工場→街全体の産出効率UP）
