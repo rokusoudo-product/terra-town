@@ -72,10 +72,10 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 **⚠️ CRITICAL**: 使い捨てコード可（`prototype/spike-*` ブランチ）。合格基準は plan.md §8・§14 の数値を用いる
 
-- [ ] T011 Flutter 地図プラグインの候補比較（`maplibre_gl` 系 vs 新 `maplibre`）を実機で行い、選定結果と根拠を `specs/001-mvp/research.md` に記録（plan.md §16 の未確定事項①）
-- [ ] T012 **R1**: 選定プラグインで**ローカル MBTiles 読込**（`mbtiles://`）が動作することを検証し、結果を `specs/001-mvp/research.md` に追記（不可なら PMTiles → ネイティブビュー埋め込みへフォールバック検討）
-- [ ] T013 **R1**: 動的 `addSource`/`addLayer` と `feature-state` 操作が API 経由で可能なことを検証し `specs/001-mvp/research.md` に追記
-- [ ] T014 **R2**: fog of war の GeoJSON 穴あきポリゴン方式で性能基準を計測（開示1ヘクス追加の更新 **200ms 以内** / 1万ヘクス開示状態でパン・ズーム **55fps 以上**）し、結果を `specs/001-mvp/research.md` に追記
+- [x] T011 Flutter 地図プラグインの候補比較（`maplibre_gl` 系 vs 新 `maplibre`）を実機で行い、選定結果と根拠を `specs/001-mvp/research.md` に記録（plan.md §16 の未確定事項①）→ **完了（2026-09-08・Issue #56 追随、実測は2026-08-13）**: `maplibre_gl`（`release-0.27.0` 相当）を採用。fog of war の合格基準（§6.4）を満たす唯一の構成であるため（research.md §6.1）
+- [ ] T012 **R1**: 選定プラグインで**ローカル MBTiles 読込**（`mbtiles://`）が動作することを検証し、結果を `specs/001-mvp/research.md` に追記（不可なら PMTiles → ネイティブビュー埋め込みへフォールバック検討）→ **判定不能（2026-09-08・Issue #56 追随）**: 検証ハーネス（`spikes/map_spike_gl/lib/map_probe_page.dart`）がベクタタイルのフィクスチャを `RasterSourceProperties` で読み込む実装になっていた不具合により、プラグインの能力かハーネスの作りかを切り分けられず判定不能（research.md §6.2）。**ハーネスをベクタソース対応に修正したうえでの再検証が必要**。未チェックのまま残す
+- [x] T013 **R1**: 動的 `addSource`/`addLayer` と `feature-state` 操作が API 経由で可能なことを検証し `specs/001-mvp/research.md` に追記 → **完了（2026-09-08・Issue #56 追随、実測は2026-08-13）**: `addGeoJsonSource`/`addLayer` は動作し、`feature-state`（`setFeatureState`）は `release-0.27.0` で Android 実機動作を確認（0.26.2 は Android 未実装）。research.md §6.3
+- [ ] T014 **R2**: fog of war の feature-state 方式（plan.md §8 採用方式）で性能基準を計測し、結果を `specs/001-mvp/research.md` §6.4 に記録済み（実測は2026-08-13〜14）。**完了項目**: 開示1ヘクス追加の更新 **200ms 以内** → ✅達成（feature-state方式 max 37.7ms）／ヘクス1万個開示状態での**更新ループ中**fps（基準55fps以上） → ✅達成（56.6fps）。**残る未計測項目（research.md §6.4「残る未計測事項」・未チェックのまま残す）**: 手動パン・ズーム時のfps（上記は更新ループ中の計測のみ）／スタイル再読み込み時のちらつきの有無。※代表決定（2026-09-07）により、部分完了タスクはチェックを入れず注記で完了/残を併記する（全項目完了時のみチェックする）
 - [ ] T015 **R3**: Kotlin foreground service で1時間の実歩行（都市部マルチパス含む）を記録し、電池消費と測位品質を計測。距離しきい値の初期値を決定して `specs/001-mvp/research.md` に記録（plan.md §16 の未確定事項②の一部）
 - [ ] T016 **R4**: `tools/pack-builder/` の試作で OSM 抽出 → 地形事前計算 → SQLite 出力を1エリア分通し、`docs/terrain.md` §5 の判定ルールどおりの分類が出ることを検証
 - [ ] T017 **R5**: モック位置検出と速度判定（移動平均/カルマン平滑後）を試作し、**正規歩行で報酬没収が起きない**ことを実歩行データで確認
@@ -123,10 +123,10 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 ### 地域パック生成パイプライン（plan.md §3・§4）
 
 - [ ] T039 `tools/pack-builder/` に Planetiler/osmium ベースの生成スクリプトを実装（OSM日本抽出 → ベクタタイル MBTiles）。1エリアのヘクス数が暫定上限 **30,000**（plan.md §3.5・fog of war ソース構築2秒以内が主基準）を超える場合はエリア分割を行うこと
-- [ ] T040 `tools/pack-builder/` に **地形属性の事前計算**を実装（`docs/terrain.md` §5 の OSMタグ→地形タイプ判定ルールを細分グリッドセルに適用 → §4 の多数決でヘクスに集約 → SQLite `cell_terrain`/`hex_terrain`）
+- [ ] T040 `tools/pack-builder/` に **地形属性の事前計算**を実装（`docs/terrain.md` §5 の OSMタグ→地形タイプ判定ルールを細分グリッドセルに適用 → §4 の多数決でヘクスに集約 → SQLite `cell_terrain`/`hex_terrain`）。**要件追記（2026-09-08・Issue #56）**: fog of war の fill レイヤに載せる各ヘクス Feature は、GeoJSON 出力時に**直下に整数 `id`** を持たせること。`promoteId` は Web 専用で Android では機能しないため、`properties` からの昇格では代用できない（plan.md §8・research.md §6.3）。Issue #38 着手前に本要件を満たす設計にすること
 - [ ] T041 [P] `tools/pack-builder/` に行政区域ポリゴン（国土数値情報 N03・トポロジ保持簡略化）の取り込みを実装
 - [ ] T042 [P] `tools/pack-builder/` に名所 POI 抽出（OSM 観光POI → SQLite `poi`）を実装
-- [ ] T043 [P] `tools/pack-builder/` にパックメタ（`pack_version`）の付与を実装
+- [ ] T043 [P] `tools/pack-builder/` にパックメタ（`pack_version`）の付与を実装。**要件追記（2026-09-08・Issue #56）**: fog of war の fill レイヤに載せる各ヘクス Feature の**直下に整数 `id`** を付与すること（`promoteId` は Android 非対応 — plan.md §8・research.md §6.3）。Issue #38 着手前に落としておく
 - [ ] T044 バーティカルスライス対象エリア（**代表の生活圏を含む約5km四方**・水辺/緑地/農地/市街が混在 — plan.md §15）のパックを生成し、`app/assets/` に**同梱**する。ヘクス数が暫定上限 **30,000**（plan.md §3.5）を超える場合はエリア分割して同梱すること
 - [ ] T045 [P] パック生成を CI で再現可能にする（`.github/workflows/pack-build.yml`）
 
@@ -158,7 +158,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 - [ ] T054 [US1] `packages/core/lib/src/disclosure/disclosure_service.dart` に開示判定ロジック（通過グリッドセル→ヘクス多数決集約→`disclosed_hex` 更新）を実装。**GPS/地図に依存しない純粋ロジック**
 - [ ] T055 [US1] `packages/location/lib/src/map/map_view.dart` に MapLibre 地図表示（同梱 MBTiles をローカル読込）を実装
-- [ ] T056 [US1] `packages/location/lib/src/map/fog_of_war_layer.dart` に fog of war を実装（未開示領域を穴あきポリゴン1枚の GeoJSON として差分更新・union は isolate・ビューポート近傍に限定 — plan.md §8）
+- [ ] T056 [US1] `packages/location/lib/src/map/fog_of_war_layer.dart` に fog of war を実装（**採用方式・2026-09-08 Issue #56 追随**: 全ヘクスを起動時／エリア切替時に**1回だけ** `addGeoJsonSource` でソースに追加し、開示は fill レイヤの `fill-opacity` を `feature-state`（`setFeatureState`）のトグルで切り替える。各 Feature は直下に整数 `id` を持たせる（`promoteId` は Android 非対応）。`maplibre_gl` 0.27.0 以降が必要（0.26.2 は Android で `setFeatureState` が `UnimplementedError`）— plan.md §8。**不採用（経緯）**: 「穴あきポリゴン1枚」の GeoJSON 差分更新は実機計測で性能基準未達（FAIL）のため不採用 — plan.md §8・research.md §6.4）
 - [ ] T057 [US1] `app/lib/features/map/map_screen.dart` にマップ画面を実装（`DESIGN.md` のトークンに準拠。色・サイズの直書きをしない）
 - [ ] T058 [US1] 現在地表示と地図追従を実装（`app/lib/features/map/`）
 - [ ] T059 [US1] 位置記録サービスの起動/停止と権限リクエスト（フォアグラウンド位置のみ）を実装（`app/lib/features/permissions/`）
