@@ -12,6 +12,8 @@ library;
 
 import 'package:terra_town_core/terra_town_core.dart';
 
+export 'src/map/fog_of_war_layer.dart';
+
 /// 土台の疎通確認用。location から core を参照できることを示す。
 /// 逆方向（core -> location）は tools/check_import_direction.sh が禁止する。
 String locationScaffoldMarker() => 'terra_town_location -> $coreScaffoldMarker';

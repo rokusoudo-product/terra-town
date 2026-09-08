@@ -11,6 +11,7 @@ GPS×実地図の街育成ゲーム。Android 先行・将来 iOS。spec-kit（�
 
 ## アーキテクチャ制約（必守）
 - `core/`（ゲームロジックの純粋実装）は `location/`（GPS・地図SDK）を **import しない**一方向依存（`C:\Users\moets\.claude\GPS_ARCHITECTURE.md` 準拠）。core は別 Dart パッケージ（`packages/core`）で物理分離する。
+- **地図レイヤーの色は `app` から注入する。`location` は配色を知らない**（Issue #57）。`app` が DESIGN.md のトークンから16進文字列・αを導出し、`location` の地図レイヤーへコンストラクタ引数で渡す。
 - 技術スタック: Flutter ＋ MapLibre GL Native ＋ 機微処理は Kotlin ネイティブ（Pigeon channel）。
 - MVP は端末内完結（ステートフルなBEなし）。タイル・地形属性・区画・POI は「地域パック」に束ねる（plan.md §3・§4）。
 - 資材分類は実行時タイルクエリではなく **CI で事前計算**した属性を参照する（決定論保証。plan.md §4）。

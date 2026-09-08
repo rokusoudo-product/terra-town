@@ -158,7 +158,7 @@ terra-town/
 > 根拠は `specs/001-mvp/research.md` §6.4（Pixel 7a 実測）。**本節の変更は代表の承認を要する。**
 
 - **採用方式: 全ヘクスを一度だけソースに追加し、開示は `feature-state` のトグルで表現する**。
-  - 起動時（またはエリア切替時）に対象ヘクスを **1回だけ** `addGeoJsonSource` で追加し、fill レイヤの `fill-opacity` を `['case', ['boolean', ['feature-state', 'revealed'], false], 0.0, 0.62]` のような **feature-state 式**で切り替える（0.62 は DESIGN.md の fog トークンの α）。
+  - 起動時（またはエリア切替時）に対象ヘクスを **1回だけ** `addGeoJsonSource` で追加し、fill レイヤの `fill-opacity` を `['case', ['boolean', ['feature-state', 'revealed'], false], 0.0, 0.62]` のような **feature-state 式**で切り替える（0.62 は DESIGN.md の fog トークンの α。ここでは実装例として値を直書きしているが、実装では `location` がこの値を直書きしないこと。`app`（composition root）が DESIGN.md の `fog` トークンから導出し、`FogOfWarLayer` のコンストラクタ引数として注入する — Issue #57・注入方式）。
   - 1ヘクスの開示は `setFeatureState(sourceId, featureId, {'revealed': true})` の1回だけ。**更新コストが開示済みヘクス数に依存しない（O(1)）**。
   - **各 Feature は直下に整数 `id` を持つ必要がある**。`promoteId` は Web 専用で Android では機能しないため、`properties` からの昇格は使えない。→ **地域パック生成（`tools/pack-builder/` ・ Issue #38）はこの id を埋め込む前提で設計すること**。
   - **`maplibre_gl` 0.27.0 以降が必要**（0.26.2 の Android は `setFeatureState` が `UnimplementedError`）。**0.27.0 は 2026-08-19 に pub.dev へ公開済み**（`latest=0.27.0`）。git 依存（`ref: release-0.27.0` 固定）は採らず、`packages/location/pubspec.yaml` で pub.dev 版 `maplibre_gl: ^0.27.0` を採用する（代表決定 2026-09-07・Issue #55）。
