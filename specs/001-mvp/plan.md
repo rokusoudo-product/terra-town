@@ -233,7 +233,9 @@ terra-town/
 **R1 追記（2026-09-08、Issue #55 / PR #66 / 追跡 #67）**: R1 は「ローカルMBTiles読込・動的レイヤ操作・feature-state という必要APIが露出しているか」を検証対象として想定していたが、`maplibre_gl` 0.27.0 を実際に組み込んで最初に詰まったのはその手前の**ビルド統合**だった。しかもビルド統合には独立した2つの詰まりどころ（Blocker）があることが判明した。
 
 - **Blocker A（対応済み）**: AGP 9.0.1 ＋ `android.builtInKotlin=false` の組み合わせで `flutter build apk --debug` が `Could not find method kotlin()` で失敗。暫定対応として `app/android/gradle.properties` の `android.builtInKotlin` を `true` に変更し解消。Flutter が非推奨として案内する互換シムであり恒久対応ではないため、撤去条件・撤去タイミングは Issue #67 で追跡する。
-- **Blocker B（未解決）**: `maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを AGP バージョンに関係なく無条件で `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、JDK 21 でのビルドが別途必須。本プロジェクトが正本とする JDK 17（`ci.yml`）ではビルドできず、**CI は本PR時点でも依然 red**。Issue #67（Blocker A の撤去）とは独立した制約で、JDK をプロジェクト既定として21に上げるかどうかは別途代表判断が必要（詳細は research.md §6.1、PR #66）。
+- **Blocker B（解決済み・2026-09-08 代表決定）**: `maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを AGP バージョンに関係なく無条件で `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、JDK 21 でのビルドが別途必須だった。**JDK をプロジェクト既定として 17 → 21 へ引き上げることを決定した**（`ci.yml` の `java-version`・`docs/dev-setup.md` §2 を同一PR＝#66 で更新済み、`tools/check_toolchain_versions.sh` PASS 確認済み）。
+
+  **この決定は §8 の fog of war 方式決定から強制されるものである**: §8 で承認済みの feature-state 方式は Android で `setFeatureState` が動く `maplibre_gl` 0.27.0 以降を前提としており（0.26.2 は `UnimplementedError`）、その 0.27.0 が JDK 21 を無条件で要求する。JDK 21 を採らない場合は §8 の fog of war 方式の決定そのものを開き直す必要があり、割に合わないと判断した。JDK 21 は LTS で AGP 9.0.1 / Kotlin 2.3.20 いずれとも対応する。Issue #67（Blocker A `builtInKotlin=true` の撤去条件）とは独立した制約で、上流の Built-in Kotlin 対応が進んでも本件（JDK 21 要求）は解消しない。詳細は research.md §6.1。
 
 R1 本来の検証項目（API成熟度）は本対応の範囲外で、未実施のまま。
 

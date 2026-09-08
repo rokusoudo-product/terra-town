@@ -4,7 +4,7 @@ project: terra-town
 doc: 開発環境セットアップ手順
 status: approved
 created: 2026-07-30
-updated: 2026-08-13
+updated: 2026-09-08
 related:
   - specs/001-mvp/plan.md
   - specs/001-mvp/tasks.md
@@ -28,7 +28,7 @@ related:
 `plan.md` §15 のバーティカルスライス完了条件が「実際に30分歩いて…」である以上、
 検証は**実機を屋外で歩かせる**のが前提になる。エミュレータの重要度が低い。
 
-## 2. 導入済みのバージョン（2026-07-30 時点の実測）
+## 2. 導入済みのバージョン（2026-07-30 時点の実測、JDK 行のみ 2026-09-08 に実態へ更新）
 
 | 項目 | バージョン / パス |
 |------|------------------|
@@ -39,7 +39,7 @@ related:
 | Android SDK Platform | android-36 |
 | Android SDK Build-Tools | 37.0.0 |
 | Android SDK Platform-Tools | 37.0.0 |
-| JDK | OpenJDK 17.0.11（sdkman 管理） |
+| JDK | OpenJDK 21.0.12（Ubuntu 24.04 システムパッケージ `openjdk-21-jdk-headless`。`/usr/bin/java` → `update-alternatives` 経由。詳細・sdkman との関係は下記注記） |
 
 `flutter doctor` の結果:
 
@@ -54,6 +54,33 @@ Flutter バージョンを上げる（例: stable channel の更新に追従す�
 ローカルと CI で異なるバージョンのまま乖離する。
 この乖離は `tools/check_toolchain_versions.sh` が CI で機械的に検出する（Issue #59）。
 **正本（enforced value）は `ci.yml` 側であり、乖離時はこの表を `ci.yml` の値に合わせて修正すること。**
+
+### ⚠️ JDK 行の実態（2026-09-08 確認・sdkman の記述は現状と合っていなかった）
+
+本表の JDK 行は従来「OpenJDK 17.0.11（sdkman 管理）」としていたが、2026-09-08 に
+`java -version` を実際に確認したところ **OpenJDK 21.0.12** だった。調査の結果、
+「sdkman 管理」という記述はもはや正確ではなく、次の2系統が併存している状態だと判明した。
+
+- **対話シェル（`bash -i` など、人間が WSL ターミナルを開いて作業する場合）**: `~/.bashrc` の
+  sdkman 初期化行（`sdkman-init.sh`）が実行され、`java` は sdkman 管理の
+  **17.0.11-tem**（`~/.sdkman/candidates/java/current` が指す版）に解決される。
+- **非対話シェル（`bash -lc "..."` など。CI・エージェント（po_agent 等）からの実行はすべてこちら）**:
+  Ubuntu の `.bashrc` 冒頭にある非対話ガード（`case $- in *i*) ;; *) return;; esac`）により
+  sdkman の初期化行に到達せず、`java` は `update-alternatives` が指す
+  **Ubuntu 24.04 システムパッケージの OpenJDK 21.0.12**（`openjdk-21-jdk-headless`、
+  `/usr/bin/java` → `/etc/alternatives/java` → `/usr/lib/jvm/java-21-openjdk-amd64`）に解決される。
+
+**これが Blocker B の混乱の原因そのものだった**（詳細: `specs/001-mvp/research.md` §6.1）。
+前任のエージェントが最初に「ローカルでビルド成功」と報告したのは非対話シェル経由で
+JDK21 に偶然フォールバックしていたためで、対話シェル相当の sdkman JDK17 を明示的に
+使って再現するとCIと同じ `invalid source release: 21` で失敗した。
+
+プロジェクトの正本を JDK 21 に統一した（2026-09-08 代表決定。§3「`maplibre_gl` 0.27.0 は
+JDK 21 を要求する」参照）ため、
+**この対話/非対話の分岐自体はもう実害を生まない**（どちらの経路でも 21 系に統一するのが
+本来あるべき姿）が、sdkman 側の候補は 17.0.11-tem のまま残っており、対話シェルで
+`sdk default java 21.x-tem` 相当の設定変更は未実施。sdkman 側の追従（21系候補への切替、
+または sdkman 運用自体の終了）は本PRのスコープ外とし、別Issue化を推奨する。
 
 ## 3. セットアップ手順（新しい環境で再現する場合）
 
@@ -114,12 +141,12 @@ flutter doctor
   `tools/check_toolchain_versions.sh`（Issue #59, Flutter/JDK のバージョン整合チェック）を
   Flutter バージョン変更時に実行する運用と合わせて、本フラグの要否もそのタイミングで再評価する。
 
-### ⚠️⚠️ `maplibre_gl` 0.27.0 は JDK 21 を要求する（未解決・2026-09-08・CIはred）
+### ⚠️ `maplibre_gl` 0.27.0 は JDK 21 を要求する（解決済み・2026-09-08・JDK 21 に統一）
 
 `android.builtInKotlin=true`（上記）だけでは `flutter build apk` は通らない。
 `maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを
 **AGPのバージョンに関係なく無条件で** `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、
-本項目の §2 が正本とする JDK 17（sdkman管理・`ci.yml` の `java-version: "17"`）でビルドすると
+JDK 17 でビルドすると
 
 ```
 Execution failed for task ':maplibre_gl:compileDebugJavaWithJavac'.
@@ -127,14 +154,25 @@ Execution failed for task ':maplibre_gl:compileDebugJavaWithJavac'.
     error: invalid source release: 21
 ```
 
-で失敗する。WSL環境の `java` コマンドが `update-alternatives` 経由でシステムJDK 21 に
-解決される場合はこのエラーに気づかず「ビルドが通った」ように見えてしまう罠がある
-（本項目のsdkman管理JDK 17を明示的に使わないと再現しない）ので注意。**これは
-Issue #67（`builtInKotlin` の撤去条件）とは独立した別の制約**で、上流が Built-in Kotlin に
-対応しても解消しない。JDK をプロジェクト既定として 21 に上げるべきかどうかは
-`ci.yml` と本表（§2）を同一PRで変更する規模の判断であり、代表判断が必要
-（詳細: `specs/001-mvp/research.md` §6.1、PR #66）。**現時点でこの依存を組み込んだ状態の
-CIビルドは red のまま。**
+で失敗する。**これは Issue #67（`builtInKotlin` の撤去条件）とは独立した別の制約**で、
+上流が Built-in Kotlin に対応しても解消しない。
+
+**【代表決定・2026-09-08】プロジェクトの正本 JDK を 17 → 21 に引き上げた。**
+根拠: ゲート②で承認済みの feature-state 方式の fog of war（`plan.md` §8）を実現するには
+Android で `setFeatureState` が動く `maplibre_gl` 0.27.0 以降が必須（0.26.2 は
+`UnimplementedError`）で、その 0.27.0 が JDK 21 を無条件で要求する。JDK 21 を採らない場合は
+ゲート②の fog of war 方式の決定そのものを開き直す必要があり、割に合わないと判断した。
+JDK 21 は LTS で AGP 9.0.1 / Kotlin 2.3.20 いずれも対応する。`ci.yml` の `java-version` を
+`"21"` に変更し、本表（§2）も実態（21）に更新済み。詳細: `specs/001-mvp/research.md` §6.1、
+`specs/001-mvp/plan.md` §14 R1 追記、PR #66。
+
+**この一件が明らかにした `tools/check_toolchain_versions.sh` の限界**（Issue #59）:
+このチェックは `ci.yml` と本ドキュメント §2 という**2つの文書間の一致**を検査するものであり、
+**文書と実環境（実際にインストールされている JDK）のズレは検出できない**。今回は
+両文書とも JDK 17 の記述で一致していたためチェック自体は PASS していたが、
+（上記「JDK 行の実態」の節で述べた通り）非対話シェルの実環境は JDK 21 に解決されており、
+実際にビルドを壊していたのはこの「文書 vs 実環境」のズレだった。文書間の一致チェックだけでは
+この種の問題は防げない、という限界として記録しておく。
 
 ## 4. PATH の永続化
 
