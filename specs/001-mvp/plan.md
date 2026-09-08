@@ -161,7 +161,7 @@ terra-town/
   - 起動時（またはエリア切替時）に対象ヘクスを **1回だけ** `addGeoJsonSource` で追加し、fill レイヤの `fill-opacity` を `['case', ['boolean', ['feature-state', 'revealed'], false], 0.0, 0.62]` のような **feature-state 式**で切り替える（0.62 は DESIGN.md の fog トークンの α）。
   - 1ヘクスの開示は `setFeatureState(sourceId, featureId, {'revealed': true})` の1回だけ。**更新コストが開示済みヘクス数に依存しない（O(1)）**。
   - **各 Feature は直下に整数 `id` を持つ必要がある**。`promoteId` は Web 専用で Android では機能しないため、`properties` からの昇格は使えない。→ **地域パック生成（`tools/pack-builder/` ・ Issue #38）はこの id を埋め込む前提で設計すること**。
-  - **`maplibre_gl` 0.27.0 以降が必要**（0.26.2 の Android は `setFeatureState` が `UnimplementedError`）。0.27.0 は 2026-08-13 時点で **pub.dev 未公開**（上流 PR #956 が open）。当面は git 依存で `ref: release-0.27.0` に固定するか、リリースを待つ。
+  - **`maplibre_gl` 0.27.0 以降が必要**（0.26.2 の Android は `setFeatureState` が `UnimplementedError`）。**0.27.0 は 2026-08-19 に pub.dev へ公開済み**（`latest=0.27.0`）。git 依存（`ref: release-0.27.0` 固定）は採らず、`packages/location/pubspec.yaml` で pub.dev 版 `maplibre_gl: ^0.27.0` を採用する（代表決定 2026-09-07・Issue #55）。
 - **不採用: 「穴あきポリゴン1枚」の GeoJSON 差分更新**（旧第一案）。実測で合格基準を大きく下回った（research.md §6.4）。
   - 更新のたびに GeoJSON 全体を再エンコードするため、1回の更新が O(n)・全体で O(n²) になる。
   - `maplibre_gl` 0.27.0 の `compute` オフロード（上流 #366 対応）は UI の応答性を改善するが**総コストはむしろ増える**（上流実装コメント: "This buys a responsive UI, not speed"）。バージョンでは解決しない。
@@ -223,12 +223,21 @@ terra-town/
 
 | # | リスク | 検証（合格基準） | 対応 Issue |
 |---|--------|-----------------|-----------|
-| R1 | **Flutter×MapLibre プラグイン成熟度**（最大の未知数） | ローカルMBTiles読込＋動的レイヤ操作＋feature-state が通るか。落ちたら B/A 再検討（ネイティブビュー埋め込み深掘り） | #24 |
+| R1 | **Flutter×MapLibre プラグイン成熟度**（最大の未知数） | ローカルMBTiles読込＋動的レイヤ操作＋feature-state が通るか。落ちたら B/A 再検討（ネイティブビュー埋め込み深掘り） | #24, #55, #67 |
 | R2 | fog of war 描画性能 | §8 の数値基準（更新200ms・1万セルで55fps） | #24 |
 | R3 | 電池とトラッキング品質 | 1時間実歩行（都市部マルチパス含む）で許容範囲か | #10 |
 | R4 | 資材分類パイプライン | OSM抽出→事前計算→パックが期待どおりの分類を出すか | 未起票 |
 | R5 | モック/速度判定の誤検出率 | 正規歩行で報酬没収が起きないか | #9 |
 | R6 | Health Connect 疎通 | 読み取り＋オプトインUX | #13 |
+
+**R1 追記（2026-09-08、Issue #55 / PR #66 / 追跡 #67）**: R1 は「ローカルMBTiles読込・動的レイヤ操作・feature-state という必要APIが露出しているか」を検証対象として想定していたが、`maplibre_gl` 0.27.0 を実際に組み込んで最初に詰まったのはその手前の**ビルド統合**だった。しかもビルド統合には独立した2つの詰まりどころ（Blocker）があることが判明した。
+
+- **Blocker A（対応済み）**: AGP 9.0.1 ＋ `android.builtInKotlin=false` の組み合わせで `flutter build apk --debug` が `Could not find method kotlin()` で失敗。暫定対応として `app/android/gradle.properties` の `android.builtInKotlin` を `true` に変更し解消。Flutter が非推奨として案内する互換シムであり恒久対応ではないため、撤去条件・撤去タイミングは Issue #67 で追跡する。
+- **Blocker B（解決済み・2026-09-08 代表決定）**: `maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを AGP バージョンに関係なく無条件で `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、JDK 21 でのビルドが別途必須だった。**JDK をプロジェクト既定として 17 → 21 へ引き上げることを決定した**（`ci.yml` の `java-version`・`docs/dev-setup.md` §2 を同一PR＝#66 で更新済み、`tools/check_toolchain_versions.sh` PASS 確認済み）。
+
+  **この決定は §8 の fog of war 方式決定から強制されるものである**: §8 で承認済みの feature-state 方式は Android で `setFeatureState` が動く `maplibre_gl` 0.27.0 以降を前提としており（0.26.2 は `UnimplementedError`）、その 0.27.0 が JDK 21 を無条件で要求する。JDK 21 を採らない場合は §8 の fog of war 方式の決定そのものを開き直す必要があり、割に合わないと判断した。JDK 21 は LTS で AGP 9.0.1 / Kotlin 2.3.20 いずれとも対応する。Issue #67（Blocker A `builtInKotlin=true` の撤去条件）とは独立した制約で、上流の Built-in Kotlin 対応が進んでも本件（JDK 21 要求）は解消しない。詳細は research.md §6.1。
+
+R1 本来の検証項目（API成熟度）は本対応の範囲外で、未実施のまま。
 
 ## 15. バーティカルスライス（最初に完成品質で作る1エリア）
 

@@ -186,7 +186,26 @@ plan.md §1 が最大の実装リスクとして挙げた2系統を比較した�
 - [x] **最終選定結果: `maplibre_gl`（`release-0.27.0` 相当）を推奨**
 - [x] **選定理由**: fog of war の合格基準（§6.4）を満たす唯一の構成が「`maplibre_gl` 0.27.0 の feature-state を使う第二案」であったため。0.26.2 では feature-state が Android 未実装で、第二案自体が成立しない。josxha 版は feature-state の実装根拠が見つかっておらず（§3.2）、同じ方式を取れる見込みがない
 
-> **未リリース版への依存という制約が残る。** pub.dev 版では合格構成を組めないため、当面は git 依存（`ref: release-0.27.0`）で固定するか、0.27.0 のリリースを待つ判断が必要。
+> **【2026-09-08 更新】未リリース版依存の制約は解消した。** `maplibre_gl` 0.27.0 は 2026-08-19 に pub.dev へ公開済み（`latest=0.27.0`）。`packages/location/pubspec.yaml` は git 依存（`ref: release-0.27.0`）ではなく pub.dev 版 `maplibre_gl: ^0.27.0` を採用する（代表決定 2026-09-07・Issue #55）。
+>
+> 上流リリースノート（[v0.27.0](https://github.com/maplibre/flutter-maplibre-gl/releases/tag/v0.27.0)）で、本節が前提とする2点がいずれも0.27.0に含まれることを確認した。
+> - Android の feature-state 対応（上流 #889）: 「**Android**: feature state (`setFeatureState`, `getFeatureState`, `removeFeatureState`) works on Android as well as web ... `promoteId` stays web-only, so Android features need a top-level `id` in the GeoJSON (#889)」
+> - GeoJSON エンコードのバックグラウンド化（上流 #366）: 「**Android, iOS**: adding or updating a GeoJSON source with a large payload no longer blocks the UI for the whole encode ... encoded in the background, cutting the blocking time by a factor of two to three (#366)」
+>
+> また同リリースで Android の MapLibre Native が 13.3.0 → 13.5.0 に上がっている。**Android ビルド統合を実際に確認した結果、`flutter build apk --debug` が失敗することが判明した**（実機でのR1/R2再計測は行わない。地図表示・fog of war の実装本体は T055・T056 のスコープ）。
+>
+> **【ビルド統合の検証結果（2026-09-08・Issue #55）】** Flutter 3.44.8 の既定テンプレート（AGP 9.0.1・`android.builtInKotlin=false`）で `flutter build apk --debug` を実行すると、`:maplibre_gl` の評価で `Could not find method kotlin() for arguments [...] on project ':maplibre_gl'`（`maplibre_gl-0.27.0/android/build.gradle` L77）で失敗する。原因は上流の `build.gradle` が Kotlin Gradle Plugin（KGP）の適用を `agpMajor < 9` で分岐しており、AGP 9 以降は「AGP 自身が Kotlin を提供する」前提で KGP を適用しないため。しかし Flutter 3.44.8 は `android.builtInKotlin` を既定で `false` にする移行を行っており（[migrate-to-built-in-kotlin](https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin)）、この既定のままでは AGP 側の Kotlin 提供も KGP 適用もどちらも起きず、`kotlin {}` 拡張が存在しない。
+> 診断のため `app/android/gradle.properties` の `android.builtInKotlin` を一時的に `true` に切り替えると、**ローカル環境（後述するがJDK21が実際に使われていた環境）では** `flutter build apk --debug` が成功する（`flutter pub deps` 解決バージョンは 0.27.0 系）。ただし Flutter はこのとき次の警告を出す: 「Applying the Kotlin Android Plugin (KGP) was unsuccessful... Future versions of Flutter will fail to build if your app uses plugins that apply KGP.」つまりこれは Flutter が非推奨として扱っている互換シムであり、恒久対応ではない。`minSdk` は今回変更不要（Flutter 既定 `minSdkVersion=24` が `maplibre_gl` の要求 `minSdkVersion=21` を上回るため）。
+>
+> **【代表決定・2026-09-08】** 暫定対応として `android.builtInKotlin=true` を採用し、コミットした（Blocker A への対応）。他案を採らなかった理由: (1) 上流 `maplibre/flutter-maplibre-gl` の対応を待つ案は不採用——`builtInKotlin`／AGP 9／KGP で検索して該当 Issue が0件（open PR も dependabot の依存バンプのみ、調査日 2026-09-08）で、待っても直る見込みがない。(2) AGP を9未満へ戻す案も不採用——Flutter既定から外れツールチェーンの方向（AGP 9）に逆行し、いずれAGP 9へ戻す移行コストが二重になる（**なお本案が実際に動くかは未検証**）。(1)を選んだ根拠は、1行・可逆・現時点でアプリ側のKotlinコードが `MainActivity.kt` のみのため影響範囲が最小な点。Kotlinの本番実装（T046 foreground service・Pigeon）着手時に再評価する。撤去条件・追跡は **Issue #67**。
+>
+> **【Blocker B（未解決・2026-09-08発見）: `maplibre_gl` 0.27.0 は JDK 21 を要求する。CIは依然red。】** `android.builtInKotlin=true` をコミットして CI（`ci.yml` の `java-version: "17"`）で実行したところ、Blocker A（`kotlin()` メソッド未検出）は解消したが、別のエラーで `flutter build apk --debug` が失敗した: `Execution failed for task ':maplibre_gl:compileDebugJavaWithJavac'. > Java compilation initialization error: error: invalid source release: 21`。原因は `maplibre_gl-0.27.0/android/build.gradle` が `compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }` と `kotlin { compilerOptions { jvmTarget = ...JVM_21 } }` を**AGPのバージョンに関係なく無条件で**指定していること（`agpMajor < 9` 分岐の対象は KGP 適用可否のみで、Java/Kotlinのターゲットバージョンはこの分岐の外にある）。つまり `maplibre_gl` 0.27.0 を組み込むには、Blocker A への対応（本コミットの `builtInKotlin=true`）に加えて **JDK 21 でのビルドが別途必須**であり、これは Issue #67（Blocker A の暫定対応の撤去）とは独立した制約で、上流がBuilt-in Kotlinに対応しても解消しない。
+>
+> ローカルで最初に「成功」と報告した検証（上記パラグラフ）は、このWSL環境の `java` が `update-alternatives` 経由でシステムJDK 21（`update-alternatives`のデフォルト）に解決されていたために偶然通っていたことが判明した。`docs/dev-setup.md` §2が正本として記載する sdkman管理のJDK 17.0.11（`~/.sdkman/candidates/java/17.0.11-tem`）を明示的に使って再現したところ、CIと同じ `invalid source release: 21` で失敗することを確認した（2026-09-08）。**したがって本PRの時点でCIはBlocker Bにより依然redであり、「ビルドが通った」と言えるのはJDK 21環境に限られる。** JDK をプロジェクト既定として21へ上げる（`ci.yml` と `docs/dev-setup.md` §2 を同一PRで更新し `tools/check_toolchain_versions.sh` の対象を21に更新）べきかどうかは、Issue #67の暫定対応の範囲を超える別のトレードオフ判断であり、代表判断が必要（PR #66参照）。
+>
+> **【代表決定・2026-09-08、追記】JDK を 17 → 21 に引き上げることを決定した。** 根拠: ゲート②承認済みの feature-state 方式の fog of war（`plan.md` §8）には `maplibre_gl` 0.27.0 以降の `setFeatureState`（Android実装）が必須で、その 0.27.0 が JDK 21 を無条件で要求する以上、JDK 21 を採らない選択肢は事実上「ゲート②の fog of war 方式の決定を開き直す」ことを意味し割に合わない。JDK 21 は LTS で AGP 9.0.1 / Kotlin 2.3.20 とも対応関係があり、ローカル環境（システムJDK 21）で `flutter build apk --debug` の成功も実証済み。`ci.yml` の `java-version` を `"21"` に、`docs/dev-setup.md` §2 の JDK 行を実態（21.0.12・Ubuntu システムパッケージ）に更新し、`tools/check_toolchain_versions.sh` の PASS を確認した（同一PR＝#66）。
+>
+> **本件が明らかにした `tools/check_toolchain_versions.sh`（Issue #59）の限界**: このチェックは `ci.yml` と `docs/dev-setup.md` §2 という**2つの文書間の一致**を検査するものであり、**文書と実環境のズレは検出できない**。今回は両文書とも JDK 17 の記述で一致していたためチェックはPASSしていたが、実際にビルドを壊していたのは「両文書は17で揃っているが、（非対話シェルの）実環境は21である」というズレそのものだった。文書間整合チェックは「ドキュメントの自己矛盾」は防げても「ドキュメントと現実の乖離」までは防げない、という限界として記録する。
 
 ### 6.2 T012 / R1: ローカルMBTiles読込
 

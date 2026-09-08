@@ -16,10 +16,15 @@ jobs:
       # 乖離時は docs/dev-setup.md 側をこの値に合わせて更新する。
       # Flutter バージョンを上げるときは docs/dev-setup.md §2 も同じ PR で更新する。
       # ci.yml と docs/dev-setup.md §2 の乖離は tools/check_toolchain_versions.sh が機械的に検出する（Issue #59）。
+      # 17→21（2026-09-08・代表決定・Issue #55 / PR #66）: maplibre_gl 0.27.0
+      # （plan.md §8 のゲート②承認済み feature-state 方式に必須）が、
+      # Java/Kotlin のコンパイルターゲットを AGP バージョンに関係なく無条件で
+      # JDK 21 に固定しているため（maplibre_gl-0.27.0/android/build.gradle）。
+      # 詳細は specs/001-mvp/research.md §6.1・plan.md §14 R1 追記。
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       # flutter-version: この値が正本（enforced value）。docs/dev-setup.md §2 の実測値と
       # 一致させる（固定）。乖離時は docs/dev-setup.md 側をこの値に合わせて更新する。
