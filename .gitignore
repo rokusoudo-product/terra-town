@@ -44,6 +44,15 @@ Thumbs.db
 tools/pack-builder/out/
 *.mbtiles
 *.pmtiles
+# tools/pack-builder/ の最小プロトタイプ（Issue #38）専用の venv・OSM抽出キャッシュ・SQLite出力
+tools/pack-builder/.venv/
+tools/pack-builder/data_cache/
+tools/pack-builder/*.sqlite
+*.osm.pbf
+
+# --- Python（tools/配下の各種スクリプト共通） ---
+__pycache__/
+*.pyc
 
 # --- SVG→PNG 変換ツール（Issue #28） ---
 # tools/rasterize_assets.py 専用の venv。リポジトリ専用のため他プロジェクトと共有しない
