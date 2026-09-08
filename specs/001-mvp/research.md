@@ -186,7 +186,16 @@ plan.md §1 が最大の実装リスクとして挙げた2系統を比較した�
 - [x] **最終選定結果: `maplibre_gl`（`release-0.27.0` 相当）を推奨**
 - [x] **選定理由**: fog of war の合格基準（§6.4）を満たす唯一の構成が「`maplibre_gl` 0.27.0 の feature-state を使う第二案」であったため。0.26.2 では feature-state が Android 未実装で、第二案自体が成立しない。josxha 版は feature-state の実装根拠が見つかっておらず（§3.2）、同じ方式を取れる見込みがない
 
-> **未リリース版への依存という制約が残る。** pub.dev 版では合格構成を組めないため、当面は git 依存（`ref: release-0.27.0`）で固定するか、0.27.0 のリリースを待つ判断が必要。
+> **【2026-09-08 更新】未リリース版依存の制約は解消した。** `maplibre_gl` 0.27.0 は 2026-08-19 に pub.dev へ公開済み（`latest=0.27.0`）。`packages/location/pubspec.yaml` は git 依存（`ref: release-0.27.0`）ではなく pub.dev 版 `maplibre_gl: ^0.27.0` を採用する（代表決定 2026-09-07・Issue #55）。
+>
+> 上流リリースノート（[v0.27.0](https://github.com/maplibre/flutter-maplibre-gl/releases/tag/v0.27.0)）で、本節が前提とする2点がいずれも0.27.0に含まれることを確認した。
+> - Android の feature-state 対応（上流 #889）: 「**Android**: feature state (`setFeatureState`, `getFeatureState`, `removeFeatureState`) works on Android as well as web ... `promoteId` stays web-only, so Android features need a top-level `id` in the GeoJSON (#889)」
+> - GeoJSON エンコードのバックグラウンド化（上流 #366）: 「**Android, iOS**: adding or updating a GeoJSON source with a large payload no longer blocks the UI for the whole encode ... encoded in the background, cutting the blocking time by a factor of two to three (#366)」
+>
+> また同リリースで Android の MapLibre Native が 13.3.0 → 13.5.0 に上がっている。**Android ビルド統合を実際に確認した結果、`flutter build apk --debug` が失敗することが判明した**（実機でのR1/R2再計測は行わない。地図表示・fog of war の実装本体は T055・T056 のスコープ）。
+>
+> **【ビルド統合の検証結果（2026-09-08・Issue #55）】** Flutter 3.44.8 の既定テンプレート（AGP 9.0.1・`android.builtInKotlin=false`）で `flutter build apk --debug` を実行すると、`:maplibre_gl` の評価で `Could not find method kotlin() for arguments [...] on project ':maplibre_gl'`（`maplibre_gl-0.27.0/android/build.gradle` L77）で失敗する。原因は上流の `build.gradle` が Kotlin Gradle Plugin（KGP）の適用を `agpMajor < 9` で分岐しており、AGP 9 以降は「AGP 自身が Kotlin を提供する」前提で KGP を適用しないため。しかし Flutter 3.44.8 は `android.builtInKotlin` を既定で `false` にする移行を行っており（[migrate-to-built-in-kotlin](https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin)）、この既定のままでは AGP 側の Kotlin 提供も KGP 適用もどちらも起きず、`kotlin {}` 拡張が存在しない。
+> 診断のため `app/android/gradle.properties` の `android.builtInKotlin` を一時的に `true` に切り替えると `flutter build apk --debug` は成功する（`flutter pub deps` 解決バージョンは 0.27.0 系）。ただし Flutter はこのとき次の警告を出す: 「Applying the Kotlin Android Plugin (KGP) was unsuccessful... Future versions of Flutter will fail to build if your app uses plugins that apply KGP.」つまりこれは Flutter が非推奨として扱っている互換シムであり、恒久対応ではない。**この診断用の変更はコミットしていない。** `minSdk` は今回変更不要（Flutter 既定 `minSdkVersion=24` が `maplibre_gl` の要求 `minSdkVersion=21` を上回るため）。対応方針（`android.builtInKotlin=true` を受け入れるか・上流 `maplibre_gl` の Built-in Kotlin 対応を待つか）は代表判断が必要（Issue #55 の PR 参照）。
 
 ### 6.2 T012 / R1: ローカルMBTiles読込
 

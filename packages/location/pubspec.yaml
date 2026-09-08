@@ -19,6 +19,10 @@ dependencies:
     sdk: flutter
   terra_town_core:
     path: ../core
+  # fog of war は feature-state 方式（plan.md §8）。Android の setFeatureState は
+  # 0.27.0 で対応（0.26.2 は UnimplementedError）。0.27.0 は 2026-08-19 に pub.dev
+  # へ公開済みのため git 依存（ref 固定）は使わず pub.dev 版を採用する（Issue #55）。
+  maplibre_gl: ^0.27.0
 
 dev_dependencies:
   flutter_test:
