@@ -26,7 +26,8 @@ def main() -> None:
     types = [r[0] for r in conn.execute("SELECT DISTINCT terrain_type FROM hex_terrain")]
     print(f"検出された地形タイプ: {sorted(types)}")
 
-    all_types = ["sea", "waterside", "mountain", "forest", "farmland", "urban", "vacant_lot"]
+    # Issue #70（2026-09-08）で地形タイプから farmland・urban を除外し5種にした。
+    all_types = ["sea", "waterside", "mountain", "forest", "vacant_lot"]
     for t in all_types:
         rows = conn.execute(
             "SELECT hex_id, feature_id, cell_count FROM hex_terrain WHERE terrain_type = ? "

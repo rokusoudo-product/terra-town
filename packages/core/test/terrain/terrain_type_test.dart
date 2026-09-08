@@ -2,8 +2,8 @@ import 'package:terra_town_core/terra_town_core.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('TerrainType は docs/terrain.md §2 の7種と過不足なく一致する', () {
-    expect(TerrainType.values, hasLength(7));
+  test('TerrainType は docs/terrain.md §2 の5種と過不足なく一致する（Issue #70で農地・市街を除外）', () {
+    expect(TerrainType.values, hasLength(5));
     expect(
       TerrainType.values.toSet(),
       {
@@ -12,8 +12,6 @@ void main() {
         TerrainType.mountain, // 山
         TerrainType.waterside, // 水辺（川・湖）
         TerrainType.sea, // 海
-        TerrainType.farmland, // 農地
-        TerrainType.urban, // 市街
       },
     );
   });

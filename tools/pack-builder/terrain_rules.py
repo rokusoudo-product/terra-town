@@ -5,10 +5,19 @@
 （`CLAUDE.md` の方針: ドキュメントが常に正）。
 
 `TerrainType` の文字列コードは `packages/core/lib/src/terrain/terrain_type.dart` の
-enum 値（`vacantLot, forest, mountain, waterside, sea, farmland, urban`）と
-1:1で対応する snake_case 表記（`vacant_lot, forest, mountain, waterside, sea, farmland, urban`）を
+enum 値（`vacantLot, forest, mountain, waterside, sea`）と
+1:1で対応する snake_case 表記（`vacant_lot, forest, mountain, waterside, sea`）を
 採用する。将来 `location/` 側でパックを読み込む際、このスネークケース文字列から
 `TerrainType.values.byName(...)`（キャメルケースに変換して）へ機械的にマップできるようにする狙い。
+
+【2026-09-08 Issue #70】地形タイプから農地・市街を除外し5種にした（代表決定）。
+文明（畑・農場・工場・住宅等）はプレイヤーが空き地に建設する対象として `docs/buildings.md`
+側に移し、地形タイプとしては固定配置しない設計に整理した。旧・優先度5（農地）
+`landuse=farmland/orchard/vineyard/meadow`、旧・優先度6（市街）
+`landuse=residential/commercial/industrial/retail` は、いずれも本モジュールから
+削除し、判定ルールに一致しないタグとしてフォールバックの空き地（`vacant_lot`）に
+合流させる（`classify_area_tags` がこれらのタグに対して None を返し、呼び出し側の
+フォールバック処理で空き地になる。挙動としては対応する `if` 分岐を削除しただけ）。
 """
 
 from __future__ import annotations
@@ -20,17 +29,13 @@ PRIORITY_SEA = 1
 PRIORITY_WATERSIDE = 2
 PRIORITY_MOUNTAIN = 3
 PRIORITY_FOREST = 4
-PRIORITY_FARMLAND = 5
-PRIORITY_URBAN = 6
-PRIORITY_VACANT_LOT = 7  # フォールバック（どの優先タグにも該当しない）
+PRIORITY_VACANT_LOT = 5  # フォールバック（どの優先タグにも該当しない。Issue #70で5に繰り上げ）
 
 TERRAIN_BY_PRIORITY = {
     PRIORITY_SEA: "sea",
     PRIORITY_WATERSIDE: "waterside",
     PRIORITY_MOUNTAIN: "mountain",
     PRIORITY_FOREST: "forest",
-    PRIORITY_FARMLAND: "farmland",
-    PRIORITY_URBAN: "urban",
     PRIORITY_VACANT_LOT: "vacant_lot",
 }
 
@@ -125,34 +130,16 @@ FOREST_AREA_RULES = (
     TagRule("natural", ("wood",)),
 )
 
-# --- 優先度5: 農地 ---------------------------------------------------------
-FARMLAND_AREA_RULES = (
-    TagRule("landuse", ("farmland", "orchard", "vineyard", "meadow")),
-)
+# --- 旧・優先度5(農地)/優先度6(市街) は Issue #70 で廃止 ------------------
+# 廃止前の判定タグ（記録として残す。§5.1参照）:
+#   農地: landuse=farmland/orchard/vineyard/meadow
+#   市街: landuse=residential/commercial/industrial/retail（2026-09-08 に retail を追加した経緯は
+#         docs/terrain.md §5.1・本モジュールのgit履歴を参照）
+# いずれも本Issueでフォールバックの空き地に統合したため、対応する TagRule・
+# classify_area_tags 内の分岐を削除した。詳細な経緯は docs/terrain.md §5.1・
+# specs/001-mvp/research.md §8.8（5種化後の再生成結果。旧7種当時の記録は§8.5）参照。
 
-# --- 優先度6: 市街 ---------------------------------------------------------
-# docs/terrain.md §5（本Issueでの改訂後）: landuse=residential/commercial/industrial/retail、
-#                      building=* が一定密度以上
-#
-# 【本プロトタイプで判明した判定ルールの不備・2026-09-08 修正】
-# 当初の docs/terrain.md §5 は landuse=residential/commercial/industrial のみを
-# 市街判定タグとしていたが、本プロトタイプの実データ検証（狭山湖周辺、本ファイル冒頭）で
-# `landuse=retail`（コストコ入間倉庫店・三井アウトレットパーク入間など、実在する
-# 大型小売店舗の敷地）が該当し、かつ既存ルールでは市街のいずれにも一致せず
-# フォールバックの「空き地」に誤分類されることが判明した。
-# 小売店舗の敷地は実態として市街地の一部であり、産出資材の観点でも空き地
-# （建築の土台）として扱う理由がないため、`landuse=retail` を優先度6に追加した。
-# この修正は docs/terrain.md §5 にも反映済み（同じPRに含む）。
-#
-# 【既知の簡略化】「building=* が一定密度以上」の密度しきい値は docs/terrain.md にも
-# 具体的な数値が定義されておらず、本プロトタイプでは実装していない
-# （landuse=residential/commercial/industrial/retail のみで判定）。密度ベースの補完は
-# plan/tasks 工程での精緻化事項として残す。
-URBAN_AREA_RULES = (
-    TagRule("landuse", ("residential", "commercial", "industrial", "retail")),
-)
-
-# 優先度7（空き地）はフォールバックのため専用ルールを持たない。
+# 優先度5（空き地）はフォールバックのため専用ルールを持たない。
 
 
 def classify_area_tags(tags: dict[str, str]) -> int | None:
@@ -170,10 +157,6 @@ def classify_area_tags(tags: dict[str, str]) -> int | None:
         return PRIORITY_MOUNTAIN
     if any(r.matches(tags) for r in FOREST_AREA_RULES):
         return PRIORITY_FOREST
-    if any(r.matches(tags) for r in FARMLAND_AREA_RULES):
-        return PRIORITY_FARMLAND
-    if any(r.matches(tags) for r in URBAN_AREA_RULES):
-        return PRIORITY_URBAN
     return None
 
 
