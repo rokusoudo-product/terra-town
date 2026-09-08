@@ -77,7 +77,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - [x] T013 **R1**: 動的 `addSource`/`addLayer` と `feature-state` 操作が API 経由で可能なことを検証し `specs/001-mvp/research.md` に追記 → **完了（2026-09-08・Issue #56 追随、実測は2026-08-13）**: `addGeoJsonSource`/`addLayer` は動作し、`feature-state`（`setFeatureState`）は `release-0.27.0` で Android 実機動作を確認（0.26.2 は Android 未実装）。research.md §6.3
 - [ ] T014 **R2**: fog of war の feature-state 方式（plan.md §8 採用方式）で性能基準を計測し、結果を `specs/001-mvp/research.md` §6.4 に記録済み（実測は2026-08-13〜14）。**完了項目**: 開示1ヘクス追加の更新 **200ms 以内** → ✅達成（feature-state方式 max 37.7ms）／ヘクス1万個開示状態での**更新ループ中**fps（基準55fps以上） → ✅達成（56.6fps）。**残る未計測項目（research.md §6.4「残る未計測事項」・未チェックのまま残す）**: 手動パン・ズーム時のfps（上記は更新ループ中の計測のみ）／スタイル再読み込み時のちらつきの有無。※代表決定（2026-09-07）により、部分完了タスクはチェックを入れず注記で完了/残を併記する（全項目完了時のみチェックする）
 - [ ] T015 **R3**: Kotlin foreground service で1時間の実歩行（都市部マルチパス含む）を記録し、電池消費と測位品質を計測。距離しきい値の初期値を決定して `specs/001-mvp/research.md` に記録（plan.md §16 の未確定事項②の一部）
-- [ ] T016 **R4**: `tools/pack-builder/` の試作で OSM 抽出 → 地形事前計算 → SQLite 出力を1エリア分通し、`docs/terrain.md` §5 の判定ルールどおりの分類が出ることを検証
+- [x] T016 **R4**: `tools/pack-builder/` の試作で OSM 抽出 → 地形事前計算 → SQLite 出力を1エリア分通し、`docs/terrain.md` §5 の判定ルールどおりの分類が出ることを検証（Issue #38・2026-09-08完了。ヘクスID体系にH3を採用し docs/terrain.md §3.1/§4.2-4.4 に確定。検証結果は specs/001-mvp/research.md §8 参照）
 - [ ] T017 **R5**: モック位置検出と速度判定（移動平均/カルマン平滑後）を試作し、**正規歩行で報酬没収が起きない**ことを実歩行データで確認
 - [ ] T018 [P] **R6**: Health Connect の歩数読み取り疎通とオプトイン UX を検証し、Google Play のヘルスデータ申告要件を `specs/001-mvp/research.md` に記録
 - [ ] T019 スパイク結果を `specs/001-mvp/plan.md` に反映（プラグイン最終選定・距離しきい値・fog of war 方式の確定）。**plan.md に差分が出る場合は代表承認を得る**（ドキュメントが常に正）

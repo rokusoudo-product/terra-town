@@ -1,0 +1,8 @@
+# tools/pack-builder/ 最小プロトタイプの Python 依存関係（Issue #38）。
+# バージョンは 2026-09-08 時点で動作確認済みのものを固定している。
+# H3 は v3/v4 でAPIが異なるため、Dart側 h3_dart との互換確認済みバージョンから
+# 不用意に上げないこと（research.md §8 参照）。
+osmium==4.3.1
+h3==4.5.0
+shapely==2.1.2
+numpy==2.5.3
