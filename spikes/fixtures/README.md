@@ -35,7 +35,8 @@ bash fetch_fixtures.sh
 **【2026-09-09 変更】`adb push` は使わない。** Android 13+ ではアプリがSAF（Storage Access
 Framework）を通さずに `/sdcard/Download` 等の任意ファイルを直接読めず、`adb push` で配置した
 ファイルへのアクセスが権限エラーになる。これは「MapLibre側の失敗」と外形上区別できず、
-検証結果を汚染する（Issue #24 コメント参照）。
+検証結果を汚染する（Androidのスコープドストレージ一般の制約。terra-town固有の一次情報
+での確認はしていない。要確認としてIssue #24側に記録すること）。
 
 かわりに `fetch_fixtures.sh` が `sample.mbtiles` を `map_spike_gl/assets/` へもコピーし、
 `pubspec.yaml` の `flutter: assets:` に登録済みにしてある。`map_spike_gl` アプリのタブ①

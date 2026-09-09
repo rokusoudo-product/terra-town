@@ -89,7 +89,8 @@ class _MapProbePageState extends State<MapProbePage> {
   // --- 3-0. 同梱フィクスチャをアプリのキャッシュ領域へコピー -----------------
   // 【2026-09-09 追加】adb push方式を廃止した。Android 13+ ではアプリがSAFを通さずに
   // /sdcard/Download 等の任意パスを直接読めず、権限エラーになる。これは「MapLibreの失敗」と
-  // 外形上区別できず検証結果を汚染する（research.mdコメント・Issue #24参照）。
+  // 外形上区別できず検証結果を汚染する（Androidのスコープドストレージ一般の制約。
+  // terra-town固有の一次情報での確認はしていない。要確認としてIssue #24に記録すること）。
   // かわりにアセット同梱（pubspec.yaml の assets: 参照）にした。アセットは署名パッケージ内に
   // 封じ込まれておりネイティブSQLiteが直接開けないため、rootBundle.load()で読み出し、
   // 書き込み可能なディレクトリ（Directory.systemTemp）へコピーしてから mbtiles:// で参照する
@@ -159,6 +160,20 @@ class _MapProbePageState extends State<MapProbePage> {
         await srcFile.copy(destPath);
         _appendLog('MBTiles(vector/$variant): 書き込み可能ディレクトリへコピー完了 -> $destPath');
       }
+
+      // 同じボタンを2回目以降に押した場合（例: 1回目は描画されず、代表がもう一度押した場合）に
+      // 「source already exists」でクラッシュ/例外になると、それがMBTiles読込自体の失敗
+      // であるかのように見えてしまう。毎回いったん削除してから追加し直すことで、
+      // 「複数回試せる」ことを保証する（既存が無ければ例外は握りつぶす）。
+      try {
+        await controller.removeLayer(fillLayerId);
+      } catch (_) {}
+      try {
+        await controller.removeLayer(lineLayerId);
+      } catch (_) {}
+      try {
+        await controller.removeSource(sourceId);
+      } catch (_) {}
 
       final uri = 'mbtiles://$destPath';
       await controller.addSource(
@@ -355,7 +370,16 @@ class _MapProbePageState extends State<MapProbePage> {
           const FillLayerProperties(fillColor: '#00c853', fillOpacity: 0.7),
         );
         setState(() => _featureIdProbeAdded = true);
-        _appendLog('feature_id疎通: id=$kMaxObservedFeatureId のFeatureを追加（例外なし）');
+        // このFeatureは東京近辺の固定座標に置いている。②③のMBTiles確認でカメラが
+        // ズーム2（世界全体表示）へ移動している場合、そのままでは緑の四角が
+        // 画面外/視認不能になり「例外なし＝成功」の判定を目視で裏取りできなくなる。
+        // 目視確認を主目的ではなく補助にするため（PASS判定の主はログのsetFeatureState/
+        // getFeatureStateの結果）、ここで明示的にカメラを寄せておく。
+        await controller.animateCamera(
+          CameraUpdate.newLatLngZoom(const LatLng(35.805, 139.405), 13),
+        );
+        _appendLog('feature_id疎通: id=$kMaxObservedFeatureId のFeatureを追加（例外なし）。'
+            '目視用に地図を東京近辺（zoom13）へ移動しました');
       }
 
       await controller.setFeatureState(

@@ -103,16 +103,25 @@ cd ~/terra-town/spikes/map_spike_gl
       コピーし、パス欄に自動入力される。**`adb push` は不要**（Android 13+ でSAF外の任意パスが
       読めず、権限エラーとMapLibreの失敗が区別できなくなるため廃止した。詳細は
       `spikes/fixtures/README.md`）。
-   2. 「② VectorSourceProperties(url:)で読込」を押す。**PASSの見た目**: 地図が自動でズーム2
-      まで引き、薄い青の塗り（国境ポリゴン・`countries`レイヤ）と赤い線（経緯線・`geolines`
-      レイヤ）が見える。ログに「addSource/addLayer(fill+line)成功」と出ていても、
-      **実際に塗り・線が見えなければFAILと判定すること**（`research.md`§6.2の教訓＝
+   2. 「② VectorSourceProperties(url:)で読込」を押す。**注意: 既定のデモスタイル
+      （`MapLibreStyles.demo`）自体が、このフィクスチャと同じ Natural Earth の国境データを
+      既に描画している。** そのため「国境線が見える」ことはPASSの根拠にならない
+      （デモスタイルが元から表示しているだけの可能性がある）。**PASSの判定基準は
+      色**: このボタンは国境ポリゴンを**薄い青**（`#3388ff`）、経緯線を**赤**（`#ff0000`）で
+      塗るので、地図が自動でズーム2まで引いた後に**青い着色と赤い線が乗って見えるか**で
+      判定すること。ログに「addSource/addLayer(fill+line)成功」と出ていても、
+      **青・赤が乗って見えなければFAILと判定すること**（`research.md`§6.2の教訓＝
       例外が出ないことと描画されることは別）。
    3. 続けて「③ VectorSourceProperties(tiles:)で読込」も押す（別のsource/layer IDを使うため
-      ②を押した後でも独立して試せる）。同じ基準でPASS/FAILを判定する。
+      ②を押した後でも独立して試せる。2回目以降に同じボタンを押しても「source already
+      exists」エラーにならないよう、内部で毎回いったん削除してから追加し直している）。
+      同じ基準（青い着色・赤い線が乗るか）でPASS/FAILを判定する。
    4. **両方試すこと。** `url`と`tiles`のどちらが正しいかは一次情報で確定できなかったため、
       1回のセッションで両方の結果を`research.md`§6.2に転記してほしい（両方PASS・片方のみ
       PASS・両方FAILのいずれもあり得る有効な結果）。
+   5. 参考: research.md §6.4は基盤地図タイル（`demotiles.maplibre.org`）がHTTP 429
+      （レート制限）で読めないことがあったと記録している。デモスタイルの背景が
+      真っ白/簡素に見えても異常ではない。
 3. **④ PMTiles読込**: 公式サンプル（`pmtiles_style.json`）と同じ「スタイルJSON内のsource.urlに
    `pmtiles://...` を書く」方式。ローカルファイルパスでの構文は公式サンプル（リモートURL）からの
    類推であり、未検証。こちらもパスはテキスト入力のみ（優先度は低い。フォールバック候補の参考）。
@@ -123,10 +132,14 @@ cd ~/terra-town/spikes/map_spike_gl
 6. **⑦ feature_id（H3由来の大きい整数）疎通確認【最優先・§8.4】**: 「大きいfeature_idで
    setFeatureStateを試す」を押す。`id=833108588584959`（`tools/pack-builder/
    verify_feature_id.py` の実測最大値・research.md §8.4）を持つFeatureを追加し、
-   `setFeatureState`→`getFeatureState`の順に呼ぶ。**PASSの見た目**: 地図上に緑色の小さな
-   四角（東京近辺）が表示され、ログに「setFeatureState 成功」「getFeatureStateで読み戻し成功」
-   の両方が出る。`getFeatureState`の結果が`{probed: true}`と一致しない場合は、idが途中で
-   丸められた可能性があるため要確認として報告すること。
+   `setFeatureState`→`getFeatureState`の順に呼ぶ。**PASSの判定基準はログ**:
+   「setFeatureState 成功」「getFeatureStateで読み戻し成功 -> {probed: true}」の両方が
+   出ていればPASS。`getFeatureState`の結果が`{probed: true}`と一致しない場合は、idが途中で
+   丸められた可能性があるため要確認として報告すること。地図上には確認用として緑色の
+   小さな四角（東京近辺、自動でズーム13へ移動する）も表示されるが、これはあくまで
+   ログの結果を裏取りするための補助であり、四角が見えること自体はPASS/FAILの主基準ではない
+   （③のMBTiles確認を先に試した場合、カメラがズーム2にあった状態から自動で東京近辺へ
+   戻る）。
 
 ## fog of war 性能計測（タブ②・③）は実機計測済み（参考）
 

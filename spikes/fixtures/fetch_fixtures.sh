@@ -22,8 +22,9 @@
 
 # 【2026-09-09 変更】adb push方式を廃止し、map_spike_glにはアセット同梱でも
 # 使えるようコピーするようにした。Android 13+ ではアプリがSAFを通さずに
-# /sdcard/Download 等の任意ファイルを読めず、「権限エラー」と「MapLibireの失敗」が
-# 区別できなくなるため（Issue #24 コメント参照）。map_spike_gl/assets/ 配下は
+# /sdcard/Download 等の任意ファイルを読めず、「権限エラー」と「MapLibreの失敗」が
+# 区別できなくなるため（Androidのスコープドストレージ一般の制約。terra-town固有の
+# 一次情報での確認はしていない）。map_spike_gl/assets/ 配下は
 # .gitignore で除外済み（約5MBのバイナリのためコミットしない）。
 
 set -euo pipefail

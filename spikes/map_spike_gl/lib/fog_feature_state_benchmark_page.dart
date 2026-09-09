@@ -500,12 +500,28 @@ class _FogFeatureStateBenchmarkPageState
       // onStyleLoadedCallback（MapLibreMapのコールバック、下のbuild()参照）が
       // 発火したら _onStyleReloaded がフォグの再構築を行う。
       await controller.setStyle(MapLibreStyles.demo);
+      // 発火しなかった場合にボタンが永久に押せなくなる（無言のスタック）のを防ぐ
+      // ウォッチドッグ。正常系（callbackが発火して_rebuildFogAfterStyleReloadが完走した
+      // 場合）は_styleReloadInProgressが既にfalseになっているため何もしない。
+      unawaited(_watchdogForStuckStyleReload());
     } catch (e, st) {
       _appendLog('スタイル再読み込み: setStyle失敗 ${e.runtimeType}: $e');
       developer.log('style reload setStyle failed', error: e, stackTrace: st);
       if (_styleReloadCollector.isCollecting) _styleReloadCollector.stop();
       if (mounted) setState(() => _styleReloadInProgress = false);
     }
+  }
+
+  /// onStyleLoadedCallbackが発火しない/フォグ再構築が完走しない場合に、
+  /// ボタンが永久に無効のまま残ることを防ぐための保険。
+  Future<void> _watchdogForStuckStyleReload() async {
+    await Future.delayed(const Duration(seconds: 10));
+    if (!mounted || !_styleReloadInProgress) return;
+    _appendLog(
+        'スタイル再読み込み: onStyleLoadedCallbackが10秒経っても発火しませんでした（要確認）。'
+        '計測を打ち切ります');
+    if (_styleReloadCollector.isCollecting) _styleReloadCollector.stop();
+    setState(() => _styleReloadInProgress = false);
   }
 
   /// MapLibreMapのonStyleLoadedCallback。初回スタイル読込時にも発火するため、
