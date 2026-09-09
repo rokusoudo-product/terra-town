@@ -123,6 +123,26 @@ flutter doctor
   拾ってしまい `Failed to find package` になった。導入可能な最新は **android-36**（2026-07-30 時点）。
 - **`dart create --no-pub` は使わない。** クラッシュする。`--no-pub` なしで実行する。
 - sdkmanager は deprecated 警告を出すが、現時点では動作する（将来 `android` CLI へ移行）。
+- **`java -version` が21を返しても、Gradleビルドは17で動いて落ちることがある**
+  （2026-09-09・実機セッションで発生）。対話シェルではsdkmanの初期化行が実行され
+  `JAVA_HOME=~/.sdkman/candidates/java/current`（JDK **17**.0.11-tem）が設定される。
+  `PATH`からsdkmanのパスだけを取り除いても`JAVA_HOME`は残ったままになり、
+  **Gradleは`java`コマンドの解決結果より`JAVA_HOME`を優先する**ため、
+  「`java -version`は21なのにGradleは17を使い`invalid source release: 21`で落ちる」
+  という一見矛盾した状態になる（sdkmanにはJDK 21がインストールされていないため
+  `sdk use java 21...`も使えない）。対処は`JAVA_HOME`をシステムJDK21のパスへ
+  明示的に上書きすること。例:
+  ```bash
+  JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
+    PATH=$(echo "$PATH" | tr ':' '\n' | grep -v sdkman | paste -sd:) \
+    flutter run
+  ```
+  17でビルドを一度試みてGradleデーモンが起動してしまっている場合は、環境変数を
+  直しただけでは効かないことがあるため、先に`./gradlew --stop`でデーモンを
+  止めてからやり直すこと。詳細・具体的な発生経緯は
+  `spikes/map_spike_gl/README.md`「代表向けの実行手順」ステップ0を参照
+  （本プロジェクトのJDK正本は下記§3のとおり21だが、対話シェル環境ではsdkmanが
+  この落とし穴を作りうる点は環境準備一般の注意として本節に記録する）。
 
 ### ⚠️ `android.builtInKotlin`（Issue #55 / PR #66・追跡 #67）
 
