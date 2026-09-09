@@ -138,8 +138,10 @@ bash build_vector_tiles.sh
 ./.venv/bin/python export_hex_geojson.py
 ```
 
-上記3〜10を一括で実行し、`app/assets/pack/` への同梱まで行う場合は
-`bash bundle_region_pack.sh` を使う（下記「バーティカルスライス対象エリアの同梱」参照）。
+上記3（`classify_terrain.py`）・7（`build_vector_tiles.sh`）・9（`slim_pack_for_bundle.py`）
+と`app/assets/pack/`へのコピーを一括で実行する場合は `bash bundle_region_pack.sh` を使う
+（下記「バーティカルスライス対象エリアの同梱」参照）。**決定論の検証（4・8）や
+Feature id の検証（10）は含まれない**ため、それらは別途上記の手順で個別に実行すること。
 
 ## 出力（`out/pack.sqlite`）のテーブル構成
 
@@ -229,7 +231,10 @@ bash bundle_region_pack.sh
 コミットしない**（`spikes/fixtures/fetch_fixtures.sh`と同じ「取得（生成）スクリプト+
 `.gitignore`」の考え方。`app/assets/pack/README.md`と`.gitignore`参照）。
 `app/pubspec.yaml`の`flutter.assets`はこのディレクトリをディレクトリ単位で宣言しており、
-`README.md`だけが存在する状態（＝未生成）でも`flutter test`/`flutter analyze`は失敗しない。
+`README.md`だけが存在する状態（＝未生成）でも`flutter test`/`flutter analyze`は失敗しない
+（2026-09-10実測: `region_pack.sqlite`・`tiles.mbtiles`を一時退避し`README.md`のみの
+状態で`flutter pub get`・`flutter analyze`（No issues found）・`flutter test -j 1`
+（13件全PASS）を確認済み。CIの`ci.yml`「Test app」ステップもこの状態で走る）。
 
 **実測（2026-09-10・狭山湖周辺エリア）**:
 
@@ -249,26 +254,49 @@ MBTiles読込は未実施」（T012が確認したのはMapLibre公式デモの�
 terra-town自身の地域パックではない）を解消するための手順。**実機実行は代表が行う
 ため、以下は手順の用意のみ（本Issueのスコープ）。**
 
-`spikes/map_spike_gl`のハーネス（ブランチ`feature/issue-24-map-spike-harness`系・
-`main`にマージ済み。`spikes/map_spike_gl/lib/map_probe_page.dart`）がそのまま使える。
-ただし、このハーネスは検証時のフィクスチャ（MapLibre公式デモの`maplibre.mbtiles`）に
-合わせて**layer名をソースコードに直書き**している（`kFixtureFillSourceLayer =
-'countries'`・`kFixtureLineSourceLayer = 'geolines'`）。terra-townのパックには
-`countries`・`geolines`という層は存在しない（上記「実測」の層一覧参照）ため、
-**そのまま実行すると「レイヤーが見つからない」ため描画されない**。
+`spikes/map_spike_gl`のハーネス（`spikes/map_spike_gl/lib/map_probe_page.dart`）が
+そのまま使える。**⚠️ ただしこのブランチ（`feature/issue-24-map-spike-harness`系）は
+まだ`main`にマージされていない**（`git ls-tree -r main -- spikes/`が空であることを
+確認済み。作業ディレクトリに残っている`spikes/`はビルド成果物のみで`lib/`を含まない）。
+別途チェックアウトが必要:
 
-1. `bash bundle_region_pack.sh`で`app/assets/pack/tiles.mbtiles`を生成する。
-2. `spikes/map_spike_gl/assets/`に`tiles.mbtiles`をコピーする（`fetch_fixtures.sh`が
-   `sample.mbtiles`をコピーしているのと同じ要領）。
-3. `spikes/map_spike_gl/lib/map_probe_page.dart`の以下2点を書き換える:
-   - `rootBundle.load('assets/sample.mbtiles')` → `'assets/tiles.mbtiles'`
-   - `kFixtureFillSourceLayer = 'countries'` → `'building'`（または`'water'`・`'landuse'`など、
-     上記レイヤ一覧から見た目で確認しやすいもの）
+```bash
+git fetch origin feature/issue-24-map-spike-harness
+git worktree add ../terra-town-spike origin/feature/issue-24-map-spike-harness
+cd ../terra-town-spike/spikes/map_spike_gl
+```
+
+このハーネスは検証時のフィクスチャ（MapLibre公式デモの`maplibre.mbtiles`。世界地図・
+z0-6）に合わせて**layer名・ズーム範囲・カメラ位置をソースコードに直書き**している
+（`kFixtureFillSourceLayer = 'countries'`・`kFixtureLineSourceLayer = 'geolines'`・
+`kFixtureMinZoom/MaxZoom = 0/6`・`kOriginLat/Lng`＝東京駅付近）。terra-townのパックは
+`countries`・`geolines`という層を持たず、ズーム0-14・狭山湖周辺という別のデータのため、
+**書き換えずに実行すると「レイヤーが見つからない」「ズーム範囲外で何も描画されない」
+「カメラが無関係の場所を向いている」のいずれかで失敗する**。
+
+1. terra-townリポジトリ側で`bash bundle_region_pack.sh`を実行し、
+   `app/assets/pack/tiles.mbtiles`を生成する。
+2. 生成した`tiles.mbtiles`を、ハーネス側の`spikes/map_spike_gl/assets/sample.mbtiles`
+   に**上書きコピー**する（ファイル名を`sample.mbtiles`のままにすることで、
+   `rootBundle.load('assets/sample.mbtiles')`やタブ①「同梱フィクスチャをコピーして
+   使う」ボタンをコード変更なしで流用できる）。
+3. `spikes/map_spike_gl/lib/map_probe_page.dart`の以下を書き換える:
+   - `kFixtureFillSourceLayer = 'countries'` → `'building'`（または`'water'`・
+     `'landuse'`など。上記「実測」のレイヤ一覧から見た目で確認しやすいもの）
    - `kFixtureLineSourceLayer = 'geolines'` → `'transportation'`
-4. `flutter run`で実機にインストールし、タブ①「同梱フィクスチャをコピーして使う」→
+   - `kFixtureMinZoom = 0` / `kFixtureMaxZoom = 6` → `0` / `14`（terra-townのパックは
+     zoom 0-14。`building`はminzoom 13のため、maxzoomを6のままにすると
+     ズーム範囲外で常に空振りする）
+4. `spikes/map_spike_gl/lib/hex_grid.dart`の`kOriginLat`/`kOriginLng`
+   （既定は東京駅付近: 35.681236 / 139.767125）を、狭山湖周辺のパック中心付近
+   （`tiles.mbtiles`のmetadata実測値: 緯度35.82581・経度139.41317）に書き換える
+   （`map_probe_page.dart`の`initialCameraPosition`と各ベンチマークページのカメラが
+   この定数を参照しているため、変更しないと無関係の場所（東京駅周辺）にカメラが
+   向いたままになる）。
+5. `flutter run`で実機にインストールし、タブ①「同梱フィクスチャをコピーして使う」→
    ②/③のボタンで`addSource`/`addLayer`が例外なく成功し、建物・道路等が実際に
    描画されるかを目視確認する。
-5. ソース構築コストの計測は、ハーネスの性能計測タブが**ヘクス数を指定して合成ジオメトリを
+6. ソース構築コストの計測は、ハーネスの性能計測タブが**ヘクス数を指定して合成ジオメトリを
    生成する**方式のため、terra-townの実パックそのものの計測ではない。
    **本Issueで生成した実際のヘクス数（13,106）を指定して計測すること**を手順として
    明記する。これは「同じFeature数・合成ジオメトリでの代理計測」であり、

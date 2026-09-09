@@ -27,7 +27,10 @@ bash bundle_region_pack.sh
 `app/pubspec.yaml` の `flutter.assets` はこのディレクトリを**ディレクトリ単位**
 （`assets/pack/`）で宣言している。ディレクトリ宣言のため、この `README.md` だけが
 存在する状態（＝生成物未取得の状態）でも `flutter test` / `flutter analyze` は失敗しない
-（ビルド・実機実行時に地図表示を試す場合は、事前に `bundle_region_pack.sh` の実行が必要）。
+（2026-09-10実測で確認済み。`region_pack.sqlite`・`tiles.mbtiles` を退避した状態で
+`flutter pub get`・`flutter analyze`（No issues found）・`flutter test -j 1`
+（13件全PASS）を確認した。CIの `ci.yml`「Test app」ステップもこの状態で走る）。
+ビルド・実機実行時に地図表示を試す場合は、事前に `bundle_region_pack.sh` の実行が必要。
 
 ## 地図表示（T055）で読む際の注意
 
