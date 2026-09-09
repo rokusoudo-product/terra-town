@@ -11,23 +11,62 @@
 
 ## これは何を検証するか
 
-`specs/001-mvp/research.md`（PR #41・机上調査ドラフト、2026-08-11時点でマージ待ち）の §6 チェックリストのうち、
-以下に対応する画面を提供します。
+`specs/001-mvp/research.md`（現行は main。git履歴上はPR #41の机上調査ドラフトから始まり、
+その後 §6 に実機検証結果が追記された）のうち、まだ判定できていない項目に対応する画面を提供します。
+**Issue #24 は既にほぼ完了しており（§6.1 プラグイン選定・§6.3 addSource/feature-state・
+§6.4 fog of war性能はいずれも実機計測済み）、残っているのは次の3件だけです。**
 
-| このアプリのUI | research.md §6 の項目 |
-|---|---|
-| 上部バナー: プラグイン名・版数・stable/git main | §6.1「実機での最終判断」の前提記録 |
-| タブ①「② 基本地図表示」 | §6.1 の基本動作確認 |
-| タブ①「③ ローカルMBTiles読込」 | §6.2 T012/R1 |
-| タブ①「④ PMTiles読込」 | §6.2 のフォールバック候補 |
-| タブ①「⑤ addSource/addLayer 疎通」 | §6.3 T013/R1 |
-| タブ①「⑥ feature-state プローブ」 | §6.3 T013/R1（feature-stateの可否） |
-| タブ②「fog of war 性能(第一案:再エンコード)」 | §6.4 T014/R2（plan.md §8 の数値基準） |
-| タブ③「fog of war 性能(第二案:feature-state)」 | §6.4 T014/R2 再検証（第一案FAIL後の代替案） |
+| このアプリのUI | research.md の項目 | 状態 |
+|---|---|---|
+| 上部バナー: プラグイン名・版数 | §6.0〜§6.1 の前提記録 | 実機計測済み（参考表示のみ） |
+| タブ①「② 基本地図表示」 | §6.1 の基本動作確認 | 実機計測済み（参考） |
+| タブ①「③ ローカルMBTiles読込（ベクタソース・url/tiles方式）」 | **§6.2 T012** | **未判定（本ハーネスの主目的）** |
+| タブ①「④ PMTiles読込」 | §6.2 のフォールバック候補 | 未実施（参考） |
+| タブ①「⑤ addSource/addLayer 疎通」 | §6.3 T013/R1 | 実機計測済み（参考） |
+| タブ①「⑥ feature-state プローブ」 | §6.3 T013/R1 | 実機計測済み（参考） |
+| タブ①「⑦ feature_id（H3由来の大きい整数）疎通確認」 | **§8.4** | **未判定（本ハーネスの主目的）** |
+| タブ②「fog of war 性能(第一案:再エンコード)」 | §6.4 T014/R2 | 実機計測済み・FAIL（参考。比較対象として残置） |
+| タブ③「fog of war 性能(第二案:feature-state)」②・②' | §6.4 T014/R2 | 実機計測済み・PASS（参考） |
+| タブ③「③ 手動パン・ズームfps計測」 | **§6.4「残る未計測事項」** | **未判定（本ハーネスの主目的）** |
+| タブ③「④ スタイル再読み込み時のちらつき確認」 | **§6.4 チェックリストの「スタイル再読み込み時のちらつきの有無」** | **未判定（本ハーネスの主目的）** |
+
+**今回の実機セッションで判定してほしいのは太字の4項目**（MBTiles url/tiles・feature_id・
+パン/ズームfps・スタイル再読み込みちらつき）です。他の項目は既に判定済みで、ボタン自体は
+比較のため・または回帰確認のために残してあります。
 
 ## 代表向けの実行手順
 
-### 1. 実機をWSLに接続する
+### 0. JDKバージョンを確認する（必ず最初に）
+
+```bash
+java -version   # 21 であること
+```
+
+**理由**: `maplibre_gl` 0.27.0 は JDK 21 を無条件で要求する（research.md §6.1）。
+ところが sdkman は**対話シェルでのみ初期化**され、対話シェル（`flutter run` を打つ手元の
+シェル）では sdkman管理のJDK 17 が返ることがある。この状態で `flutter run`/
+`flutter build apk` を実行すると、MBTilesとは無関係の理由（`invalid source release: 21`）で
+ビルドが落ちる。**これが起きるとMBTiles/feature_idの検証がハーネスの不具合なのか
+ビルド環境の問題なのか区別できなくなる**ので、必ず最初に確認すること。
+
+17 が返った場合の対処（いずれか）:
+
+- `sdk use java 21<Tab補完で候補を確認>` のように sdkman でJDK 21系に切り替える
+- または、sdkmanを経由しない新しいシェルを開く（システムJDKが21であればそちらが解決される。
+  本ハーネスの動作確認は非対話シェル（システムJDK 21）で行っている）
+
+### 1. フィクスチャを取得する
+
+```bash
+cd ~/terra-town/spikes/fixtures
+bash fetch_fixtures.sh
+```
+
+`sample.mbtiles`（約5MB）が `spikes/map_spike_gl/assets/` にもコピーされる。
+**これを実行せずに `flutter run`/`flutter build apk` するとアセットが見つからずビルド自体が
+失敗する**（`pubspec.yaml` の `assets:` にこのファイルを登録済みのため）。
+
+### 2. 実機をWSLに接続する
 
 USB接続でWSLから直接使う場合（推奨・本ハーネスの手順として指定されたもの）:
 
@@ -40,7 +79,7 @@ USB接続でWSLから直接使う場合（推奨・本ハーネスの手順と�
 
 `docs/dev-setup.md` §5 に記載のワイヤレスデバッグ（`adb pair` / `adb connect`）でも代替可能です。
 
-### 2. アプリを実行する
+### 3. アプリを実行する
 
 ```bash
 cd ~/terra-town/spikes/map_spike_gl
@@ -49,29 +88,54 @@ cd ~/terra-town/spikes/map_spike_gl
 
 `flutter devices` に複数出る場合は `-d <deviceId>` を付ける。
 
-### 3. 各タブのボタンを順に押し、画面の数値をスクリーンショット、または手で
-   `specs/001-mvp/research.md` §6 の該当欄に転記する。
+### 4. 各タブのボタンを順に押し、画面の数値をスクリーンショット、または手で
+   `specs/001-mvp/research.md` の該当欄に転記する。**優先して判定してほしいのは
+   タブ①③⑦とタブ③③④の4項目**（上の表の太字）。
 
-## タブ①: 地図/MBTiles/feature-state
+## タブ①: 地図/MBTiles/feature-state/feature_id
 
 1. **② 基本地図表示**: デフォルトで MapLibre 公式デモスタイル
    （`https://demotiles.maplibre.org/style.json`）が表示される。別スタイルを試したい場合は
    URL欄に入力して「スタイル適用」を押す。
-2. **③ ローカルMBTiles読込**: パス欄に端末上のMBTilesファイルの絶対パスを直接入力し、
-   「MBTiles読込を試す」を押す。research.md §2.1 の手順（書き込み可能ディレクトリへコピー →
-   `mbtiles://<パス>` を `RasterSourceProperties` 経由で `addSource`）を実装している。
-   非公式・未文書化の挙動（[Issue #318](https://github.com/maplibre/flutter-maplibre-gl/issues/318)）のため、
-   例外が出ないことと実際にタイルが描画されることの両方を目視確認すること。
-   **ネイティブのファイル選択ダイアログは実装していない**（下記「既知の制約」参照）。
-   端末上のパスは事前に `adb push` 等で把握しておくこと。
+2. **③ ローカルMBTiles読込（ベクタソース）【最優先・§6.2 T012】**:
+   1. まず「① 同梱フィクスチャをコピーして使う（推奨）」を押す。アプリ内蔵のアセット
+      （`fetch_fixtures.sh` が取得した `sample.mbtiles`）をアプリのキャッシュディレクトリへ
+      コピーし、パス欄に自動入力される。**`adb push` は不要**（Android 13+ でSAF外の任意パスが
+      読めず、権限エラーとMapLibreの失敗が区別できなくなるため廃止した。詳細は
+      `spikes/fixtures/README.md`）。
+   2. 「② VectorSourceProperties(url:)で読込」を押す。**PASSの見た目**: 地図が自動でズーム2
+      まで引き、薄い青の塗り（国境ポリゴン・`countries`レイヤ）と赤い線（経緯線・`geolines`
+      レイヤ）が見える。ログに「addSource/addLayer(fill+line)成功」と出ていても、
+      **実際に塗り・線が見えなければFAILと判定すること**（`research.md`§6.2の教訓＝
+      例外が出ないことと描画されることは別）。
+   3. 続けて「③ VectorSourceProperties(tiles:)で読込」も押す（別のsource/layer IDを使うため
+      ②を押した後でも独立して試せる）。同じ基準でPASS/FAILを判定する。
+   4. **両方試すこと。** `url`と`tiles`のどちらが正しいかは一次情報で確定できなかったため、
+      1回のセッションで両方の結果を`research.md`§6.2に転記してほしい（両方PASS・片方のみ
+      PASS・両方FAILのいずれもあり得る有効な結果）。
 3. **④ PMTiles読込**: 公式サンプル（`pmtiles_style.json`）と同じ「スタイルJSON内のsource.urlに
    `pmtiles://...` を書く」方式。ローカルファイルパスでの構文は公式サンプル（リモートURL）からの
-   類推であり、未検証。こちらもパスはテキスト入力のみ。
-4. **⑤ addSource/addLayer 疎通**: 3ヘクス分の合成GeoJSONを動的に追加し、赤いポリゴンとして描画されるか確認。
-5. **⑥ feature-state プローブ**: `setFeatureState` を呼び出す。0.26.2（pub.dev安定版）では
-   `UnimplementedError` が投げられる想定（research.md §3.2）。例外の型・メッセージがそのまま画面に出る。
+   類推であり、未検証。こちらもパスはテキスト入力のみ（優先度は低い。フォールバック候補の参考）。
+4. **⑤ addSource/addLayer 疎通**: 3ヘクス分の合成GeoJSONを動的に追加し、赤いポリゴンとして
+   描画されるか確認（実機計測済み・参考）。
+5. **⑥ feature-state プローブ**: `setFeatureState` を呼び出す（実機計測済み・参考。
+   0.27.0では例外なく成功する見込み）。
+6. **⑦ feature_id（H3由来の大きい整数）疎通確認【最優先・§8.4】**: 「大きいfeature_idで
+   setFeatureStateを試す」を押す。`id=833108588584959`（`tools/pack-builder/
+   verify_feature_id.py` の実測最大値・research.md §8.4）を持つFeatureを追加し、
+   `setFeatureState`→`getFeatureState`の順に呼ぶ。**PASSの見た目**: 地図上に緑色の小さな
+   四角（東京近辺）が表示され、ログに「setFeatureState 成功」「getFeatureStateで読み戻し成功」
+   の両方が出る。`getFeatureState`の結果が`{probed: true}`と一致しない場合は、idが途中で
+   丸められた可能性があるため要確認として報告すること。
 
-## fog of war 性能計測: 第一案と第二案（タブ②・③）
+## fog of war 性能計測（タブ②・③）は実機計測済み（参考）
+
+**タブ②・③の①〜②'（ヘクス数選択・ベンチマーク実行・ソース構築コスト計測）は
+2026-08-13〜14に実機計測済みで、research.md §6.4に結果が反映されている
+（第二案=feature-state方式のPASSを確認済み。1ソースあたりのヘクス数上限もplan.md §3に
+明記済み）。今回のセッションで優先して判定してほしいのは、タブ③に新設した
+③手動パン・ズームfps計測と④スタイル再読み込み時のちらつき確認の2項目のみ**（後述）。
+以下は既存の計測方法の説明（変更していない）。
 
 fog of war の実装方式を2つ用意し、両方とも同じ指標（計測A: 更新レイテンシ min/median/max/avg、
 計測B: フレーム統計）・同じ表示形式（PASS/FAIL判定含む）で比較できるようにしてある。
@@ -129,7 +193,17 @@ fog of war の実装方式を2つ用意し、両方とも同じ指標（計測A:
      （ソース構築やGeoJSON再エンコードは含まない）。この算出方法は今回の追補作業でも変更していない。
    - 計測A・B・PASS/FAIL判定・目標値（更新200ms以内・55fps以上）はタブ②と完全に同じ算出方法・
      表示形式。並べて比較できることを最優先にしてある。
-3. ループ完了後、タブ②と同様に「③ 手動パン・ズームfps計測」で代表が地図をパン・ズーム操作する。
+3. ループ完了後、タブ②と同様に「③ 手動パン・ズームfps計測」で代表が地図をパン・ズーム操作する
+   **【最優先・§6.4「残る未計測事項」】**。ヘクス数**10,000**を選択した状態で実行すること
+   （plan.md §8の基準「1万ヘクス開示状態で55fps以上」を厳密に検証するため）。「開始」を押し、
+   数秒間パン・ズームしてから「停止」。PASS/FAIL判定は画面に自動で出る。
+4. さらに続けて「④ スタイル再読み込み時のちらつき確認」も実行する **【最優先】**。
+   「スタイル再読み込みを試す」を押し、`controller.setStyle` でスタイル全体を差し替えたときに
+   フォグが一時的に消える様子を目視で確認する。数値（`onStyleLoadedCallback`までの経過時間・
+   フォグ再構築完了までの合計時間・観測ウィンドウ中のフレーム統計）は自動計測されるが、
+   **「ちらついたか・どのくらいの時間見えなかったか」という主観的な見た目の判定は代表が行うこと**
+   （PASS/FAIL基準はresearch.mdに定義がないため、本ハーネスは数値のみ表示しPASS/FAIL判定はしない）。
+   再構築後は開示状態がリセットされ全面フォグに戻る（既知の制約。ちらつきの有無の判定には影響しない）。
 
 ### ソース構築コスト計測（Issue #24 追補・最初の1回だけのコスト）
 
@@ -227,29 +301,15 @@ fog of war の実装方式を2つ用意し、両方とも同じ指標（計測A:
 ログ・画面に表示する。ループ途中で例外が出た場合は、そこまでに計測できた分だけで
 min/median/max/avgを計算し、部分結果として表示する（全滅として握りつぶさない）。
 
-## バージョン切り替え（pub.dev安定版 ⇔ git main）
+## バージョン
 
-`pubspec.yaml` の既定は pub.dev 安定版 `maplibre_gl: 0.26.2` です。
-git 依存でmainブランチを直接参照する記述をコメントアウトで併記してあります:
-
-```yaml
-dependencies:
-  maplibre_gl: ^0.26.2
-  # 0.27.0（未リリース・feature-state Android対応 + #366性能改善を含む）を試す場合は
-  # 上の行をコメントアウトし、以下を有効化する:
-  # maplibre_gl:
-  #   git:
-  #     url: https://github.com/maplibre/flutter-maplibre-gl.git
-  #     ref: main
-  #     path: maplibre_gl
-```
-
-切り替えたら **`lib/plugin_info.dart` の `kPluginVersionLabel` も必ず手で書き換える**こと
-（画面上部のバナーが自動判定していないため）。
-
-- **安定版で回すと「今日出荷できるか」が分かる**（feature-stateは使えない前提での検証）。
-- **git mainで回すと「0.27.0で直るか」が分かる**（feature-state Android対応 + Issue #366の性能改善）。
-- **両方回すことを推奨**します。切り替え後は `flutter pub get` を忘れずに。
+**【2026-09-09 変更】バージョン切り替え（pub.dev安定版⇔git依存）の手順は廃止した。**
+`maplibre_gl` 0.27.0 は 2026-08-19 に pub.dev へ正式公開され、main の
+`packages/location/pubspec.yaml` も pub.dev版 `^0.27.0` を採用済み（Issue #55）。
+本ハーネスもそれに揃え、git依存（`ref: release-0.27.0`）と `dependency_overrides` を撤去した。
+feature-state の Android対応（上流#889）・Issue #366のエンコードオフロードはいずれも
+0.27.0に収録済み（research.md §6.0）。バージョンを変える場合は `pubspec.yaml` と
+`lib/plugin_info.dart` の `kPluginVersionLabel` を両方書き換えること。
 
 ## MBTiles / PMTiles フィクスチャ
 
@@ -261,16 +321,17 @@ dependencies:
 ```bash
 cd ~/terra-town/spikes/fixtures
 bash fetch_fixtures.sh
-adb push sample.mbtiles /sdcard/Download/
-adb push sample.pmtiles /sdcard/Download/
 ```
 
-その後、アプリの入力欄に `/sdcard/Download/sample.mbtiles`（または`.pmtiles`）を入力するか、
-「ファイル選択」で選ぶ。MBTiles/PMTilesパスは**画面から自由に指定・変更できる設計**にしてあるので、
+`sample.mbtiles` は `map_spike_gl/assets/` へも自動でコピーされ、アプリのタブ①
+「① 同梱フィクスチャをコピーして使う」ボタンから直接使える（**`adb push` は不要**。
+Android 13+ でSAF外の任意パスが読めず権限エラーとMapLibreの失敗が区別できなくなるため
+2026-09-09に廃止した）。MBTiles/PMTilesパスの手入力欄も残してあるので、
 代表が別途用意したファイル（例: [MapTiler](https://www.maptiler.com/) や
-[Protomaps](https://protomaps.com/) のサンプル、`pmtiles convert` で自作したもの）でも試せます。
+[Protomaps](https://protomaps.com/) のサンプル、`pmtiles convert` で自作したもの）を
+試したい場合はそちらを使うこと。
 
-fog of war 性能計測（タブ②・最重要項目）はMBTilesなしで実行できます（合成GeoJSONのみで完結）。
+fog of war 性能計測（タブ②③）はMBTilesなしで実行できます（合成GeoJSONのみで完結）。
 
 ## 既知の制約
 
@@ -281,17 +342,21 @@ fog of war 性能計測（タブ②・最重要項目）はMBTilesなしで実�
   （`flutter build apk` の出力にも「Future versions of Flutter will fail to build if your app uses
   plugins that apply KGP」という警告が出ている。file_picker と maplibre_gl の両方がこれに該当）。
   無理に動かそうとせず、`file_picker` への依存自体を外し、MBTiles/PMTilesのパスは
-  テキスト入力のみで指定する方式に変更した。ファイル選択が必要な場合は `adb push` で
-  端末の既知のパス（例: `/sdcard/Download/`）に配置し、そのパスを手入力すること。
+  テキスト入力のみで指定する方式に変更した。既定の導線はアセット同梱（タブ①の
+  「同梱フィクスチャをコピー」ボタン）であり、手入力欄は補助的な用途。
+- **スタイル再読み込み確認（タブ③④）は開示状態を復元しない**。`controller.setStyle` で
+  スタイル全体が差し替わった後、フォグのソース/レイヤーは作り直すが、どのヘクスが
+  開示済みだったかは保持していないため、再構築後は全面フォグに戻る。ちらつきの有無・
+  再表示までの時間の観測には影響しない設計上の割り切り。
 
 ## 環境
 
 - Flutter 3.44.8 / Dart 3.12.2（`docs/dev-setup.md` §2 準拠）
-- `maplibre_gl`: 現在の既定は git依存 `release-0.27.0`（`pubspec.yaml`参照。pub.dev安定版
-  `^0.26.2`はコメントアウトで併記。切り替え方法は下記「バージョン切り替え」参照）
+- `maplibre_gl`: `^0.27.0`（pub.dev正式版。`pubspec.yaml`参照。上記「バージョン」節参照）
 - Android minSdk はFlutterのデフォルト値をそのまま使用（`maplibre_gl` の要求 minSdk 21 を上回る）
 - ビルド時にAndroid SDK Platform 35が自動インストールされる（`maplibre_gl` の要求）。
   `docs/dev-setup.md` §2 記載の環境にはPlatform 36のみが入っていたため、初回ビルド時に追加された。
+- **JDK 21が必須**（`maplibre_gl` 0.27.0の要求。「代表向けの実行手順」ステップ0参照）。
 
 ## コンパイル・起動確認（feature-state方式追加時点）
 
@@ -315,3 +380,35 @@ fog of war 性能計測（タブ②・最重要項目）はMBTilesなしで実�
 - **50,000・100,000ヘクスでの実際のベンチマーク実行・数値の読み取りは代表が行う**
   （本ハーネスの方針どおり自動化していない。実行時間が長くなる・端末が無応答になる
   可能性があるため特に注意）。
+
+## コンパイル確認（2026-09-09・MBTilesベクタ対応・feature_id疎通・アセット同梱化）
+
+**実機を保有していないため、以下はWSL上での静的検証（analyze・ビルド）のみ。
+実機での動作・描画確認は行っていない（代表が行う）。**
+
+- 実施内容: pubspec.yamlをgit依存(release-0.27.0)からpub.dev版`^0.27.0`へ変更・
+  dependency_overrides撤去、android.builtInKotlin=trueの経緯コメント更新、
+  MBTiles読込のRasterSourceProperties→VectorSourceProperties(url/tiles両対応)化、
+  fill+lineレイヤ追加（source-layer名`countries`/`geolines`は実測・後述）、
+  adb push方式を廃止しアセット同梱（`assets/sample.mbtiles`）+ アプリ内コピー方式に変更、
+  feature_id（H3由来の大きい整数）疎通確認ボタンの追加、
+  スタイル再読み込み時のちらつき確認ボタンの追加。
+- `bash -lc "java -version"`: `21.0.12`であることを確認（非対話シェル。CIと同条件）。
+- `flutter pub get`: 成功（maplibre_gl/maplibre_gl_platform_interface/maplibre_gl_web が
+  gitからpub.dev 0.27.0へ切り替わったことを確認）。
+- `flutter analyze`: 実施済み・問題なし。
+- `flutter build apk --debug`: 実施済み・ビルド成功（既知のKGP警告のみ、無関係な既存の警告）。
+  **`spikes/fixtures/fetch_fixtures.sh` を先に実行してアセットを配置しないとビルド自体が
+  失敗する**（`pubspec.yaml`の`assets:`参照。この動作自体は意図どおり＝フィクスチャ未取得の
+  まま気づかず実機に持ち込む事故を防ぐ）。
+- source-layer名（`countries`=ポリゴン、`geolines`=線、`centroids`=点）は
+  `spikes/fixtures/sample.mbtiles`のmetadataテーブルを実際に読んで確定した（推測ではない）。
+  確認コマンド:
+  ```bash
+  cd spikes/fixtures && python3 -c \
+    "import sqlite3; c=sqlite3.connect('sample.mbtiles'); \
+     print(c.execute(\"select value from metadata where name='json'\").fetchone()[0])"
+  ```
+- **実機での動作確認（描画されるか・feature_idが正しく往復するか・fps・ちらつきの見た目）は
+  一切行っていない。** これは実機を保有しないためであり、判定不能ではなく「未実施」。
+  代表の実機セッションでの判定が必要。

@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 【2026-09-09 追加】spikes/fixtures/fetch_fixtures.sh がコピーするフィクスチャ。
+# 約5MBのバイナリでコミット対象外（spikes/fixtures/.gitignoreと同じ方針）。
+/assets/*.mbtiles
+/assets/*.pmtiles

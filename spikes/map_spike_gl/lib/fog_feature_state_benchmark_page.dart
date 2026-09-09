@@ -39,6 +39,7 @@
 // 分解して計測する。既存の計測A（setFeatureStateのトグル計測）・計測Bの算出方法は一切変更しない。
 // 詳細な定義・近似の限界はREADMEを参照。
 
+import 'dart:async' show unawaited;
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -138,6 +139,17 @@ class _FogFeatureStateBenchmarkPageState
   final FrameStatsCollector _manualCollector = FrameStatsCollector();
   FrameStatsResult? _manualFrameStats;
   bool _manualCollecting = false;
+
+  // --- スタイル再読み込み時のちらつき確認（research.md §6.4「残る未計測事項」） ---
+  // controller.setStyle はスタイル全体（ソース・レイヤーを含む）を差し替えるため、
+  // 開示済みフォグは一度消え、onStyleLoadedCallback発火後に作り直すまで表示されない。
+  // その空白時間・フレーム落ちを「ちらつき」の客観的な近似指標として計測する。
+  final FrameStatsCollector _styleReloadCollector = FrameStatsCollector();
+  FrameStatsResult? _styleReloadFrameStats;
+  bool _styleReloadInProgress = false;
+  DateTime? _styleReloadStartedAt;
+  double? _styleReloadCallbackElapsedMs;
+  double? _styleReloadRebuildTotalElapsedMs;
 
   // ソースは「最初に1回だけ」追加する方式なので、どのヘクス数で構築済みかを覚えておく。
   // 選択ヘクス数を切り替えた場合のみ、ソース/レイヤーを作り直す
@@ -457,6 +469,115 @@ class _FogFeatureStateBenchmarkPageState
     _appendLog('手動fps計測: 停止。${result.summary}');
   }
 
+  /// スタイル再読み込み（`controller.setStyle`）を実行し、ちらつきを近似計測する。
+  /// setStyleはソース・レイヤーを含むスタイル全体を差し替えるため、直前まで開示していた
+  /// フォグは一度全て消える。onStyleLoadedCallback発火後にフォグを作り直すまでの
+  /// 経過時間とフレーム統計を記録し、代表が「実際にどう見えたか」を目視確認できるようにする。
+  Future<void> _reloadStyleAndCheckFlicker() async {
+    final controller = _controller;
+    if (controller == null) {
+      _appendLog('スタイル再読み込み: マップ未初期化のため中止');
+      return;
+    }
+    if (!_fogSourceReady) {
+      _appendLog(
+          'スタイル再読み込み: 先に②のベンチマークを実行してフォグを表示させてください'
+          '（フォグが無いとちらつきの有無が判断できません）');
+      return;
+    }
+    setState(() {
+      _styleReloadInProgress = true;
+      _styleReloadFrameStats = null;
+      _styleReloadCallbackElapsedMs = null;
+      _styleReloadRebuildTotalElapsedMs = null;
+    });
+    _styleReloadStartedAt = DateTime.now();
+    _styleReloadCollector.start();
+    _appendLog(
+        'スタイル再読み込み開始: setStyleを呼び出しました。フォグが一時的に消える見込みです。'
+        '画面を目視し、消えている間の見た目（背景色のちらつき・空白等）を確認してください');
+    try {
+      // onStyleLoadedCallback（MapLibreMapのコールバック、下のbuild()参照）が
+      // 発火したら _onStyleReloaded がフォグの再構築を行う。
+      await controller.setStyle(MapLibreStyles.demo);
+    } catch (e, st) {
+      _appendLog('スタイル再読み込み: setStyle失敗 ${e.runtimeType}: $e');
+      developer.log('style reload setStyle failed', error: e, stackTrace: st);
+      if (_styleReloadCollector.isCollecting) _styleReloadCollector.stop();
+      if (mounted) setState(() => _styleReloadInProgress = false);
+    }
+  }
+
+  /// MapLibreMapのonStyleLoadedCallback。初回スタイル読込時にも発火するため、
+  /// 「再読み込みちらつき確認」を実行中のときだけフォグの再構築を行う。
+  void _onStyleReloaded() {
+    if (!_styleReloadInProgress) return;
+    final startedAt = _styleReloadStartedAt;
+    final callbackElapsedMs = startedAt == null
+        ? null
+        : DateTime.now().difference(startedAt).inMicroseconds / 1000.0;
+    _styleReloadCallbackElapsedMs = callbackElapsedMs;
+    _appendLog(
+        'スタイル再読み込み: onStyleLoadedCallback発火（setStyleから'
+        '${callbackElapsedMs?.toStringAsFixed(1)}ms経過）。'
+        'フォグのソース/レイヤーを再構築します（setStyleで消えているため）');
+    unawaited(_rebuildFogAfterStyleReload());
+  }
+
+  /// スタイル再読み込みで失われたフォグのソース/レイヤーを作り直す。
+  /// 【既知の制約】どのヘクスが開示済みだったかの集合を別途保持していないため、
+  /// 再構築後は全ヘクス未開示（フォグ全面表示）の状態に戻る。これも「スタイル再読み込みで
+  /// 開示状態が失われる」という観測結果の一部として扱い、README に明記する。
+  Future<void> _rebuildFogAfterStyleReload() async {
+    final controller = _controller;
+    final hexCount = _fogSourceHexCount ?? _selectedCount;
+    try {
+      if (controller == null) {
+        throw StateError('マップ未初期化');
+      }
+      final centers = generateHexGrid(hexCount);
+      final ids = [for (int i = 0; i < centers.length; i++) i];
+      final geojson = _buildAllHexGeoJson(centers, ids);
+      await controller.addGeoJsonSource(_fogSourceId, geojson);
+      await controller.addLayer(
+        _fogSourceId,
+        _fogLayerId,
+        const FillLayerProperties(
+          fillColor: '#141610',
+          fillOpacity: [
+            'case',
+            ['boolean', ['feature-state', 'revealed'], false],
+            0.0,
+            0.62,
+          ],
+        ),
+      );
+      _featureIds = ids;
+
+      // 再構築完了後もしばらくフレーム統計を集め続け、初回描画のスパイクまで含めて
+      // 「ちらつき」の近似指標に反映する（ソース構築コスト計測と同じ考え方）。
+      await Future.delayed(postSourceBuildSettleWindow(hexCount));
+      final frameStats = _styleReloadCollector.stop();
+      final totalElapsedMs = _styleReloadStartedAt == null
+          ? null
+          : DateTime.now().difference(_styleReloadStartedAt!).inMicroseconds /
+              1000.0;
+      _styleReloadRebuildTotalElapsedMs = totalElapsedMs;
+      if (mounted) setState(() => _styleReloadFrameStats = frameStats);
+      _appendLog(
+          'スタイル再読み込み: フォグ再構築完了（例外なし）。'
+          'setStyleから合計${totalElapsedMs?.toStringAsFixed(1)}ms。'
+          '${frameStats.summary}。'
+          '開示状態はリセットされ全面フォグに戻っています（既知の制約・README参照）');
+    } catch (e, st) {
+      if (_styleReloadCollector.isCollecting) _styleReloadCollector.stop();
+      _appendLog('スタイル再読み込み: フォグ再構築失敗 ${e.runtimeType}: $e');
+      developer.log('style reload fog rebuild failed', error: e, stackTrace: st);
+    } finally {
+      if (mounted) setState(() => _styleReloadInProgress = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final updatePass =
@@ -475,6 +596,7 @@ class _FogFeatureStateBenchmarkPageState
               zoom: 15,
             ),
             onMapCreated: (c) => _controller = c,
+            onStyleLoadedCallback: _onStyleReloaded,
           ),
         ),
         Expanded(
@@ -656,6 +778,49 @@ class _FogFeatureStateBenchmarkPageState
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Text(_manualFrameStats!.summary),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const Divider(height: 32),
+              Text('④ スタイル再読み込み時のちらつき確認 [research.md §6.4「残る未計測事項」]',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const Text(
+                '②でフォグを表示させた状態で押すこと。controller.setStyleでスタイル全体を'
+                '差し替え、フォグが一時的に消えてから再構築されるまでを観測する。'
+                '数値（経過時間・フレーム統計）に加えて、代表が実際の見た目'
+                '（消える瞬間・空白時間・再表示時のガクつき等）を目視で確認すること。'
+                '再構築後は開示状態がリセットされ全面フォグに戻る（既知の制約）。',
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: (_fogSourceReady && !_styleReloadInProgress)
+                    ? _reloadStyleAndCheckFlicker
+                    : null,
+                child: Text(_styleReloadInProgress ? '再読み込み・観測中…' : 'スタイル再読み込みを試す'),
+              ),
+              if (_styleReloadCallbackElapsedMs != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                    'onStyleLoadedCallbackまで: '
+                    '${_styleReloadCallbackElapsedMs!.toStringAsFixed(1)}ms'),
+              ],
+              if (_styleReloadFrameStats != null) ...[
+                const SizedBox(height: 8),
+                Card(
+                  color: Colors.blueGrey.shade50,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'フォグ再構築完了まで合計: '
+                          '${_styleReloadRebuildTotalElapsedMs?.toStringAsFixed(1)}ms',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text('観測ウィンドウ中のフレーム統計: ${_styleReloadFrameStats!.summary}'),
                       ],
                     ),
                   ),
