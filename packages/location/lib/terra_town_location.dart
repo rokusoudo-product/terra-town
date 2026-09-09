@@ -8,10 +8,14 @@
 ///   - src/position/ NativePositionProvider（T050）
 ///   - src/pack/     RegionPackRepository（T069）
 ///   - src/map/      MapView・FogOfWarLayer・各種レイヤー（T055〜T056・T071・T090・T094）
+///   - src/db/       GameDatabase・RegionPackConnection（T030〜T034・Issue #83）
 library;
 
 import 'package:terra_town_core/terra_town_core.dart';
 
+export 'src/db/building_type.dart';
+export 'src/db/game_database.dart';
+export 'src/db/region_pack_connection.dart';
 export 'src/map/fog_of_war_layer.dart';
 
 /// 土台の疎通確認用。location から core を参照できることを示す。

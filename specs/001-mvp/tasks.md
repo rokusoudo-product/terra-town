@@ -110,11 +110,11 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ### データ永続化（plan.md §6）
 
-- [ ] T030 SQLite（Drift）を `packages/location/` または `app/` 側に導入し、**ゲーム状態DB**と**地域パックDB（読み取り専用）**を別接続として分離する構成を作る
-- [ ] T031 [P] `disclosed_hex` テーブル（開示済みヘクス・`pack_version`）のスキーマとマイグレーションを作成
-- [ ] T032 [P] `inventory` テーブルのスキーマとマイグレーションを作成
-- [ ] T033 [P] `building` テーブル（建物種別・レベル・建築状態軸・ヘクス座標・区画）のスキーマを作成（`docs/buildings.md` §2）
-- [ ] T034 [P] `district_progress`（制覇率・発展度）・`collection`（名所図鑑）・`quest_daily`・`settings` のスキーマを作成
+- [x] T030 SQLite（Drift）を `packages/location/` または `app/` 側に導入し、**ゲーム状態DB**と**地域パックDB（読み取り専用）**を別接続として分離する構成を作る（Issue #83。`packages/location/lib/src/db/game_database.dart` の `GameDatabase`〔読み書き〕と `region_pack_connection.dart` の `RegionPackConnection`〔`OpenMode.readOnly` で構造的に書き込みを防止〕に分離。`app/pubspec.yaml` は未編集）
+- [x] T031 [P] `disclosed_hex` テーブル（開示済みヘクス・`pack_version`）のスキーマとマイグレーションを作成（Issue #83。不変性ルール自体の実装は別 Issue #84・T035〜T037）
+- [x] T032 [P] `inventory` テーブルのスキーマとマイグレーションを作成（Issue #83。`core` の `Resource` 型〔T026・PR #89 未マージ〕には依存させず、資材キーは生の文字列列に留めた）
+- [x] T033 [P] `building` テーブル（建物種別・レベル・建築状態軸・ヘクス座標・区画）のスキーマを作成（`docs/buildings.md` §2）（Issue #83。採石場を含む8種〔`BuildingType`〕を表現）
+- [x] T034 [P] `district_progress`（制覇率・発展度）・`collection`（名所図鑑）・`quest_daily`・`settings` のスキーマを作成（Issue #83）
 - [ ] T035 **開示ヘクス集合の圧縮表現**を実装（Roaring Bitmap / ビットセット・plan.md §6）。GeoJSON 保持はしない
 - [ ] T036 **パック更新の不変性ルール**を実装: 一度開示したヘクスの資材分類は、パック更新後も過去分を不変とする（獲得履歴は当時の `pack_version` で確定 — plan.md §3.3）
 - [ ] T037 [P] `packages/core/test/pack/pack_version_immutability_test.dart` にパック更新後も過去の開示・獲得が変わらないことのテストを作成
