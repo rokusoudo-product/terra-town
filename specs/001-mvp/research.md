@@ -69,13 +69,38 @@ plan.md §1 が最大の実装リスクとして挙げた2系統を比較した�
 
 ### 2.1 `maplibre_gl`
 
+> **【2026-09-09 訂正】本節が当初 `RasterSourceProperties` を前提として書いていたのは誤りだった。**
+> terra-town の地域パックは `plan.md` §3.2 のとおり**ベクタタイル MBTiles**（Planetiler生成）である。
+> ところが本節はIssue #318のコミュニティ報告のうち「ラスタ・ベクタタイル双方の報告あり」の
+> 部分から `RasterSourceProperties` の使用例だけを本文に採用してしまい、`addSource` に渡す
+> プロパティ型としてラスタ用のクラスを案内していた（下記「`RasterSourceProperties(tiles: [...])`
+> を `addSource` に渡す方式で動作」の記述）。
+>
+> この誤りは机上調査だけでは表面化せず、`spikes/map_spike_gl/lib/map_probe_page.dart`
+> の実装がこの記述に忠実に従ったことで**そのままハーネスに伝播した**。その結果、§6.2
+> （T012 実機検証）で「フィクスチャ（ベクタタイル）を `RasterSourceProperties` で読もうとして
+> いた」という不一致が発覚し、**プラグインの能力の問題かハーネスの作りの問題かを切り分け
+> られず、判定不能に終わった**（詳細は §6.2「判定できなかった理由」）。
+>
+> **訂正後の結論**: terra-town の用途（ベクタタイルMBTiles）では `addSource` に渡すべきは
+> `VectorSourceProperties` であり、ベクタソースは**レイヤー（fill/line等）を別途追加しないと
+> 何も描画されない**点も当時の記述には無かった注意点である。一方、**`VectorSourceProperties`
+> の `url` パラメータと `tiles` パラメータのどちらで `mbtiles://<パス>` を渡すべきかは、
+> Issue #318のコメントも含め一次情報で確定できていない。これは推測で断定せず、実機で
+> 両方試して切り分ける**（`spikes/map_spike_gl` のハーネスに両方のボタンを用意した。
+> 別PR・Issue #24参照）。
+>
+> なお、下記の「アセット/外部ストレージのファイルを書き込み可能ディレクトリへ事前コピーする
+> 必要がある」という結論（ソース種別に依存しない、MapLibre Nativeの `mbtiles://` スキームの
+> 制約）自体は誤りではなく、そのまま有効である。
+
 - 公式ドキュメントには **MBTiles 専用ページが存在しない**。`website/docs/advanced/` 配下にあるのは `pmtiles.md` のみで、PMTiles が第一級（公式ドキュメント化された）機能として案内されている。同ドキュメントは「MBTiles を PMTiles に変換して使う」ことを推奨している（`pmtiles convert input.mbtiles output.pmtiles`）[^gl-pmtiles-doc]。
 - 一方で、コミュニティの実地検証は存在する。Issue #318「How to load an mbtiles file」（2023-10 open、直近コメント2023-11、**未クローズ**）で、`mbtiles://` スキームは **maplibre-native 自体には実装されている**ことが示唆され、実際に動作報告が複数ある [^gl-318]:
-  - `RasterSourceProperties(tiles: ['mbtiles:///<絶対パス>/map.mbtiles'])` を `addSource` に渡す方式で動作（ラスタ・ベクタタイル双方の報告あり）。
-  - **Flutter の asset バンドルから直接は読めない**。`assets/` 同梱ファイルはアプリの署名パッケージ内に封じ込まれており、ネイティブSQLiteが直接開けない。`rootBundle.load()` で読み出し、`getApplicationCacheDirectory()`（や `getExternalStorageDirectory()`）配下の**書き込み可能なファイルシステムパスにコピーしてから** `mbtiles://` で参照する、という2段階の実装が必要（同Issueの `venomwine` 氏のコードで確認）。
+  - ~~`RasterSourceProperties(tiles: ['mbtiles:///<絶対パス>/map.mbtiles'])` を `addSource` に渡す方式で動作（ラスタ・ベクタタイル双方の報告あり）。~~ **【誤り・上記2026-09-09訂正参照】** 同Issueの報告はラスタ・ベクタタイル双方を含んでいたが、本節はラスタ用のプロパティクラスのみを案内していた。terra-townの用途（ベクタタイルMBTiles）では `VectorSourceProperties` を使うこと。`url`/`tiles`のどちらのパラメータで渡すかは未確定（実機で切り分け）。
+  - **Flutter の asset バンドルから直接は読めない**。`assets/` 同梱ファイルはアプリの署名パッケージ内に封じ込まれており、ネイティブSQLiteが直接開けない。`rootBundle.load()` で読み出し、`getApplicationCacheDirectory()`（や `getExternalStorageDirectory()`）配下の**書き込み可能なファイルシステムパスにコピーしてから** `mbtiles://` で参照する、という2段階の実装が必要（同Issueの `venomwine` 氏のコードで確認）。この結論は訂正の対象ではない。
   - 既知の不具合報告（`timautin` 氏）: ズームイン時とズームアウト時でタイルの表示/非表示が切り替わる閾値がずれる、80MB程度の大きめのmbtilesでは min/max zoom を明示しないと一部タイルが表示されないことがある。
   - この経路は**公式サポートではなくコミュニティが発見した挙動**であり、READMEには「アセット参照方法のドキュメント化」を目的とした PR #346（2023-12 マージ済）はあるが、これは主にPMTiles/一般的なアセット参照に関する追記で、MBTilesの正式サポート表明ではない [^gl-346]。
-- **結論（机上）**: `maplibre_gl` でも `mbtiles://` は**動く可能性が高いが非公式扱い**。実装には「アプリ書き込み可能ディレクトリへの事前コピー」という一手間が必須で、公式に文書化された安定機能ではない。
+- **結論（机上・2026-09-09訂正済み）**: `maplibre_gl` でも `mbtiles://` は**動く可能性が高いが非公式扱い**。terra-townの用途ではベクタソース（`VectorSourceProperties`）＋レイヤー追加が必要で、`url`/`tiles`のどちらのパラメータを使うべきかは一次情報で確定できていない（実機検証が必要）。実装には「アプリ書き込み可能ディレクトリへの事前コピー」という一手間も必須で、公式に文書化された安定機能ではない。
 
 ### 2.2 `maplibre`（josxha 版）
 
@@ -213,7 +238,7 @@ plan.md §1 が最大の実装リスクとして挙げた2系統を比較した�
 - [ ] `maplibre`（josxha版）でのMBTiles参照 → **未実施**（参照構文が特定できず、ハーネスの該当ボタンは無効化してある）
 - [ ] PMTiles フォールバックの実測 → **未実施**
 
-**判定できなかった理由**: 検証用フィクスチャ（MapLibre 公式デモの `maplibre.mbtiles`）は**ベクタタイル**だが、ハーネスは `RasterSourceProperties` で読み込む実装になっていた（`spikes/map_spike_gl/lib/map_probe_page.dart`）。この不一致のままでは、失敗してもプラグインの能力の問題かハーネスの作りの問題か切り分けられない。**ハーネスをベクタソース対応に修正してからの再検証が必要。**
+**判定できなかった理由**: 検証用フィクスチャ（MapLibre 公式デモの `maplibre.mbtiles`）は**ベクタタイル**だが、ハーネスは `RasterSourceProperties` で読み込む実装になっていた（`spikes/map_spike_gl/lib/map_probe_page.dart`）。この不一致のままでは、失敗してもプラグインの能力の問題かハーネスの作りの問題か切り分けられない。**ハーネスをベクタソース対応に修正してからの再検証が必要。**この誤りの出所は本書 §2.1 の机上調査記述（2026-09-09訂正済み）であり、ハーネス側の独自の不具合ではなかった。
 
 ### 6.3 T013 / R1: 動的 addSource/addLayer/feature-state
 
