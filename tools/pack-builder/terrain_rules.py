@@ -18,6 +18,15 @@ enum 値（`vacantLot, forest, mountain, waterside, sea`）と
 削除し、判定ルールに一致しないタグとしてフォールバックの空き地（`vacant_lot`）に
 合流させる（`classify_area_tags` がこれらのタグに対して None を返し、呼び出し側の
 フォールバック処理で空き地になる。挙動としては対応する `if` 分岐を削除しただけ）。
+
+【2026-09-08 Issue #71】山の判定タグを拡張した（代表決定に基づく案A）。
+`natural=hill`（点）・`natural=ridge`（線）・`natural=cliff`（点/線/面）・
+`natural=rock`（点/面）を追加。実データでの効果測定・`natural=peak`バッファ半径の
+判断根拠・DEM要否の結論は `specs/001-mvp/research.md` §8.9 参照。
+点・線タグはこれまでの「単一バッファ定数」から「タグの種類ごとに異なるバッファ」を
+扱えるよう `classify_point_tags`・`classify_way_tags` の戻り値を
+`(優先度, バッファ半径m)` のタプルに変更した（呼び出し側 `classify_terrain.py` も
+合わせて更新済み）。
 """
 
 from __future__ import annotations
@@ -108,20 +117,62 @@ def is_waterside_water_polygon(tags: dict[str, str]) -> bool:
 
 # --- 優先度3: 山 ----------------------------------------------------------
 # natural=peak、natural=mountain_range、natural=bare_rock、natural=scree、landuse=quarry
+# 【2026-09-08 Issue #71】タグを拡張した。追加したタグ・根拠・実データでの効果測定は
+# `specs/001-mvp/research.md` §8.9 を参照（結論: この検証エリアには追加タグの
+# 該当データが1件も存在せず、実測上の効果はゼロだった。地物としては正しい拡張のため
+# コードは残すが、「タグを広げれば増える」という前提自体が別エリアでは成り立たない
+# 可能性がある点に注意）。
 #
-# 【既知の簡略化】natural=peak は OSM 上は通常「点」（山頂ノード）で面積を持たない。
-# 本プロトタイプでは点データに一定半径のバッファ（MOUNTAIN_PEAK_BUFFER_M）を掛けて
-# 面として扱う簡易近似とする。natural=mountain_range は実運用でほぼ使われていない
-# タグ（OSM wiki上も「使用が承認されていない」）ため、本プロトタイプでは
-# タグ一致条件としては残すが、実データでのヒットは想定していない。
+# 【既知の簡略化】natural=peak・natural=hill は OSM 上は通常「点」（山頂ノード）で
+# 面積を持たない。本プロトタイプでは点データに一定半径のバッファ
+# （MOUNTAIN_PEAK_BUFFER_M）を掛けて面として扱う簡易近似とする。natural=mountain_range
+# は実運用でほぼ使われていないタグ（OSM wiki上も「使用が承認されていない」）ため、
+# 本プロトタイプではタグ一致条件としては残すが、実データでのヒットは想定していない。
+#
+# natural=cliff・natural=rock は OSM wiki上、点・線・面のいずれでも使われる
+# （`natural=ridge` は線のみ）。面で閉じている場合はそのままMOUNTAIN_AREA_RULESで、
+# 点・線の場合は下記のバッファ付き点・線ルールで扱う。
 MOUNTAIN_AREA_RULES = (
-    TagRule("natural", ("bare_rock", "scree", "mountain_range")),
+    TagRule("natural", ("bare_rock", "scree", "mountain_range", "cliff", "rock")),
     TagRule("landuse", ("quarry",)),
 )
-MOUNTAIN_POINT_RULES = (
-    TagRule("natural", ("peak",)),
+
+# 山頂・丘頂上（点）。summit扱いで、既存の30mバッファをそのまま適用する。
+MOUNTAIN_SUMMIT_POINT_RULES = (
+    TagRule("natural", ("peak", "hill")),
 )
 MOUNTAIN_PEAK_BUFFER_M = 30.0
+# 【2026-09-08 Issue #71・根拠つきで「変更しない」と判断】
+# `natural=peak`にはOSM上、山体の大きさ・裾野の広さを示す情報が一切付随しない
+# （標高`ele`はあっても水平方向の広がりは不明）。DEM等の傾斜データなしにこの半径を
+# 拡大する行為は「実データに基づく判断」ではなく推測に等しいため、本Issueでは行わない
+# （代表決定: DEMは投機的に導入しない）。
+# 感度分析（`tools/pack-builder/peak_radius_sensitivity.py`）として
+# 30/50/75/100/150/200mで再生成した結果は research.md §8.9.3 に記録した。
+# 200m（現行の6.7倍）まで拡大しても山は0.02%→0.98%にしか増えず、その代償として
+# 森113ヘクス（森全体の約2.7%）を侵食する。「タグ拡張で到達できる水準」を測るという
+# 本Issueの目的（代表決定2026-09-08）に対し、根拠のない半径拡大で数値を作ることは
+# 目的に反するため、30m据え置きを結論とする。
+
+# 崖・露岩などの局所的な地物（点）。summitより小さい地物であるため、
+# summit用バッファ(30m)をそのまま流用せず、より小さい専用バッファを設ける。
+MOUNTAIN_FEATURE_POINT_RULES = (
+    TagRule("natural", ("cliff", "rock")),
+)
+# 根拠: 露岩(rock)・崖(点表記のcliff)は、山頂のような広い裾野を持つ地物ではなく、
+# 単体の岩・短い崖面という局所的な広がりの地物である。既存のwaterway線バッファ(5m)より
+# 大きく、summitバッファ(30m)よりは明確に小さい値として10mを採用する
+# （具体的な実測値ではなく、地物の性質から見た相対的な大小関係に基づくオーダー感の判断。
+# 本検証エリアには該当データが存在しないため実測での裏付けはできていない）。
+MOUNTAIN_SMALL_FEATURE_BUFFER_M = 10.0
+
+# 稜線(ridge)・崖線(cliffの線表記)。線状の岩場・急斜面の縁を表す。
+MOUNTAIN_LINE_RULES = (
+    TagRule("natural", ("ridge", "cliff")),
+)
+# 根拠は MOUNTAIN_SMALL_FEATURE_BUFFER_M と同じ考え方のため同じ値を採用する
+# （線の両側に均等にバッファすることで帯状の地形として近似する）。
+MOUNTAIN_LINE_BUFFER_M = MOUNTAIN_SMALL_FEATURE_BUFFER_M
 
 
 # --- 優先度4: 森 ----------------------------------------------------------
@@ -160,15 +211,30 @@ def classify_area_tags(tags: dict[str, str]) -> int | None:
     return None
 
 
-def classify_way_tags(tags: dict[str, str]) -> int | None:
-    """開いたway（線: waterway=river/stream/canal 等）のタグから優先度を決める。"""
+def classify_way_tags(tags: dict[str, str]) -> tuple[int, float] | None:
+    """開いたway（線: waterway=river/stream/canal・natural=ridge/cliff 等）の
+    タグから (優先度, バッファ半径m) を決める。
+
+    【2026-09-08 Issue #71】山の線状タグ（natural=ridge・natural=cliff）を
+    追加したのに伴い、線ごとにバッファ幅が異なるため戻り値をタプルに変更した
+    （旧: 優先度のみを返し、呼び出し側が WATERWAY_LINE_BUFFER_M 固定で使っていた）。
+    """
     if any(r.matches(tags) for r in WATERSIDE_LINE_RULES):
-        return PRIORITY_WATERSIDE
+        return PRIORITY_WATERSIDE, WATERWAY_LINE_BUFFER_M
+    if any(r.matches(tags) for r in MOUNTAIN_LINE_RULES):
+        return PRIORITY_MOUNTAIN, MOUNTAIN_LINE_BUFFER_M
     return None
 
 
-def classify_point_tags(tags: dict[str, str]) -> int | None:
-    """ノード（点: natural=peak 等）のタグから優先度を決める。"""
-    if any(r.matches(tags) for r in MOUNTAIN_POINT_RULES):
-        return PRIORITY_MOUNTAIN
+def classify_point_tags(tags: dict[str, str]) -> tuple[int, float] | None:
+    """ノード（点: natural=peak/hill/cliff/rock 等）から (優先度, バッファ半径m) を決める。
+
+    【2026-09-08 Issue #71】classify_way_tags と同じ理由でタプルを返すよう変更した。
+    summit系（peak・hill）とfeature系（cliff・rock）でバッファ幅が異なるため、
+    どちらに一致したかで採用するバッファ半径を切り替える。
+    """
+    if any(r.matches(tags) for r in MOUNTAIN_SUMMIT_POINT_RULES):
+        return PRIORITY_MOUNTAIN, MOUNTAIN_PEAK_BUFFER_M
+    if any(r.matches(tags) for r in MOUNTAIN_FEATURE_POINT_RULES):
+        return PRIORITY_MOUNTAIN, MOUNTAIN_SMALL_FEATURE_BUFFER_M
     return None

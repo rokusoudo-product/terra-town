@@ -87,9 +87,10 @@ def load_geometries(pbf_path: Path, proj: LocalProjection) -> dict[int, list]:
             tags = dict(obj.tags)
             if not tags:
                 continue
-            priority = rules.classify_way_tags(tags)
-            if priority is None:
+            classified = rules.classify_way_tags(tags)
+            if classified is None:
                 continue
+            priority, buffer_m = classified
             try:
                 wkb_hex = wkbfab.create_linestring(obj)
             except RuntimeError as exc:
@@ -97,7 +98,7 @@ def load_geometries(pbf_path: Path, proj: LocalProjection) -> dict[int, list]:
                 continue
             line = shapely.wkb.loads(bytes.fromhex(wkb_hex))
             line_m = proj.project_geom(line)
-            geom_m = line_m.buffer(rules.WATERWAY_LINE_BUFFER_M)
+            geom_m = line_m.buffer(buffer_m)
             buckets[priority].append(geom_m)
             n_way_hits += 1
         elif obj.is_node():
@@ -105,12 +106,13 @@ def load_geometries(pbf_path: Path, proj: LocalProjection) -> dict[int, list]:
             tags = dict(obj.tags)
             if not tags:
                 continue
-            priority = rules.classify_point_tags(tags)
-            if priority is None:
+            classified = rules.classify_point_tags(tags)
+            if classified is None:
                 continue
+            priority, buffer_m = classified
             pt = shapely.geometry.Point(obj.location.lon, obj.location.lat)
             pt_m = proj.project_geom(pt)
-            geom_m = pt_m.buffer(rules.MOUNTAIN_PEAK_BUFFER_M)
+            geom_m = pt_m.buffer(buffer_m)
             buckets[priority].append(geom_m)
             n_node_hits += 1
 

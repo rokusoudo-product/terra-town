@@ -101,6 +101,9 @@ bash extract_area.sh
 
 # (参考) H3の解像度選定の再現。docs/terrain.md §3.1・research.md §8.2 の実測値の再現用
 ./.venv/bin/python h3_resolution_survey.py
+
+# (参考) natural=peak バッファ半径の感度分析の再現。research.md §8.9.3 の実測値の再現用
+./.venv/bin/python peak_radius_sensitivity.py
 ```
 
 ## 出力（`out/pack.sqlite`）のテーブル構成
@@ -126,9 +129,14 @@ bash extract_area.sh
 - `verify_feature_id.py` — H3 index <-> feature_id 橋渡し方式の検証（衝突なし・JSON安全整数範囲内・可逆性）
 - `spot_check_samples.py` — 抜き取り検証用のサンプルヘクス抽出
 - `h3_resolution_survey.py` — H3解像度ごとの平均対辺・実測対辺の算出（`docs/terrain.md` §3.1・`research.md` §8.2 の実測値の再現用）
+- `peak_radius_sensitivity.py` — `natural=peak`バッファ半径（`terrain_rules.MOUNTAIN_PEAK_BUFFER_M`）を30〜200mで変化させた場合の山ヘクス数・森の侵食数の再現用（`research.md` §8.9.3。Issue #71で「30m据え置き」と判断した根拠データ）
 - `download_kanto.sh` / `extract_area.sh` — OSM抽出のダウンロード・bbox切り出し
 
 ## 既知の簡略化・未解決事項
 
 `specs/001-mvp/research.md` §8.7 および `terrain_rules.py`・`docs/terrain.md` §5.1 のコメント参照。
-特に「山」判定（`natural=peak`点タグへの依存）の実用上の妥当性は代表確認事項として残っている。
+
+**【Issue #71（2026-09-08）で対応済み】** 「山」判定タグを拡張（`natural=hill`/`cliff`/`rock`を追加）したが、
+検証エリア（狭山湖周辺）には追加タグに該当する実データが存在せず、出現率は0.02%のまま変化しなかった
+（実測結果・DEM要否の結論は`research.md` §8.9参照）。山の出現率不足の解消自体は
+[Issue #72](https://github.com/rokusoudo-product/terra-town/issues/72)（石・鉄・塩の供給源）に引き継がれている。
