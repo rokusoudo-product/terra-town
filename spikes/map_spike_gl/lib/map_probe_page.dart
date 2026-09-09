@@ -218,6 +218,45 @@ class _MapProbePageState extends State<MapProbePage> {
     }
   }
 
+  // --- 3-3. url方式・tiles配列方式のソース/レイヤーをリセット -----------------
+  // 【2026-09-09追加】2026-09-09の実機セッションで、url方式を追加した後にリセットせず
+  // tiles配列方式を重ねて追加したため、描画がどちらの方式の寄与か厳密に分離できない
+  // という精度の限界が生じた（research.md §6.2参照）。url/tiles方式を比較する際は、
+  // 必ず片方を試す→本ボタンでリセット→もう片方を試す、の順で行うこと
+  // （README「タブ①」節にも同じ注意を記載）。
+  Future<void> _resetMbtilesVectorSources() async {
+    final controller = _controller;
+    if (controller == null) {
+      _appendLog('MBTiles(vector) リセット: マップ未初期化のため中止');
+      return;
+    }
+    const ids = [
+      ['mbtiles_vec_url_fill', 'mbtiles_vec_url_line', 'mbtiles_vec_url_source'],
+      [
+        'mbtiles_vec_tiles_fill',
+        'mbtiles_vec_tiles_line',
+        'mbtiles_vec_tiles_source'
+      ],
+    ];
+    for (final group in ids) {
+      final fillLayerId = group[0];
+      final lineLayerId = group[1];
+      final sourceId = group[2];
+      try {
+        await controller.removeLayer(fillLayerId);
+      } catch (_) {}
+      try {
+        await controller.removeLayer(lineLayerId);
+      } catch (_) {}
+      try {
+        await controller.removeSource(sourceId);
+      } catch (_) {}
+    }
+    _appendLog(
+        'MBTiles(vector) リセット完了: url方式・tiles配列方式のソース/レイヤーを両方削除しました。'
+        'これでどちらか片方だけを試せば、描画がその方式単独の寄与だと確認できます');
+  }
+
   // --- 4. PMTiles読込（フォールバック候補） ------------------------------
   // 公式サンプル（maplibre_gl_example/assets/pmtiles_style.json）はリモートURL
   // ("pmtiles://https://...") をスタイルJSON内のsource.urlとして与える方式。
@@ -449,7 +488,11 @@ class _MapProbePageState extends State<MapProbePage> {
               const Text(
                 'terra-townの地域パックはベクタタイルMBTiles（plan.md）。'
                 'まず①でフィクスチャをコピーしてから、②url方式・③tiles配列方式を'
-                '両方試すこと（どちらが正しいか一次情報で確定できないため）。',
+                '両方試すこと（どちらが正しいか一次情報で確定できないため）。\n'
+                '⚠️ 重要: ②③は同じ色（青い塗り・赤い線）で描画するため、片方を試した後に'
+                'リセットせずもう片方を重ねて試すと、描画がどちらの方式単独の寄与かが'
+                '区別できなくなる。②→リセット→③、の順で1つずつ試すこと'
+                '（2026-09-09の実機セッションでこれをせず重ねたため、この精度の限界が生じた）。',
               ),
               const SizedBox(height: 8),
               ElevatedButton(
@@ -476,6 +519,10 @@ class _MapProbePageState extends State<MapProbePage> {
                   ElevatedButton(
                     onPressed: _loadMbtilesVectorTiles,
                     child: const Text('③ VectorSourceProperties(tiles:)で読込'),
+                  ),
+                  OutlinedButton(
+                    onPressed: _resetMbtilesVectorSources,
+                    child: const Text('リセット（②③を両方削除）'),
                   ),
                 ],
               ),

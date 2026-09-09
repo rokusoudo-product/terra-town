@@ -598,8 +598,10 @@ class _FogFeatureStateBenchmarkPageState
   Widget build(BuildContext context) {
     final updatePass =
         _updateStats != null && _updateStats!.maxMs <= kFsUpdateTargetMs;
+    // 判定には activeFps（無操作区間を除いた fps）を使う。naiveFps は参考値
+    // （2026-09-09・Issue #24 実機セッションで発覚。frame_stats.dart 冒頭コメント参照）。
     final fpsPass =
-        _manualFrameStats != null && _manualFrameStats!.fps >= kFsFpsTarget;
+        _manualFrameStats != null && _manualFrameStats!.activeFps >= kFsFpsTarget;
 
     return Column(
       children: [
@@ -789,7 +791,8 @@ class _FogFeatureStateBenchmarkPageState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '計測B: 手動パン/ズームfps ${fpsPass ? "PASS" : "FAIL"}（基準: 55fps以上）'
+                          '計測B: 手動パン/ズームfps ${fpsPass ? "PASS" : "FAIL"}'
+                          '（基準: activeFps=55fps以上。判定指標はactiveFps。naiveFpsは参考値）'
                           '${_selectedCount != 10000 ? "（注: 現在の選択は$_selectedCount。厳密比較は1万ヘクス選択時に行うこと）" : ""}',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
