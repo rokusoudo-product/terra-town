@@ -1,0 +1,107 @@
+name: Pack Build
+
+# tools/pack-builder/ の地域パック生成パイプラインをCIで再現できることを検証する
+# ワークフロー（Issue #85・T045）。
+#
+# ⚠️ 通常のPR CI（ci.yml）には含めない。理由:
+#   - 関東地方OSM抽出（約477MiB）に加え、Planetiler標準プロファイルが要求する
+#     補助データセット（lake_centerlines・water_polygons・natural_earth、
+#     合計約1.4GB）の初回ダウンロードが発生し、PRごとに実行するには重すぎる。
+#   - actions/cache でこれらをキャッシュしても、キャッシュミス時（初回・
+#     キャッシュ期限切れ時）は毎回このコストが発生する。
+#   - Issue #85 の指示により「実際にGitHub Actionsで走らせなくてよい。ワークフローの
+#     定義と、ローカルで同等の手順が通ることの確認まででよい」とされているため、
+#     手動トリガー（workflow_dispatch）のみとし、通常のCIコストには影響させない。
+#
+# 実行内容: OSM抽出 → 地形属性事前計算（決定論検証込み）→ ベクタタイルMBTiles生成
+#   （決定論検証込み）→ 同梱用パックの組み立て。tools/pack-builder/README.md の
+#   「使い方（エンドツーエンド）」と同じ手順をCI環境で再現する。
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-pack:
+    name: build region pack (Planetiler + osmium)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/pack-builder
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK: ci.yml と同じ21を使う（Planetiler v0.10.2 の要求バージョンでもある。
+      # docs/dev-setup.md §2・Issue #55）。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install osmium-tool (CLI)
+        run: sudo apt-get update && sudo apt-get install -y osmium-tool
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv .venv
+          ./.venv/bin/pip install -r requirements.txt
+
+      # OSM抽出・Planetiler補助データセット（合計約1.9GB）をキャッシュする。
+      # キーはconfig.pyの内容（bbox変更時に別キャッシュへ切り替える）と
+      # Planetilerバージョンに紐付ける。
+      - name: Cache data_cache (OSM extract + Planetiler aux datasets)
+        uses: actions/cache@v4
+        with:
+          path: tools/pack-builder/data_cache
+          key: pack-builder-data-cache-${{ hashFiles('tools/pack-builder/config.py') }}
+
+      - name: Download Kanto OSM extract (skip if cached)
+        run: |
+          if [ ! -f data_cache/kanto-latest.osm.pbf ]; then
+            bash download_kanto.sh
+          else
+            echo "cache hit: data_cache/kanto-latest.osm.pbf"
+          fi
+
+      - name: Extract target area
+        run: bash extract_area.sh
+
+      - name: Classify terrain (with determinism check)
+        run: |
+          ./.venv/bin/python classify_terrain.py
+          ./.venv/bin/python verify_determinism.py
+
+      - name: Verify feature_id bridging
+        run: ./.venv/bin/python verify_feature_id.py
+
+      - name: Slim pack for bundling
+        run: ./.venv/bin/python slim_pack_for_bundle.py
+
+      - name: Export hex GeoJSON (T043 feature id check)
+        run: ./.venv/bin/python export_hex_geojson.py
+
+      # 同一入力から同一出力になることの検証（T045受け入れ基準）。
+      # Planetilerを2回実行するため、このステップだけで数分かかる。
+      - name: Build vector tiles (with determinism check)
+        run: ./.venv/bin/python verify_tiles_determinism.py
+
+      - name: Build vector tiles (final output)
+        run: bash build_vector_tiles.sh out/tiles.mbtiles
+
+      - name: Assemble bundle (app/assets/pack/ 相当の内容をartifactとして出力)
+        run: |
+          mkdir -p out/bundle
+          cp out/region_pack.sqlite out/bundle/region_pack.sqlite
+          cp out/tiles.mbtiles out/bundle/tiles.mbtiles
+          echo "hex_count=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute('SELECT COUNT(*) FROM hex_terrain').fetchone()[0])")"
+
+      # 生成物はリポジトリにコミットしない方針（Issue #85）のため、確認用に
+      # ワークフローのartifactとしてのみ保持する（保存期間は既定の90日）。
+      - name: Upload bundle as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: region-pack-${{ github.sha }}
+          path: tools/pack-builder/out/bundle/
+          retention-days: 14

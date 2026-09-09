@@ -323,6 +323,15 @@ def main() -> None:
     log("aggregating to H3 hexes ...")
     hex_result, cell_rows = aggregate_to_hexes(lon, lat, cell_priority)
 
+    # plan.md §3.5 の暫定上限（30,000ヘクス/1ソース）チェック（Issue #85・T039/T044）。
+    # 超過時の方針（エリア分割等）は本ツールのスコープ外のため、ここでは警告に留める。
+    HEX_COUNT_LIMIT = 30_000
+    if len(hex_result) > HEX_COUNT_LIMIT:
+        log(
+            f"WARNING: hex_count={len(hex_result)} が暫定上限 {HEX_COUNT_LIMIT} "
+            f"（plan.md §3.5）を超えています。エリア分割等の対応が必要です。"
+        )
+
     headers = {header_bits_of(h) for h in hex_result}
     if len(headers) != 1:
         log(f"WARNING: 複数の H3 index ヘッダビットが混在しています: {headers}")
@@ -331,7 +340,19 @@ def main() -> None:
 
     elapsed = time.perf_counter() - t0
 
+    input_pbf_sha256 = sha256_of_file(input_path)
+    # pack_version（Issue #85・T043・plan.md §3.2/§3.3）: エリア識別子・生成ロジックの
+    # バージョン(config.PACK_SCHEMA_VERSION)・入力OSM抽出のsha256（先頭12桁）から
+    # 決定論的に組み立てる純関数。生成時刻・生成順序に依存する要素は含まない
+    # （hex_bridge.py の feature_id と同じ「純関数にする」設計判断を踏襲）。
+    # config.PACK_SCHEMA_VERSION のコメント参照: terrain_rules.py 等のロジックを
+    # 変えたら必ず PACK_SCHEMA_VERSION をインクリメントすること。
+    pack_version = f"{config.AREA_SLUG}-v{config.PACK_SCHEMA_VERSION}-{input_pbf_sha256[:12]}"
+
     meta = {
+        "pack_version": pack_version,
+        "area_slug": config.AREA_SLUG,
+        "pack_schema_version": str(config.PACK_SCHEMA_VERSION),
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "h3_resolution": str(config.H3_RESOLUTION),
         "cell_size_m": str(config.CELL_SIZE_M),
@@ -340,7 +361,7 @@ def main() -> None:
         "bbox_lat_min": str(config.BBOX_LAT_MIN),
         "bbox_lat_max": str(config.BBOX_LAT_MAX),
         "input_pbf": str(input_path.name),
-        "input_pbf_sha256": sha256_of_file(input_path),
+        "input_pbf_sha256": input_pbf_sha256,
         "cell_count": str(len(cell_rows)),
         "hex_count": str(len(hex_result)),
         "generation_seconds": f"{elapsed:.3f}",
