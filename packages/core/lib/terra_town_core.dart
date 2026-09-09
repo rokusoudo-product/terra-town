@@ -6,14 +6,16 @@
 ///
 /// 実装予定の構成は `specs/001-mvp/tasks.md` Phase 3 を参照:
 ///   - src/geo/        HexId・TileId・Distance（T020〜T021・実装済み）
-///   - src/terrain/    TerrainType・地形→資材マッピング（T022 実装済み・T028）
+///   - src/terrain/    TerrainType・地形→資材マッピング（T022・T028 実装済み）
 ///   - src/position/   PositionProvider 抽象・GeoPosition（T023・実装済み）
 ///   - src/pack/       RegionPack 抽象・PackVersion・District・PointOfInterest（T024・実装済み）
 ///   - src/repository/ `Repository<T, ID>` 抽象（T038・実装済み）
-///   - src/economy/    Resource・Inventory（T026〜T027）
+///   - src/economy/    Resource・Inventory（T026〜T027・実装済み）
 library;
 
 export 'src/terra_town_core_base.dart';
+export 'src/economy/inventory.dart';
+export 'src/economy/resource.dart';
 export 'src/geo/distance.dart';
 export 'src/geo/hex_geometry.dart';
 export 'src/geo/hex_id.dart';
@@ -26,3 +28,4 @@ export 'src/position/geo_position.dart';
 export 'src/position/position_provider.dart';
 export 'src/repository/repository.dart';
 export 'src/terrain/terrain_type.dart';
+export 'src/terrain/terrain_yield.dart';
