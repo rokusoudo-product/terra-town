@@ -35,22 +35,13 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
-  # pub.dev 安定版に戻す場合は下のgit依存をコメントアウトし、この行を有効化する。
-  # maplibre_gl: ^0.26.2
-  #
-  # 【2026-08-13 訂正】当初この git 依存は ref: main を指していたが、これは誤りだった。
-  # 0.27.0 の作業（feature-state の Android 実装・Issue #366 のエンコードオフロード）は
-  # main には入っておらず、リリースブランチ release-0.27.0 にある（上流 PR #956 が open）。
-  #   - main の最新コミット: eae2129c / 2026-08-04（上記いずれの修正も未収録）
-  #   - release-0.27.0 の最新: 0024af65 / 2026-08-07（両方収録済みを実地確認）
-  # ref: main のまま計測すると「0.27.0 でも直らない」という誤った結論になるため、
-  # release-0.27.0 を指すこと。切り替えたら lib/plugin_info.dart の
-  # kPluginVersionLabel も手で書き換えること。
-  maplibre_gl:
-    git:
-      url: https://github.com/maplibre/flutter-maplibre-gl.git
-      ref: release-0.27.0
-      path: maplibre_gl
+  # 【2026-09-09 訂正】release-0.27.0 への git 依存は 2026-08-13 時点（0.27.0 未公開）の
+  # 暫定対応だった。0.27.0 は 2026-08-19 に pub.dev へ公開済み（Issue #55・main の
+  # packages/location/pubspec.yaml と同じ判断）。git 依存 + dependency_overrides
+  # （兄弟パッケージ解決のための回避策）は不要になったため撤去し、pub.dev 版に揃える。
+  # feature-state の Android 対応（上流#889）・Issue #366のエンコードオフロードは
+  # いずれも 0.27.0 に収録済み（research.md §6.0 参照）。
+  maplibre_gl: ^0.27.0
 
   # file_picker は不採用（README「既知の制約」参照）: file_picker 11.0.3 が独自に適用する
   # Kotlin Gradle Plugin と maplibre_gl のそれが衝突し、GeneratedPluginRegistrant.java の
@@ -59,31 +50,8 @@ dependencies:
   # 【2026-08-13 除去】path_provider は AGP 9 + maplibre_gl 0.27.0 と両立しない。
   # path_provider_android -> jni_flutter -> jni が org.jetbrains.kotlin.android を適用し、
   # AGP 9 の built-in Kotlin と衝突する。詳細は lib/map_probe_page.dart の冒頭コメント。
-  # 安定版 0.26.2 に戻す場合は復活させてよい。
+  # git依存時代のバージョンに戻す場合以外は復活させないこと。
   # path_provider: ^2.1.6
-
-# release-0.27.0 を git 依存で使う場合に必須。
-# flutter-maplibre-gl はモノレポで、maplibre_gl が兄弟パッケージの ^0.27.0 を要求するが、
-# それらは pub.dev に未公開のため、同じブランチの各 path を override しないと解決に失敗する。
-#   Because every version of maplibre_gl from git depends on maplibre_gl_web ^0.27.0
-#   which doesn't match any versions, maplibre_gl from git is forbidden.
-# 安定版へ戻すときは、このブロックごとコメントアウトすること。
-dependency_overrides:
-  maplibre_gl:
-    git:
-      url: https://github.com/maplibre/flutter-maplibre-gl.git
-      ref: release-0.27.0
-      path: maplibre_gl
-  maplibre_gl_platform_interface:
-    git:
-      url: https://github.com/maplibre/flutter-maplibre-gl.git
-      ref: release-0.27.0
-      path: maplibre_gl_platform_interface
-  maplibre_gl_web:
-    git:
-      url: https://github.com/maplibre/flutter-maplibre-gl.git
-      ref: release-0.27.0
-      path: maplibre_gl_web
 
 dev_dependencies:
   flutter_test:
@@ -107,10 +75,14 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # 【2026-09-09 追加】adb push方式の廃止（Android 13+ でSAF外の任意パスが読めず、
+  # 「権限エラー」と「MapLibreの失敗」が区別できなくなる問題への対応）。
+  # spikes/fixtures/fetch_fixtures.sh が sample.mbtiles をここへコピーする
+  # （.gitignore で除外済み・約5MBのためコミットしない）。未取得のままビルドすると
+  # アセットが見つからずビルド自体が失敗するため、README手順のとおり
+  # fetch_fixtures.sh を先に実行すること。
+  assets:
+    - assets/sample.mbtiles
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -12,7 +12,8 @@ bash fetch_fixtures.sh
 ```
 
 `sample.mbtiles`・`sample.pmtiles` がこのディレクトリに生成される（**リポジトリにはコミットしない**。
-`.gitignore` 参照）。
+`.gitignore` 参照）。あわせて `sample.mbtiles` を `../map_spike_gl/assets/` にもコピーする
+（アプリのアセット同梱用。同じくコミットしない）。
 
 ## 出典・ライセンス
 
@@ -31,7 +32,15 @@ bash fetch_fixtures.sh
 
 ## 実機での使い方
 
-Android端末からこのディレクトリのファイルへ直接アクセスすることはできない（アプリのMBTiles読込は
-「端末上の書き込み可能ディレクトリにコピーしてから参照する」方式のため）。
-`adb push spikes/fixtures/sample.mbtiles /sdcard/Download/` のようにいったん端末へ転送し、
-アプリの入力欄には端末側のパス（例: `/sdcard/Download/sample.mbtiles`）を指定すること。
+**【2026-09-09 変更】`adb push` は使わない。** Android 13+ ではアプリがSAF（Storage Access
+Framework）を通さずに `/sdcard/Download` 等の任意ファイルを直接読めず、`adb push` で配置した
+ファイルへのアクセスが権限エラーになる。これは「MapLibre側の失敗」と外形上区別できず、
+検証結果を汚染する（Androidのスコープドストレージ一般の制約。terra-town固有の一次情報
+での確認はしていない。要確認としてIssue #24側に記録すること）。
+
+かわりに `fetch_fixtures.sh` が `sample.mbtiles` を `map_spike_gl/assets/` へもコピーし、
+`pubspec.yaml` の `flutter: assets:` に登録済みにしてある。`map_spike_gl` アプリのタブ①
+「同梱フィクスチャをコピーして使う」ボタンを押せば、アプリ内蔵のアセットからアプリの
+キャッシュディレクトリ（書き込み可能領域）へ自動コピーされ、そのパスで `mbtiles://` を試せる。
+手入力のパス欄は残しているが、代表が別途用意したファイルを試す場合など補助的な用途とし、
+既定の導線としては使わないこと。
