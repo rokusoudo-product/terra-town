@@ -216,11 +216,11 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ### Implementation for US3
 
-- [ ] T082 [US3] `packages/core/lib/src/building/building_type.dart` に建物3系統7種を実装（住宅・マンション / 畑・農場・工場 / リゾート・ミュージアム — `docs/buildings.md` §2）
-- [ ] T083 [US3] `packages/core/lib/src/building/build_rule_service.dart` に建築可否判定を実装（**開示済みかつ空き地**・1マス1建物・**リゾートは海に隣接**・**ミュージアムはプレイヤーが建設した住宅系建物〔住宅・マンション〕に隣接**〔2026-09-08 代表決定・Issue #70。`docs/buildings.md` §2参照〕）
-- [ ] T084 [US3] `packages/core/lib/src/building/build_cost_service.dart` に建設コスト（建設系資材のみ消費）とアップグレード（Lv.1〜3）を実装（`docs/buildings.md` §4）
-- [ ] T085 [US3] `packages/core/lib/src/population/population_service.dart` に人口メカニクスを実装（建物ごとの人口上限・時間経過で漸増・総人口の閾値到達で産出倍率ボーナス — `docs/buildings.md` §5）
-- [ ] T086 [US3] 生産系建物の産出を実装（畑→野菜/フルーツ、農場→**肉**、工場→街全体の産出効率UP）
+- [ ] T082 [US3] `packages/core/lib/src/building/building_type.dart` に建物3系統8種を実装（住宅・マンション / 畑・農場・工場・**採石場**〔2026-09-09 代表決定・Issue #72〕 / リゾート・ミュージアム — `docs/buildings.md` §2）
+- [ ] T083 [US3] `packages/core/lib/src/building/build_rule_service.dart` に建築可否判定を実装（**開示済みかつ空き地**・1マス1建物・**リゾートは海に隣接**・**ミュージアムはプレイヤーが建設した住宅系建物〔住宅・マンション〕に隣接**〔2026-09-08 代表決定・Issue #70。`docs/buildings.md` §2参照〕・**採石場は空き地であれば山への隣接なしで建築可（山隣接は産出倍率のみに影響）**〔2026-09-09 代表決定・Issue #72。`docs/buildings.md` §2・§6.3参照〕）
+- [ ] T084 [US3] `packages/core/lib/src/building/build_cost_service.dart` に建設コスト（建設系資材のみ消費）とアップグレード（Lv.1〜3）を実装（`docs/buildings.md` §4。**採石場は木のみを消費し石・鉄を含めないこと〔設計要件・balance調整の対象外、§4.1参照〕**）
+- [ ] T085 [US3] `packages/core/lib/src/population/population_service.dart` に人口メカニクスを実装（建物ごとの人口上限・時間経過で漸増・総人口の閾値到達で産出倍率ボーナス・**生活系資材は成長速度への加算的ボーナス〔1種欠けても停止しない、2026-09-09 Issue #72・`docs/buildings.md` §5.2参照〕** — `docs/buildings.md` §5）
+- [ ] T086 [US3] 生産系建物の産出を実装（畑→野菜/フルーツ、農場→**肉**、工場→街全体の産出効率UP、**採石場→石・鉄〔山に隣接する場合は産出倍率あり〕**〔2026-09-09 代表決定・Issue #72。`docs/buildings.md` §6.3参照〕）
 - [ ] T087 [US3] 娯楽系建物の効果を実装（人口が増えやすくなる＋産出効率が少し上がる）
 - [ ] T088 [US3] **地形一次産出と建物定常産出の合算ルール**を実装（spec.md §6 の2層構造。数値は `balance.csv` に委譲）
 - [ ] T089 [US3] `app/lib/features/build/build_screen.dart` に建設UIを実装（建築可能ヘクスのハイライト・コスト表示・`DESIGN.md` 準拠）
