@@ -149,6 +149,30 @@ LD_LIBRARY_PATH=extracted/usr/lib/x86_64-linux-gnu extracted/usr/bin/osmium --ve
 sudoなしで実行できる。`libboost-program-options`のバージョンはUbuntuのバージョンにより
 異なる場合があるため、`apt-cache policy osmium-tool` で依存関係を確認すること。
 
+### 3. 単体テスト（`pytest`・Issue #118）
+
+`tools/pack-builder/tests/` に、`data_cache/`（OSM抽出・Planetiler補助データ）を
+一切使わない純粋関数の単体テストがある。対象は現時点で `terrain_rules.py`
+（`docs/terrain.md` §5 の判定ルール本体）と `hex_bridge.py`（`feature_id`の
+下位52bitマスク方式）の2モジュール。`classify_terrain.py`等のエンドツーエンド実行・
+決定論検証（`verify_determinism.py`等）は引き続き手動トリガー（`pack-build.yml`・
+Issue #85・T045）の担当であり、本テストのスコープではない。
+
+```bash
+cd tools/pack-builder
+./.venv/bin/pip install -r requirements-dev.txt   # pytestのみ（requirements.txtとは別）
+./.venv/bin/python -m pytest
+```
+
+`requirements.txt`（本番パイプライン用。`osmium`・`h3`・`shapely`・`numpy`・`topojson`）とは
+意図的に別ファイル（`requirements-dev.txt`）に分離している。テスト対象が標準ライブラリのみで
+動く純粋関数のため、CI・ローカルとも `pytest` 単体のインストールだけで済む
+（`osmium`のネイティブビルド等、重い依存をテストのために増やさないため）。
+
+PR CI（`.github/workflows/ci.yml`）でもこの2ファイルを対象に `pytest` を実行しており、
+`terrain_rules.py`（判定ルール）を書き換えて壊すと CI が red になる
+（Issue #118・変異チェックの記録は同Issueを close したPR本文参照）。
+
 ## 使い方（エンドツーエンド）
 
 ```bash
