@@ -28,7 +28,7 @@
 
 ## アーキテクチャ / 構成図
 
-MVP は **端末内完結（ステートフルなバックエンドなし）**。外部通信は「地域パックの初回ダウンロード（静的ファイル・任意）」のみで、**歩行位置はサーバに送信しない**。詳細・依存方向図は [docs/architecture.md](docs/architecture.md)。
+MVP は **端末内完結（ステートフルなバックエンドなし）**。**外部との通信はゼロ**（対象1エリアの地域パックは**アプリに同梱**）で、**歩行位置はサーバに送信しない**。都道府県/市域単位に広げる拡張フェーズで初めて地域パックの静的ホスティングからの初回DL（任意）が発生するが、これは MVP には含まれない。詳細・依存方向図・拡張フェーズの構成図は [docs/architecture.md](docs/architecture.md)。
 
 ```mermaid
 flowchart TB
@@ -38,28 +38,28 @@ flowchart TB
         subgraph flutter["Flutter アプリ (Dart)"]
             ui["UI 層（MapLibre GL / Material 3）"]
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画"]
-            loc["packages/location<br/>GPS変換・地図SDK連携"]
+            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装"]
         end
-        native["Kotlin ネイティブ (Pigeon channel)<br/>foreground位置記録・モック/速度検出・歩数・Health Connect"]
-        gamedb[("ゲーム状態 SQLite")]
-        pack[("地域パック（読取専用）<br/>MBTiles＋地形属性＋区画＋POI")]
+        native["Kotlin ネイティブ (Pigeon channel)<br/>foreground位置記録・モック/速度検出・歩数・Health Connect<br/>（未実装・予定）"]
+        gamedb[("ゲーム状態 SQLite<br/>disclosed_hex（開示時点の地形分類スナップショット）等")]
+        pack[("地域パック（読取専用・別接続）<br/>tiles.mbtiles＋cell_terrain/hex_terrain（境界事前計算済）＋district＋poi")]
     end
 
-    cdn["🌐 静的ホスティング<br/>地域パック配布（初回DLのみ）"]
-    ci["🛠 CI: Planetiler（ビルド時）<br/>OSM/国土数値情報→パック生成"]
+    ci["🛠 パック生成（手動実行の CI）<br/>tools/pack-builder/（Planetiler＋Python）"]
 
-    user -->|GPS移動| native
-    native --> gamedb
+    user -.GPS移動（未実装）.-> native
+    native -.-> gamedb
     ui <--> core
-    loc <--> core
+    loc -->|core の抽象を実装| core
     core <--> gamedb
-    core -->|地形/区画/POI 参照| pack
+    core -->|地形は新規開示時のみ／区画・POIは常時 参照| pack
     loc -->|表示専用タイル| pack
-    cdn -.初回のみ.-> pack
-    ci ==>|同梱/配布| pack
+    ci ==>|同梱（生成物はコミットしない）| pack
 
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
+    classDef planned stroke-dasharray: 5 5,fill:#f5f5f5,stroke:#9e9e9e;
     class core pure
+    class native planned
 ```
 
-> 依存方向: `core/`（純粋ロジック）は `location/`（GPS・地図SDK）を import しない一方向依存（[GPS_ARCHITECTURE 準拠](docs/architecture.md)）。
+> 依存方向: `core/`（純粋ロジック）は `location/`（GPS・地図SDK・SQLite）を import しない一方向依存（[GPS_ARCHITECTURE 準拠](docs/architecture.md)）。拡張フェーズの地域パック配布（CDN）は MVP の構成要素ではない — 詳細は [docs/architecture.md](docs/architecture.md)。
