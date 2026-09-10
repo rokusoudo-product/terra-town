@@ -103,10 +103,10 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ### 資材・経済のドメインモデル（spec.md §6・buildings.md §6）
 
-- [ ] T026 [P] `packages/core/lib/src/economy/resource.dart` に資材種別を実装（建設系: 木・石・鉄 / 食料系: 塩・水・野菜・フルーツ・**肉**）
-- [ ] T027 [P] `packages/core/lib/src/economy/inventory.dart` に `Inventory`（資材の加算・消費・上限）を実装
-- [ ] T028 [P] `packages/core/lib/src/terrain/terrain_yield.dart` に地形→資材の一次産出マッピング（森→木、山→石/鉄、水辺→水、海→塩、空き地→産出なし）を実装（Issue #70〔2026-09-08〕により農地・市街を地形タイプから除外。野菜/フルーツ/肉は建物産出専用〔`docs/buildings.md` §6〕）
-- [ ] T029 [P] `packages/core/test/economy/terrain_yield_test.dart` に地形→資材マッピングのテーブル駆動テストを作成
+- [x] T026 [P] `packages/core/lib/src/economy/resource.dart` に資材種別を実装（建設系: 木・石・鉄 / 食料系: 塩・水・野菜・フルーツ・**肉**）
+- [x] T027 [P] `packages/core/lib/src/economy/inventory.dart` に `Inventory`（資材の加算・消費・上限）を実装
+- [x] T028 [P] `packages/core/lib/src/terrain/terrain_yield.dart` に地形→資材の一次産出マッピング（森→木、山→石/鉄、水辺→水、海→塩、空き地→産出なし）を実装（Issue #70〔2026-09-08〕により農地・市街を地形タイプから除外。野菜/フルーツ/肉は建物産出専用〔`docs/buildings.md` §6〕）
+- [x] T029 [P] `packages/core/test/economy/terrain_yield_test.dart` に地形→資材マッピングのテーブル駆動テストを作成
 
 ### データ永続化（plan.md §6）
 
