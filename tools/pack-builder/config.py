@@ -95,6 +95,35 @@ PLANETILER_JAR_PATH = f"{DATA_CACHE_DIR}/planetiler-{PLANETILER_VERSION}.jar"
 PLANETILER_SOURCES_DIR = f"{DATA_CACHE_DIR}/planetiler_sources"
 PLANETILER_TMP_DIR = f"{DATA_CACHE_DIR}/planetiler_tmp"
 
+# --- 行政区域ポリゴン（Issue #86・T041）--------------------------------------
+# 国土数値情報 N03（行政区域データ）。都道府県別に配布されるため、対象エリアの
+# bboxが埼玉県・東京都にまたがることに対応し、両方をダウンロードする。
+# データソース・利用規約・実データ確認の経緯は tools/pack-builder/README.md
+# 「データソースとライセンス」参照（6桁日付の旧版は別データ〔行政区域の変遷〕であり
+# 使用しないこと。8桁日付の第3.1版〔データ基準年 令和5年〕を採用）。
+N03_EDITION = "20230101"
+N03_PREFECTURE_CODES = ["11", "13"]  # 11=埼玉県, 13=東京都
+N03_DIR = f"{DATA_CACHE_DIR}/n03"
+
+# トポロジ保持簡略化の許容誤差（ローカル平面座標・メートル単位）。
+# H3解像度11の対辺実測 47.68m（research.md §8.2）より十分小さい値とし、
+# ヘクス粒度の判定に影響しない範囲で頂点数を削減する
+# （実測: 約80%削減。tools/pack-builder/README.md参照）。
+DISTRICT_SIMPLIFY_TOLERANCE_M = 10.0
+
+# --- 名所POI（Issue #86・T042）------------------------------------------------
+# docs/landmark_objects.md §2.1 の Tier 1（主要層）タグのみを抽出する。
+# Tier 2（補完層。密度不足地域を補うための広めのタグ）は「地域内の主要層密度が
+# 目標密度を下回る場合のみ採用」という条件付きの仕様で、目標密度自体が仮値
+# （docs/landmark_objects.md §3.1）のため、本Issueでは実装しない
+# （tools/pack-builder/README.md「既知の簡略化・未解決事項」参照）。
+#
+# `leisure=park`「一定面積以上」のしきい値は docs/landmark_objects.md 上も
+# 未定義のため、1ヘクタール（100m四方相当）を暫定値として採用した
+# （`MOUNTAIN_SMALL_FEATURE_BUFFER_M` と同種の「実測に基づかないオーダー感の判断」。
+# 代表確認事項として README に記録）。
+POI_PARK_MIN_AREA_M2 = 10_000.0
+
 # --- 出力 -------------------------------------------------------------------
 OUT_DIR = "out"
 

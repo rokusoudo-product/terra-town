@@ -2,14 +2,17 @@
 
 Issue #38（[Spike] pack-builder 最小プロトタイプで地形属性の事前計算を1エリア分検証する）と
 Issue #85（[Impl] Planetiler でベクタタイル MBTiles を生成しバーティカルスライスの地域パックを
-同梱する）の成果物。
+同梱する）、Issue #86（[Impl] 地域パックに行政区域と名所POIを追加しT040の完了状態を確定する）
+の成果物。
 
 `specs/001-mvp/plan.md` §3.2「地域パックの内容物」・§4「資材分類の決定論（事前計算）」・
 `docs/terrain.md` §4・§5 で定義されたパイプラインの実装:
 
 ```
-OSM抽出 → 細分グリッドセルでの地形判定 → H3ヘクスへの多数決集約 → SQLite出力（Issue #38）
-                                                                  → ベクタタイルMBTiles生成（Planetiler・Issue #85）
+OSM抽出 → 細分グリッドセルでの地形判定 → H3ヘクスへの多数決集約 → SQLite出力（Issue #38・T040）
+                                                                  → ベクタタイルMBTiles生成（Planetiler・Issue #85・T039）
+国土数値情報N03 → 対象エリアと交差する市区町村を抽出 → トポロジ保持簡略化 → ヘクス帰属判定 → SQLite出力（Issue #86・T041）
+OSM抽出 → 観光POIタグ（Tier 1）抽出 → 名称・面積フィルタ → SQLite出力（Issue #86・T042）
 ```
 
 **本ツールの生成物（`.osm.pbf`・`*.sqlite`・`*.mbtiles`・`data_cache/`配下全般）は
@@ -29,21 +32,77 @@ OSM抽出 → 細分グリッドセルでの地形判定 → H3ヘクスへの�
 
 ## スコープ
 
-本ツールが実装するのはこれだけ（Issue #38・#85）:
+本ツールが実装するのはこれだけ（Issue #38・#85・#86）:
 
-- 対象エリア1つ分の OSM抽出 → 地形属性の事前計算 → SQLite出力（Issue #38）
+- 対象エリア1つ分の OSM抽出 → 地形属性の事前計算 → SQLite出力（Issue #38・T040）
 - 分類結果の抜き取り検証・決定論の検証（Issue #38）
 - ヘクスID体系（H3）・feature id橋渡し方式の確定（Issue #38）
 - **ベクタタイル MBTiles の生成（Planetiler・Issue #85・T039）**
 - **パックメタ（`pack_version`）の付与・各ヘクスFeature直下への整数`id`の実装確認（Issue #85・T043）**
 - **バーティカルスライス対象エリアのパック生成・`app/assets/`への同梱の仕組み（Issue #85・T044）**
 - **パック生成のCI化（Issue #85・T045・`.github/workflows/pack-build.yml`）**
+- **行政区域ポリゴン（国土数値情報N03）の取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041）**
+- **名所POI（OSM観光POI・Tier 1）の抽出（Issue #86・T042）**
 
-以下は**スコープ外**（他のIssueで実装する）:
+以下は**スコープ外**（他のIssueで実装する、または本Issueで明示的に見送った）:
 
-- 行政区域N03の取り込み（T041）・名所POI抽出（T042） — Issue #86
 - 地図表示の実装そのもの（T055）
 - 地図表示側の検証（Issue #24のR1・R2。`spikes/`配下は本ツールと無関係）
+- ODbL適合の詳細検証・`docs/licenses.md`への記録（Issue #37）
+- 名所オブジェクトのゲーム内仕様（`is_bonus`・収集判定・報酬計算等。Issue #6・`docs/landmark_objects.md`）
+- Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）の抽出（`poi_rules.py`のdocstring参照。
+  目標密度・allowlistとも仮値/未整備のため本Issueでは実装しない）
+- `district`/`hex_district`/`poi`テーブルを`region_pack.sqlite`（`slim_pack_for_bundle.py`・
+  `bundle_region_pack.sh`・`app/assets/pack/`）へ同梱すること（Issue #85・T044の対象であり
+  本Issueでは「作り直さない」よう明示されている。本Issueは`out/districts.sqlite`・
+  `out/poi.sqlite`という独立した出力を作るところまで。同梱への統合は別途フォローアップが必要
+  — 下記「既知の簡略化・未解決事項」参照）
+
+## T040（地形属性の事前計算）の完了状態の調査結果（Issue #86・2026-09-10実施）
+
+Issue #86の指示により、実装着手前に T040 の現状を調査した。結論: **T040は完了**と判断する。
+
+### 満たされている要件（根拠つき）
+
+- **`docs/terrain.md` §5 の判定ルール → §4 の多数決でヘクスに集約 → SQLite `cell_terrain`/`hex_terrain`**:
+  `terrain_rules.py`（§5 の優先順位付きタグ判定の実装）・`classify_terrain.py`
+  （`classify_cells` が優先度判定、`aggregate_to_hexes` が §4 の多数決集約と同数時の
+  決定論的タイブレークを実装）・`write_sqlite`（`cell_terrain`・`hex_terrain` 両テーブルを
+  出力）がすべて揃っている。本Issueで実際に再実行し確認済み（2026-09-10実施）:
+  `cells=1,012,011 hexes=13,106`（`research.md` §8.1・§8.8.1の実測値と完全一致）。
+- **`tasks.md` T040 の「要件追記（2026-09-08・Issue #56）」（各ヘクスFeature直下に整数`id`を
+  持たせること）**: `hex_bridge.py`（下位52bitマスク方式）・`hex_terrain.feature_id`列・
+  `export_hex_geojson.py`（実データ13,106件で「Feature直下の整数`id`・重複なし」を検証）で
+  実装済み。T043の完了記録（tasks.md）が同じ実装を指しており重複実装ではない。
+- **決定論の検証**: `verify_determinism.py` を本Issueで再実行し **PASS**（2回生成の対称差分0件。
+  `research.md` §8.6・§8.8.3・§8.9.6 でも同様の結果が記録済み）。
+- **`feature_id` 橋渡しの検証**: `verify_feature_id.py` を本Issueで再実行し **PASS**
+  （衝突0件・JSON安全整数範囲内・可逆性OK。`research.md` §8.4参照）。
+- **抜き取り検証**: `research.md` §8.5で5地形タイプ（海を除く。対象エリアに海が存在しないため）
+  すべてで実施済み、判定ルールどおりであることを確認済み。
+
+### 満たされていないもの（既知の簡略化として記録済み・T040の完了を妨げない理由）
+
+`research.md` §8.7に記録済みの簡略化のうち、今回あらためて確認したもの:
+
+- **海岸線（`natural=coastline`）からの海面ポリゴン合成が未実装**: 対象エリア（狭山湖周辺）は
+  内陸のため実際の分類結果に影響しない。沿岸部エリアを扱う場合は別途設計が必要（研究ノートに
+  記録済みであり、本Issueで新たに追加すべき対応ではない）。
+- **`building=*`密度による市街判定が未実装**: これは**Issue #70（2026-09-08）で市街が
+  地形タイプそのものから廃止されたため、要件自体が消滅している**（`docs/terrain.md` §5参照）。
+  未実装というより「対象外になった」が正確な表現。
+- **bbox境界をまたぐヘクスの多数決精度**: 境界ヘクスは内側のセルのみで投票するため、内部ヘクスより
+  精度が低い可能性がある（データ品質上の注意点であり、`feature_id`/`hex_id`自体の一意性・
+  不変性には影響しない。`research.md` §8.7参照）。
+
+### 結論
+
+上記の「満たされていないもの」はいずれも (a) 対象エリアの性質上この検証では顕在化しない、
+(b) 別Issueの決定により要件自体が消滅した、(c) 一意性・決定論に影響しないデータ品質上の
+注意点、のいずれかであり、**T040の受け入れ基準（地形判定ルールの実装・多数決集約・
+SQLite出力・整数id要件）を妨げるものではない**。したがって **T040は完了と判定し、
+`specs/001-mvp/tasks.md`のチェックボックスを本Issueでオンにする**（詳細は同ファイルの
+T040行の注記参照）。
 
 ## セットアップ
 
@@ -61,6 +120,8 @@ python3 -m venv .venv
 - `h3` 4.5.0（H3 v4世代のAPI。v3とv4はAPI・挙動が異なるため要注意。`specs/001-mvp/research.md` §8.3参照）
 - `shapely` 2.1.2
 - `numpy` 2.5.3
+- `topojson` 1.10（Issue #86・T041。行政区域ポリゴンのトポロジ保持簡略化。依存は
+  `numpy`・`shapely`・`packaging`のみで`geopandas`等は要求しない）
 
 ### 2. `osmium-tool`（CLI）のインストール
 
@@ -136,12 +197,33 @@ bash build_vector_tiles.sh
 
 # 10. 各ヘクスFeature直下に整数idがあることの検証（T043の受け入れ基準を実際に確認する）
 ./.venv/bin/python export_hex_geojson.py
+
+# 11. 国土数値情報N03（行政区域データ）をダウンロード（都道府県別。既にキャッシュ済みならスキップ）
+bash download_n03.sh
+
+# 12. 行政区域ポリゴンの取り込み（bboxと交差する市区町村を抽出→トポロジ保持簡略化→
+#     ヘクス帰属判定。out/pack.sqlite の hex_terrain を先に生成しておくこと。約1〜2秒）
+./.venv/bin/python extract_districts.py
+# out/districts.sqlite が生成される（テーブル: district, hex_district, pack_meta）
+
+# 13. 行政区域の決定論検証（2回生成して district・hex_district が一致することを確認）
+./.venv/bin/python verify_districts_determinism.py
+
+# 14. 名所POI（OSM観光POI・Tier 1）の抽出（約2〜3秒）
+./.venv/bin/python extract_poi.py
+# out/poi.sqlite が生成される（テーブル: poi, pack_meta）
+
+# 15. POI抽出の決定論検証
+./.venv/bin/python verify_poi_determinism.py
 ```
 
 上記3（`classify_terrain.py`）・7（`build_vector_tiles.sh`）・9（`slim_pack_for_bundle.py`）
 と`app/assets/pack/`へのコピーを一括で実行する場合は `bash bundle_region_pack.sh` を使う
-（下記「バーティカルスライス対象エリアの同梱」参照）。**決定論の検証（4・8）や
+（下記「バーティカルスライス対象エリアの同梱」参照）。**決定論の検証（4・8・13・15）や
 Feature id の検証（10）は含まれない**ため、それらは別途上記の手順で個別に実行すること。
+**`bundle_region_pack.sh`は12〜15（行政区域・POI）を含んでいない**（下記「スコープ」・
+「既知の簡略化・未解決事項」参照。`out/districts.sqlite`・`out/poi.sqlite`は
+`app/assets/pack/`への同梱・`slim_pack_for_bundle.py`への統合を本Issueでは行っていない）。
 
 ## 出力（`out/pack.sqlite`）のテーブル構成
 
@@ -155,6 +237,80 @@ Feature id の検証（10）は含まれない**ため、それらは別途上�
 （抜き取り検証`spot_check_samples.py`・デバッグ用途）、fog of war の実行には`hex_terrain`
 だけで足りるため。`slim_pack_for_bundle.py`が`cell_terrain`を除いた`region_pack.sqlite`
 （実測 約750KB。`cell_terrain`込みの63MBに対して1.2%）を作る。
+
+## 出力（`out/districts.sqlite`）のテーブル構成（T041）
+
+| テーブル | 列 | 説明 |
+|---|---|---|
+| `district` | `district_id, name, prefecture_name, county_name, geometry_geojson` | 行政区域（市区町村）1件。`district_id`は国土数値情報N03の行政区域コード（`N03_007`。5桁）。`geometry_geojson`はトポロジ保持簡略化後のポリゴン（lon/lat・小数点以下7桁に丸め済み） |
+| `hex_district` | `hex_id, district_id` | ヘクス→区画の帰属（plan.md §5「ヘクス重心が区画内かで帰属判定」）。帰属先がない場合（パック範囲外・水域等）はこのテーブルに行が存在しない |
+| `pack_meta` | `key, value` | 生成条件（データソース・edition・ライセンス・簡略化許容誤差・区画数・入力ファイルのSHA256等） |
+
+**`district_id`をキーにする理由**: `packages/core/lib/src/pack/district.dart`の
+`DistrictId`が「パック生成パイプラインが国土数値情報N03から払い出す区画コード等を
+そのまま保持する不透明な識別子」と定義しているため、N03の`N03_007`（都道府県コード+
+市区町村コード）をそのまま使う。
+
+**帰属判定は簡略化前の原本ポリゴンで行う**: `district.geometry_geojson`（表示用）は
+簡略化後だが、`hex_district`の判定自体は`extract_districts.py`内で簡略化前の原本
+ポリゴンに対して行っている（表示の簡略化が判定精度に影響しないようにする設計判断）。
+
+**対象は「bboxと交差する市区町村」であり、bboxでクリップしていない**:
+狭山湖周辺エリア（実測5市区町）程度の規模ではクリップしなくてもパックサイズへの
+影響は軽微な一方、クリップは切断線上でのトポロジ再構築という別のリスクを持ち込むため、
+本Issueでは採用しなかった（`extract_districts.py`冒頭のdocstring参照）。
+
+## 出力（`out/poi.sqlite`）のテーブル構成（T042）
+
+| テーブル | 列 | 説明 |
+|---|---|---|
+| `poi` | `id, lat, lon, kind, name` | 名所POI 1件。`id`はOSMの型を含む文字列（`node/<id>`・`way/<id>`・`relation/<id>`）。`kind`はマッチしたOSMタグ（例: `tourism=viewpoint`）。plan.md §3.2の`poi(id, lat, lon, kind, name)`に一致 |
+| `pack_meta` | `key, value` | 生成条件（データソース・ライセンス・タグ層〔Tier 1のみ〕・面積しきい値・タグ別件数・入力ファイルのSHA256等） |
+
+**Tier 1のみを実装（`poi_rules.py`）**: `docs/landmark_objects.md` §2.1のTier 1
+（`tourism=attraction`/`viewpoint`/`artwork`/`museum`/`gallery`/`zoo`/`theme_park`、
+`historic=monument`/`memorial`/`castle`/`ruins`/`archaeological_site`、
+`leisure=park`〔面積`config.POI_PARK_MIN_AREA_M2`以上〕）のみを抽出する。
+Tier 2（補完層）・ボーナスオブジェクト（`is_bonus`・allowlist照合）は実装していない
+（理由は下記「既知の簡略化・未解決事項」）。
+
+**名称のない地物は除外する**: `name`→`name:ja`の順でフォールバックし、いずれも
+持たない地物は`poi`に含めない（名所図鑑〔Issue #12〕上、名称のない地物は意味を
+持たないため）。
+
+## データソースとライセンス（Issue #86）
+
+### 行政区域ポリゴン（T041）
+
+- **データソース**: 国土数値情報 行政区域データ（N03）。国土交通省。
+- **取得元・版**: `https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2023/N03-20230101_{11,13}_GML.zip`
+  （第3.1版・データ基準年 令和5〔2023〕年1月1日。埼玉県〔11〕・東京都〔13〕）。
+- **⚠️ ファイル命名の罠（実データ確認済み）**: 同じ配布ページに `N03-YYMMDD_{pref}_GML.zip`
+  （6桁日付）という古い命名の版が並んでいるが、これは実体が「行政区域の変遷」
+  （`ksj:AdministrativeBoundary`。明治〜昭和の市区町村合併履歴を表す線データで、
+  現在の行政区域ポリゴンではない）という**別データ**である。実際にダウンロード・
+  展開して`N03_007`（狭山市=11215）が存在しないこと、属性が
+  `administrativeAreaCode`/`cityName`/`formationDate`/`disappearanceDate`である
+  ことを確認して判明した。8桁日付（`N03-20230101_*`）の版が現行の行政区域ポリゴン
+  （属性`N03_001`〜`N03_004`・`N03_007`、面データ）であることを確認済み。
+  `download_n03.sh`のコメントにも記録している。
+- **利用規約**: 「国土数値情報 利用規約」（令和元年以降のデータはオープンデータ）。
+  ただし配布ページには「測量法に基づく国土地理院長承認（複製）R 4JHf 430」
+  「本製品を複製する場合には、国土地理院の長の承認を得なければならない。」という
+  原典表示の注記がある。**この複製承認の要否・対応はIssue #86では判断せず、
+  代表確認事項として残す**（詳細なライセンス適合の記録・`docs/licenses.md`への反映は
+  Issue #37のスコープ）。
+- **座標系**: JGD2011（EPSG:6668）。OSM由来データ（WGS84）との差は数10cmオーダーで、
+  本パイプラインの精度要件（ヘクス約50m四方）に対して無視できるため、既存の
+  `classify_terrain.py`と同様に座標変換は行っていない。
+
+### 名所POI（T042）
+
+- **データソース**: OpenStreetMap（`tools/pack-builder/data_cache/area.osm.pbf`。
+  Geofabrik関東地方抽出からのbbox切り出し。`classify_terrain.py`と同じキャッシュを再利用）。
+- **ライセンス**: Open Database License (ODbL) 1.0 — © OpenStreetMap contributors。
+- **詳細な適合検証（属性表示義務・派生データベースの扱い等）はIssue #37のスコープ**であり、
+  本Issueでは出典の記録のみを行う。
 
 ## `pack_version`（T043）
 
@@ -321,6 +477,12 @@ z0-6）に合わせて**layer名・ズーム範囲・カメラ位置をソース
 - `slim_pack_for_bundle.py` — 同梱用に`cell_terrain`を除いた軽量SQLiteを作る（Issue #85・T044）
 - `export_hex_geojson.py` — 各ヘクスFeature直下の整数`id`要件（T043）の検証・参照実装
 - `bundle_region_pack.sh` — 上記を一括実行し`app/assets/pack/`へ同梱する（Issue #85・T044）
+- `download_n03.sh` — 国土数値情報N03（行政区域データ）のダウンロード（Issue #86・T041）
+- `extract_districts.py` — 行政区域ポリゴンの取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041）
+- `verify_districts_determinism.py` — 行政区域データの決定論検証（Issue #86・T041）
+- `poi_rules.py` — `docs/landmark_objects.md` §2.1 の名所POI抽出ルール（Tier 1のみ）の実装（Issue #86・T042）
+- `extract_poi.py` — 名所POI抽出パイプライン本体（Issue #86・T042）
+- `verify_poi_determinism.py` — 名所POIデータの決定論検証（Issue #86・T042）
 
 ## 既知の簡略化・未解決事項
 
@@ -330,3 +492,52 @@ z0-6）に合わせて**layer名・ズーム範囲・カメラ位置をソース
 検証エリア（狭山湖周辺）には追加タグに該当する実データが存在せず、出現率は0.02%のまま変化しなかった
 （実測結果・DEM要否の結論は`research.md` §8.9参照）。山の出現率不足の解消自体は
 [Issue #72](https://github.com/rokusoudo-product/terra-town/issues/72)（石・鉄・塩の供給源）に引き継がれている。
+
+### Issue #86（行政区域・名所POI）で新たに生じた既知の簡略化・要確認事項
+
+- **Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）は未実装**:
+  `docs/landmark_objects.md` §2.1のTier 2は「地域内の主要層密度が目標密度を下回る
+  場合のみ採用」という条件付き仕様だが、目標密度自体が§3.1で「目標値・仮」と
+  明記されている仮値であり、密度判定の実装は本Issueのスコープを超えると判断した。
+  ボーナスオブジェクト（§2.2）も同様にallowlist（`bonus_landmarks.csv`相当）の
+  整備自体がplan/tasks工程の宿題として明記されている（§7）。実測: 狭山湖周辺の
+  Tier 1抽出結果は16件（`tourism=viewpoint`×2・`museum`×4・`artwork`×2・
+  `attraction`×1・`historic=memorial`×5・`leisure=park`×2）。§3.1の目標密度
+  （都市部で150〜250m四方に1件）と比較すると、25.3km²に16件は疎らであり、
+  **V-B（土地の固有性）の動機づけとして十分な密度かは要確認事項として残す**
+  （Tier 2導入の要否を含め代表確認事項）。
+- **`leisure=park`の面積しきい値（`config.POI_PARK_MIN_AREA_M2` = 10,000m²＝1ha）は仮値**:
+  `docs/landmark_objects.md`上「一定面積以上」としか定義されておらず具体的な
+  しきい値がない。`terrain_rules.MOUNTAIN_SMALL_FEATURE_BUFFER_M`と同種の
+  「実測に基づかないオーダー感の判断」であり、代表確認事項として残す
+  （実測: `leisure=park`のArea 27件中24件がこのしきい値未満で除外され、
+  面積条件を満たした3件のうち名称ありは2件だった）。
+- **`pack_version`の対象範囲**: `config.PACK_SCHEMA_VERSION`は「地形判定ルール・
+  グリッド解像度・feature_id方式」の変更時にインクリメントする値であり（`config.py`の
+  コメント参照）、N03・POI入力の変更はこの定義に含めていない（`PACK_SCHEMA_VERSION`は
+  1のまま据え置いた）。`district_progress.district_id`・`collection.poi_id`が参照する
+  識別子はいずれもN03の`N03_007`・OSMの`node/way/relation`id由来の**安定した外部ID**
+  であるため、N03/POIの入力データが更新されても`pack_version`を変えるか否かに関わらず
+  plan.md §3.3の不変性ルール（過去の獲得履歴の同一性）は保たれるという整理である。
+  この整理が妥当か、あるいは`pack_version`にN03のedition・POI入力のsha256等も
+  含めるべきかは代表確認事項として残す。
+- **国土数値情報N03の複製承認表示**: 配布ページに「測量法に基づく国土地理院長承認
+  （複製）R 4JHf 430」「本製品を複製する場合には、国土地理院の長の承認を得なければ
+  ならない。」という原典表示の注記がある。この対応要否の判断は本Issueでは行わず、
+  代表確認事項として残す（詳細な適合検証・`docs/licenses.md`への反映はIssue #37）。
+- **`district`/`hex_district`/`poi`テーブルは`region_pack.sqlite`（`app/assets/pack/`への
+  同梱物）に統合されていない**: `slim_pack_for_bundle.py`・`bundle_region_pack.sh`・
+  `.github/workflows/pack-build.yml`はいずれも`hex_terrain`/`pack_meta`のみを対象に
+  ハードコードされており（Issue #85・T044・T045で完了済み）、本Issueではこれらを
+  変更していない（「ベクタタイルMBTilesの生成・パック同梱はIssue #85完了済みで
+  作り直さない」というIssue #86のスコープ制約に従った）。したがって
+  `out/districts.sqlite`・`out/poi.sqlite`は現時点では`app/assets/pack/`に
+  同梱されず、アプリの`RegionPack`実装（`location/`側のT069）から参照できない。
+  **同梱への統合は別途フォローアップIssueが必要**（代表確認事項）。
+- **`hex_district`の帰属判定は簡略化前の原本ポリゴンで行っている**が、`district`テーブルに
+  格納するのは簡略化後のポリゴンであるため、両者の間に厳密な対応はない（表示用途と
+  判定用途を分離する設計判断。詳細は「出力（`out/districts.sqlite`）のテーブル構成」参照）。
+  この分離が許容できるかは代表確認事項として残す。
+- **CI（`.github/workflows/pack-build.yml`）は本Issueの新スクリプト
+  （`download_n03.sh`・`extract_districts.py`・`extract_poi.py`とその検証スクリプト）を
+  呼び出していない**: 上記の同梱未統合と同じ理由でワークフローを変更していない。
