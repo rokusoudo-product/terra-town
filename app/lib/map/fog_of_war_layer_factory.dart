@@ -12,7 +12,10 @@ import '../design/map_style_colors.dart';
 /// `MapStyleColor` 経由で MapLibre 用の値に変換し、注入する。
 ///
 /// 実際の `MapView` へのレイヤー登録・`feature-state` 切り替え
-/// （`specs/001-mvp/plan.md` §8・タスク T056）は本 Issue のスコープ外。
+/// （`specs/001-mvp/plan.md` §8）は `packages/location` の `FogOfWarController`
+/// が担う（タスク T056・Issue #100 で実装）。ここで組み立てた [FogOfWarLayer] は
+/// `app/lib/features/map/map_screen.dart` から `MapView.fogOfWarLayer` へ
+/// そのまま渡す。
 FogOfWarLayer buildFogOfWarLayer() {
   return FogOfWarLayer(
     fillColorHex: ColorTokens.fog.toMapLibreHexRGB,
