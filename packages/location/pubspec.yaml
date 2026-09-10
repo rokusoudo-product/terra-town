@@ -20,9 +20,27 @@ dependencies:
   terra_town_core:
     path: ../core
   # fog of war は feature-state 方式（plan.md §8）。Android の setFeatureState は
-  # 0.27.0 で対応（0.26.2 は UnimplementedError）。0.27.0 は 2026-08-19 に pub.dev
-  # へ公開済みのため git 依存（ref 固定）は使わず pub.dev 版を採用する（Issue #55）。
-  maplibre_gl: ^0.27.0
+  # 0.27.0 で対応（0.26.2 は UnimplementedError）。
+  #
+  # 【一時的差し戻し・2026-09-10・Issue #67 / 案A】
+  # Issue #55（2026-09-07 代表決定）では「pub.dev 版 maplibre_gl: ^0.27.0 を採用し、
+  # git 依存（ref 固定）は採らない」と決めていた。しかし 0.27.0 は
+  # android.builtInKotlin=true（Issue #67 の暫定対応）を要求し、これは
+  # kotlin-android を適用する他の Flutter プラグイン（path_provider 等）を
+  # 一切使えなくする相互排他を生む。上流 maplibre/flutter-maplibre-gl の
+  # 修正 PR #1020（"fix(android): apply KGP when AGP does not compile Kotlin
+  # itself"）が 2026-09-08 に main へマージ済みだが、pub.dev は 0.27.0
+  # （2026-08-19）のまま未リリースのため、その修正を取り込むには git 依存が
+  # 必要。2026-09-10 代表決定によりこの git 依存（案A）を一時的に採用する。
+  # ref は上流 main の該当コミットに固定（workspace 構成のため path 指定必須）。
+  # 【撤去条件】0.27.1 以降が pub.dev にリリースされ次第、本エントリを
+  # `maplibre_gl: ^0.27.1`（またはそれ以降）に戻し、Issue #55 の決定に復帰する。
+  # 追跡 Issue は秘書セッションが別途起票する。
+  maplibre_gl:
+    git:
+      url: https://github.com/maplibre/flutter-maplibre-gl.git
+      ref: 2dff788c650f0d49677397aae55423774aecb8f2
+      path: maplibre_gl
 
 dev_dependencies:
   flutter_test:

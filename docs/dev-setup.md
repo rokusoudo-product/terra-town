@@ -144,22 +144,29 @@ flutter doctor
   （本プロジェクトのJDK正本は下記§3のとおり21だが、対話シェル環境ではsdkmanが
   この落とし穴を作りうる点は環境準備一般の注意として本節に記録する）。
 
-### ⚠️ `android.builtInKotlin`（Issue #55 / PR #66・追跡 #67）
+### ⚠️ `android.builtInKotlin` と `maplibre_gl` の git 依存（Issue #67・2026-09-10 対応済み）
 
-`app/android/gradle.properties` の `android.builtInKotlin` は、Flutter 3.44.8 の既定である
-`false` から **暫定的に `true` に変更している**（コメント参照）。
+`app/android/gradle.properties` の `android.builtInKotlin` は Flutter 3.44.8 の既定である
+`false` に戻っている。以前（PR #66）は `maplibre_gl` 0.27.0（pub.dev版）のビルド失敗
+（`Could not find method kotlin()`）を回避するため `true` にしていたが、この設定は
+`kotlin-android` を適用する他の Flutter プラグイン（`path_provider` 等）を軒並み
+使えなくする相互排他を生むブロッカーだったことが実測で判明した（2026-09-10、
+Issue #83 / PR #90 の CI 失敗がきっかけ）。`builtInKotlin=true` と `false` は
+プラグイン構成に対して二者択一であり、両方を同時に満たす設定は存在しない。
 
-- **理由**: `maplibre_gl` 0.27.0 が AGP 9 系（本プロジェクトは AGP 9.0.1）＋
-  `android.builtInKotlin=false` の組み合わせだと `flutter build apk` 時に
-  `Could not find method kotlin()`（`:maplibre_gl` の `build.gradle` 評価失敗）で落ちる。
-  `true` にすると KGP 非推奨警告は出るが、この**評価エラー自体**は解消する。
-- **恒久対応ではない。** Flutter は将来のバージョンで KGP を適用するプラグインのビルドを失敗させる
-  方針を明言している。上流 `maplibre_gl` が Built-in Kotlin（AGP 9+ で KGP 不要）に対応し次第、
-  `false` に戻すこと。撤去条件・進捗は **Issue #67** で追跡する。
+- **現在の構成**: `packages/location/pubspec.yaml` の `maplibre_gl` は pub.dev 版ではなく、
+  上流の修正コミット（`2dff788c650f0d49677397aae55423774aecb8f2` — PR #1020
+  「apply KGP when AGP does not compile Kotlin itself」、2026-09-08 main マージ済み）
+  への git 依存（`path: maplibre_gl` 指定必須。上流はワークスペース構成）。
+  これにより `android.builtInKotlin=false` のままでも `maplibre_gl` のビルドが通る。
+- **一時的差し戻しである**: Issue #55（2026-09-07 代表決定）は「pub.dev 版
+  `maplibre_gl: ^0.27.0` を採用し git 依存は採らない」と決めていた。本対応は
+  pub.dev に上記修正を含む版（0.27.1 以降）が未リリースであることによる一時的な
+  差し戻し。リリースされ次第 pub.dev 版に戻すこと（追跡 Issue は別途起票）。
 - **Flutter をアップグレードする際は必ず Issue #67 を確認すること。** 特に AGP バージョンが変わる
-  Flutter アップデートでは本件が別の形で再発しうる（あるいは解消しうる）。上記 §2 の
+  Flutter アップデートでは本件が別の形で再発しうる。上記 §2 の
   `tools/check_toolchain_versions.sh`（Issue #59, Flutter/JDK のバージョン整合チェック）を
-  Flutter バージョン変更時に実行する運用と合わせて、本フラグの要否もそのタイミングで再評価する。
+  Flutter バージョン変更時に実行する運用と合わせて、本フラグ・git 依存の要否もそのタイミングで再評価する。
 
 ### ⚠️ `maplibre_gl` 0.27.0 は JDK 21 を要求する（解決済み・2026-09-08・JDK 21 に統一）
 
