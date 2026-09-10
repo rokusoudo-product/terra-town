@@ -110,7 +110,7 @@ def simplify_topology(
 
 
 def verify_topology(originals_m: list["shapely.Geometry"], simplified_m: list["shapely.Geometry"]) -> None:
-    """簡略化後も隣接関係（隙間・重なりの有無）が壊れていないことを検証する。"""
+    """簡略化後も隣接関係（隙間・重なりの有無・接触ペアの同一性）が壊れていないことを検証する。"""
     n = len(originals_m)
     for i in range(n):
         for j in range(i + 1, n):
@@ -132,6 +132,24 @@ def verify_topology(originals_m: list["shapely.Geometry"], simplified_m: list["s
         )
     log(f"topology check OK（sum_area - union_area = {gap:.6f} m^2、境界共有は壊れていない）")
 
+    def touching_pairs(geoms: list["shapely.Geometry"]) -> set[tuple[int, int]]:
+        pairs = set()
+        for i in range(n):
+            for j in range(i + 1, n):
+                inter = geoms[i].intersection(geoms[j])
+                if geoms[i].touches(geoms[j]) or inter.length > 0:
+                    pairs.add((i, j))
+        return pairs
+
+    pairs_before = touching_pairs(originals_m)
+    pairs_after = touching_pairs(simplified_m)
+    if pairs_before != pairs_after:
+        raise AssertionError(
+            f"簡略化前後で隣接（接触）ペアの集合が変化しています。簡略化前={pairs_before}, "
+            f"簡略化後={pairs_after}。トポロジ（どの区画同士が隣接するか）が壊れている恐れがあります。"
+        )
+    log(f"touching pairs unchanged（{len(pairs_after)}組。隣接関係は簡略化前後で同一）")
+
 
 def assign_hexes_to_districts(
     hex_ids: list[int],
@@ -145,7 +163,10 @@ def assign_hexes_to_districts(
     多数決タイブレークと同じ考え方）。
     """
     ordered = sorted(districts, key=lambda d: d[0])
-    prepared = [(did, shapely.prepare(g) or g) for did, g in ordered]
+    prepared: list[tuple[str, "shapely.Geometry"]] = []
+    for did, g in ordered:
+        shapely.prepare(g)  # in-place。prepare() 自体は None を返す。
+        prepared.append((did, g))
 
     result: dict[int, str] = {}
     for hex_id in hex_ids:

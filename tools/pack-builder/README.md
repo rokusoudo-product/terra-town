@@ -510,7 +510,17 @@ z0-6）に合わせて**layer名・ズーム範囲・カメラ位置をソース
   `docs/landmark_objects.md`上「一定面積以上」としか定義されておらず具体的な
   しきい値がない。`terrain_rules.MOUNTAIN_SMALL_FEATURE_BUFFER_M`と同種の
   「実測に基づかないオーダー感の判断」であり、代表確認事項として残す
-  （実測: このしきい値により53件中24件のpark区画が除外された）。
+  （実測: `leisure=park`のArea 27件中24件がこのしきい値未満で除外され、
+  面積条件を満たした3件のうち名称ありは2件だった）。
+- **`pack_version`の対象範囲**: `config.PACK_SCHEMA_VERSION`は「地形判定ルール・
+  グリッド解像度・feature_id方式」の変更時にインクリメントする値であり（`config.py`の
+  コメント参照）、N03・POI入力の変更はこの定義に含めていない（`PACK_SCHEMA_VERSION`は
+  1のまま据え置いた）。`district_progress.district_id`・`collection.poi_id`が参照する
+  識別子はいずれもN03の`N03_007`・OSMの`node/way/relation`id由来の**安定した外部ID**
+  であるため、N03/POIの入力データが更新されても`pack_version`を変えるか否かに関わらず
+  plan.md §3.3の不変性ルール（過去の獲得履歴の同一性）は保たれるという整理である。
+  この整理が妥当か、あるいは`pack_version`にN03のedition・POI入力のsha256等も
+  含めるべきかは代表確認事項として残す。
 - **国土数値情報N03の複製承認表示**: 配布ページに「測量法に基づく国土地理院長承認
   （複製）R 4JHf 430」「本製品を複製する場合には、国土地理院の長の承認を得なければ
   ならない。」という原典表示の注記がある。この対応要否の判断は本Issueでは行わず、

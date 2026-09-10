@@ -134,7 +134,8 @@ def extract_pois(pbf_path: Path, proj: LocalProjection) -> tuple[list[dict], dic
             )
 
     log(
-        f"tag hits (before name/area filter): { {f'{k}={v}': c for (k, v), c in per_kind_hits.items()} }"
+        "tag hits (before name filter; leisure=park is counted here only after "
+        f"passing the area threshold): { {f'{k}={v}': c for (k, v), c in per_kind_hits.items()} }"
     )
     log(f"kept per kind: { {f'{k}={v}': c for (k, v), c in per_kind_kept.items()} }")
     log(f"excluded: no_name={n_no_name} park_too_small={n_park_too_small}")
