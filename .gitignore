@@ -50,6 +50,12 @@ tools/pack-builder/data_cache/
 tools/pack-builder/*.sqlite
 *.osm.pbf
 
+# app/assets/pack/ — 同梱地域パック（tools/pack-builder/bundle_region_pack.sh の生成物。
+# Issue #85・T044）。README.md（同梱の仕組みの説明）だけはコミットし、生成物
+# （region_pack.sqlite・*.mbtiles 等）はコミットしない（spikes/fixtures/ と同じ考え方）。
+app/assets/pack/*
+!app/assets/pack/README.md
+
 # --- Python（tools/配下の各種スクリプト共通） ---
 __pycache__/
 *.pyc

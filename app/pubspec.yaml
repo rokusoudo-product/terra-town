@@ -73,6 +73,14 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # assets/pack/: バーティカルスライス対象エリアの地域パック（Issue #85・T044）。
+  # ディレクトリ単位の宣言のため、生成物（region_pack.sqlite・tiles.mbtiles）が
+  # 未取得（README.md のみ存在する状態）でもビルド・テストは失敗しない。
+  # 生成方法: tools/pack-builder/README.md 参照（bundle_region_pack.sh）。
+  # 生成物自体はコミットしない（app/assets/pack/README.md・.gitignore 参照）。
+  assets:
+    - assets/pack/
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
