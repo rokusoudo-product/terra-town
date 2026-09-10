@@ -16,6 +16,7 @@ import 'package:terra_town_core/terra_town_core.dart';
 export 'src/db/building_type.dart';
 export 'src/db/game_database.dart';
 export 'src/db/region_pack_connection.dart';
+export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';
 export 'src/map/map_camera_position.dart';
 export 'src/map/mbtiles_asset.dart';

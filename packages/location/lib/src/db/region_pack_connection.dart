@@ -25,6 +25,13 @@ import 'package:sqlite3/sqlite3.dart' as sqlite3;
 /// 実際の読み取りロジック（`core` の `RegionPack` 抽象の実装）は `location/` 側の
 /// 別タスク（tasks.md T069）が担当する。
 ///
+/// 【2026-09-10 追記・Issue #105】T069 を待たずに [rawSelect] を直接使う先行例として、
+/// `fog_hex_source.dart`（`buildFogHexFeatureCollectionFromRegionPack`・T056）が
+/// `hex_terrain` テーブルを読み、fog of war 用の GeoJSON FeatureCollection を
+/// 組み立てている。これは `core` の `RegionPack` 抽象を経由しない
+/// （地図の幾何表現を返すため、GPS_ARCHITECTURE 準拠で `core` には置けない責務であり、
+/// 構造的に T069 にはなり得ない。詳細は `fog_hex_source.dart` の docstring 参照）。
+///
 /// 【将来、型安全なスキーマに置き換える経路】
 /// [executor] は drift の [QueryExecutor] であるため、地域パックDBのスキーマが
 /// 確定した時点で `GeneratedDatabase` のサブクラス（`GameDatabase` と同様の

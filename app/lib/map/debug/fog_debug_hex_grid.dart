@@ -2,15 +2,22 @@
 /// GeoJSON FeatureCollection を組み立てる。
 ///
 /// 【本ファイルの位置づけ・重要】ここで作る「ヘクス」は**本物のヘクス割り当てではない**。
-/// 実際のヘクス境界ジオメトリ（地域パックの `hex_terrain` テーブルの H3 セルから
-/// 座標を算出する処理）は `RegionPackRepository`（tasks.md T069）が担う想定だが、
-/// 本 Issue（#100・T056）時点では未実装であり、かつ本 Issue のスコープ外
-/// （Issue #100「本Issueのスコープは任意のヘクスを開示するAPIを提供するところまで」）。
+///
+/// 【2026-09-10・Issue #105 で状況が変わった】実際のヘクス境界ジオメトリを組み立てる
+/// 手段は、地域パックの `hex_terrain.boundary_geojson`（事前計算済み）を読む
+/// `terra_town_location` の `buildFogHexFeatureCollectionFromRegionPack`
+/// （`fog_hex_source.dart`）として実装済みである。**「本番相当ヘクス数でのソース構築
+/// コスト計測」（`FogOfWarDebugPanel._runProductionScaleBenchmark`）は、以後は本ファイルの
+/// 合成データではなく、その実装を使って実データ（13,106件）で計測する**（デバッグパネル側の
+/// 変更点は `fog_of_war_debug_panel.dart` 参照）。
+///
+/// 本ファイルの合成データ生成器は、「1マス開示」「すべて開示」「霧に戻す」という
+/// **トグル操作自体の確認**（下記(a)）にのみ引き続き使う。実ヘクスを使わない理由は、
+/// この確認は境界の正確さを問わない軽量なデモであり、地域パック（ディスクI/O）を
+/// 経由せず即座に動かせる利点を残したいため。
 ///
 /// 本ファイルは、代表が実機で
 ///   (a) fog of war のトグル（`FogOfWarController.revealHex`）が実際に霧を晴らすこと
-///   (b) 本番パック相当のヘクス数（13,106・tasks.md T044 実測）での
-///       ソース構築コストの実測
 /// を確認するための**デバッグ専用**の合成データ生成器である。
 /// `app/lib/features/map/map_screen.dart` から `kDebugMode` 配下でのみ使用し、
 /// 製品ビルド（release）には一切現れない。

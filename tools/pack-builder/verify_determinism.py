@@ -31,9 +31,12 @@ def run_once(out_name: str) -> Path:
 def hex_rows(path: Path) -> set[tuple]:
     conn = sqlite3.connect(str(path))
     try:
+        # boundary_geojson（Issue #105）も比較対象に含める。境界計算
+        # （hex_geometry.hex_boundary_lonlat）も決定論的であるべきことを検証するため。
         return set(
             conn.execute(
-                "SELECT hex_id, terrain_type, feature_id, cell_count FROM hex_terrain"
+                "SELECT hex_id, terrain_type, feature_id, cell_count, boundary_geojson "
+                "FROM hex_terrain"
             ).fetchall()
         )
     finally:

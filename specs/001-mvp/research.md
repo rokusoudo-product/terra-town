@@ -782,6 +782,40 @@ docs/terrain.md §3 の「対辺 約50m」に最も近い H3 解像度を、`h3`
 
 **【要確認・代表確認事項】`MOUNTAIN_SMALL_FEATURE_BUFFER_M`（10m）について**: `natural=cliff`（点）・`natural=rock`用に新設したこの値は、実測データではなく「summitバッファ(30m)より小さく、waterway線バッファ(5m)より大きい」という地物の相対的な大小関係のみに基づくオーダー感の判断である（§8.9.1参照）。検証エリアに該当データが存在しないため実測での裏付けができておらず、他の値（例: 5m・15m・20m）でも同程度に説明可能である。代表の確認を要する事項として残す。
 
+### 8.10 ヘクス境界（`hex_terrain.boundary_geojson`）の事前計算とサイズ実測（Issue #105・2026-09-10実施）
+
+[Issue #105](https://github.com/rokusoudo-product/terra-town/issues/105)「fog of war 用のヘクス形状をどこで作るか決める」の実施記録。§8.4で確立した`feature_id`橋渡し方式に続き、ヘクスの**形状**（六角形境界）を`tools/pack-builder/`で事前計算し`region_pack.sqlite`に格納する方式（2026-09-10代表決定・案A）を実装した。
+
+#### 8.10.1 実装
+
+`tools/pack-builder/hex_geometry.py`（新規）が`h3-py`（既存依存・4.5.0）で境界を計算し、`classify_terrain.py`が`hex_terrain.boundary_geojson`列（GeoJSON Polygon座標配列の閉環・小数点以下7桁丸め・JSONテキスト）に格納する。`slim_pack_for_bundle.py`は本列を含めて同梱用にコピーする。`export_hex_geojson.py`は格納済みの値と今この場での再計算結果が一致することを検証するよう改めた（詳細は各ファイルの docstring・`tools/pack-builder/README.md`「ヘクス境界」節参照）。
+
+#### 8.10.2 決定論の検証
+
+`verify_determinism.py`の比較対象タプルに`boundary_geojson`を追加した上で2回生成し、**対称差分0件（PASS）**を確認した（13,106ヘクス完全一致）。`export_hex_geojson.py`も全13,106件で「格納済みboundary_geojsonが`hex_geometry.hex_boundary_lonlat`の再計算結果と完全一致する」ことを確認した（`verify_feature_id.py`・`verify_determinism.py`とあわせて3種類目の決定論確認）。
+
+#### 8.10.3 同梱サイズの実測（受け入れ基準「実測されること」への回答）
+
+エンコード方式は代表決定コメントの指示どおり「まず素朴に実装してサイズを実測する」を採用した。GeoJSON座標配列をJSONテキストのままSQLiteのTEXT列に格納する方式（bbox相対の固定小数点等の圧縮は行っていない）。
+
+| 項目 | 値 |
+|---|---|
+| `region_pack.sqlite`（Issue #105着手前・`boundary_geojson`列なし） | 770,048 bytes（約752KB） |
+| `region_pack.sqlite`（Issue #105実装後・7桁丸め・本Issueで採用した最終形） | 3,313,664 bytes（約3.16MB） |
+| 増分 | 2,543,616 bytes（約2.44MB）。13,106ヘクスで割ると1ヘクスあたり約194バイト |
+| 参考: 座標を丸めない場合の境界データ単体（`hex_id`+`boundary_geojson`の2列だけのSQLite。他列を含む実運用の`region_pack.sqlite`とは条件が異なる比較用の値） | 4,157,440 bytes（約3.96MB）。7桁丸め（採用方式）は無丸めに対し約20%小さい |
+| `pack.sqlite`（`cell_terrain`込み・フル出力） | 69,144,576 bytes（約66MB。`boundary_geojson`追加前は66,600,960 bytes） |
+| `tiles.mbtiles`（変更なし） | 696,320 bytes（約680KB） |
+| 同梱パック合計（`region_pack.sqlite` + `tiles.mbtiles`） | 4,009,984 bytes（約3.98MB）。追加前は約1.43MB |
+
+**7桁丸めは圧縮ではない**: `extract_districts.py`の`district.geometry_geojson`が既に採用している精度（約1.1cm相当）に合わせただけであり、bbox相対固定小数点のような圧縮アルゴリズムではない。
+
+**「許容範囲か」の判断（要確認）**: Issue起票時点の見積り「約300KBに収まる見込み」は実測ではるかに下回られ、素朴な実装では約2.44MBの増分となった。`plan.md`・`docs/`をgrepした限り、同梱アセットの総サイズに対する明記された上限は存在しない（Android Auto Backupの25MB上限はゲーム状態のエクスポート/インポート要件でありplan.md §6の別の話。fog of warのソース構築コスト基準・plan.md §8「2秒以内」はヘクス**数**に対する基準であり同梱バイト数とは無関係）。MVPは1エリアのみをアプリに同梱する設計（plan.md §3.3）であるため、本Issueでは代表決定コメントの「実測値が許容範囲なら、そのまま確定してよい」に従い、**この素朴な実装のまま確定した**。ただしこの「許容範囲である」という判断自体は代表確認を経ていないため、要確認として記録する。許容できないと判断された場合は、bbox相対の固定小数点等の圧縮をフォローアップIssueで検討する。
+
+#### 8.10.4 `pack_version`を上げなかった判断（要確認）
+
+`config.PACK_SCHEMA_VERSION`は本Issueでインクリメントしていない。`config.py`のコメントが定める契約は「同じ`pack_version`なら同じ*分類結果*（terrain_typeの判定）になる」ことであり、境界ジオメトリの追加は既存の分類ロジック・判定ルールを変えない付随データの追加であるため、この契約に抵触しないと判断した。この判断も代表確認を経ていないため要確認として記録する（`classify_terrain.py`の該当コメントにも同旨を記載済み）。
+
 ---
 
 ## 出典

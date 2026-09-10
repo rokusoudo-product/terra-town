@@ -193,9 +193,12 @@ bash build_vector_tiles.sh
 
 # 9. 同梱用に軽量化（cell_terrainを除いたSQLiteを作る）
 ./.venv/bin/python slim_pack_for_bundle.py
-# out/region_pack.sqlite が生成される（約750KB。cell_terrain込みの63MBに対して1.2%）
+# out/region_pack.sqlite が生成される（約3.16MB。cell_terrain込みの66MBに対して約4.8%。
+# Issue #105でhex_terrain.boundary_geojson（ヘクス境界）を追加したため、
+# 追加前の約750KBから増加した。詳細は下記「ヘクス境界（boundary_geojson・Issue #105）」参照）
 
 # 10. 各ヘクスFeature直下に整数idがあることの検証（T043の受け入れ基準を実際に確認する）
+# （Issue #105以降は、格納済みboundary_geojsonが再計算結果と一致することもあわせて検証する）
 ./.venv/bin/python export_hex_geojson.py
 
 # 11. 国土数値情報N03（行政区域データ）をダウンロード（都道府県別。既にキャッシュ済みならスキップ）
@@ -230,13 +233,14 @@ Feature id の検証（10）は含まれない**ため、それらは別途上�
 | テーブル | 列 | 説明 |
 |---|---|---|
 | `cell_terrain` | `cell_id, hex_id, lon, lat, terrain_type` | 細分グリッドセル（`config.CELL_SIZE_M`四方）単位の判定結果。生成過程の中間データ |
-| `hex_terrain` | `hex_id, terrain_type, feature_id, cell_count` | H3ヘクス単位に多数決集約した最終結果。`hex_id`はH3 index（64bit整数、正）。`feature_id`は地図Feature用に下位52bitマスクした値（`docs/terrain.md` §4.4参照） |
-| `pack_meta` | `key, value` | 生成条件（`pack_version`・bbox・解像度・セルサイズ・入力ファイルのSHA256・所要時間・各ツールのバージョン等） |
+| `hex_terrain` | `hex_id, terrain_type, feature_id, cell_count, boundary_geojson` | H3ヘクス単位に多数決集約した最終結果。`hex_id`はH3 index（64bit整数、正）。`feature_id`は地図Feature用に下位52bitマスクした値（`docs/terrain.md` §4.4参照）。`boundary_geojson`はヘクス境界（`[[lon,lat],...,[lon,lat]]`の閉環・小数点以下7桁丸め・JSONテキスト。Issue #105・下記「ヘクス境界」節参照） |
+| `pack_meta` | `key, value` | 生成条件（`pack_version`・bbox・解像度・セルサイズ・入力ファイルのSHA256・所要時間・各ツールのバージョン・`hex_boundary_format`等） |
 
 **`cell_terrain`は同梱対象外と判断した**（Issue #85・T044）。生成過程の中間データであり
 （抜き取り検証`spot_check_samples.py`・デバッグ用途）、fog of war の実行には`hex_terrain`
 だけで足りるため。`slim_pack_for_bundle.py`が`cell_terrain`を除いた`region_pack.sqlite`
-（実測 約750KB。`cell_terrain`込みの63MBに対して1.2%）を作る。
+（実測 約3.16MB。Issue #105で`boundary_geojson`を追加する前は約750KBだった。
+`cell_terrain`込みの66MBに対して約4.8%）を作る。
 
 ## 出力（`out/districts.sqlite`）のテーブル構成（T041）
 
@@ -327,9 +331,67 @@ Tier 2（補完層）・ボーナスオブジェクト（`is_bonus`・allowlist�
 `hex_terrain.feature_id`列がこれに当たる（Issue #38で実装済み・`hex_bridge.py`）。
 `export_hex_geojson.py`が実際にGeoJSON Featureを組み立て、
 「直下（`properties`の外）に整数`id`を持つ」「重複がない」ことを実データ（13,106件）で
-検証する。**このGeoJSONファイル自体はパックに同梱しない**（参照実装・検証用。
-plan.md §8のとおり`location/`が実行時に`hex_terrain`から組み立てる。詳細は
-`export_hex_geojson.py`冒頭のdocstring参照）。
+検証する。**このGeoJSONファイル自体はパックに同梱しない**（参照実装・検証用）。
+
+**⚠️ 旧記述の訂正（Issue #105）**: 本節はかつて「`location/`が実行時に`hex_terrain`から
+組み立てる」としていたが、これは実装が存在しない設計意図倒れだったとIssue #105で判明した。
+**現在の採用方式（下記「ヘクス境界」節参照）はヘクス境界自体を`hex_terrain.boundary_geojson`
+列にパック生成時点で事前計算・格納し、`location/`は読むだけ**にする。
+
+## ヘクス境界（`hex_terrain.boundary_geojson`・Issue #105）
+
+**背景**: fog of war（Issue #100・T056）の`FogOfWarController`は、全ヘクスの六角形境界を
+持つGeoJSON FeatureCollectionを受け取る前提で実装されていたが、その境界を実際に組み立てる
+手段がどこにも存在しなかった（`location/`にH3の依存が無かった）ため、実データ13,106件を
+fog of warに載せられなかった（Issue #105）。
+
+**採用方式（2026-09-10代表決定・案A）**: `tools/pack-builder/hex_geometry.py`が
+`h3-py`（4.5.0・既存依存）でH3セルの境界を計算し、`classify_terrain.py`が
+`hex_terrain.boundary_geojson`列（`[[lon,lat],...,[lon,lat]]`の閉環・GeoJSON Polygon座標配列・
+小数点以下7桁丸め・JSONテキスト）に格納する。`location/`はこの列を読むだけで、
+実行時にH3ライブラリで境界計算を行わない。
+
+**採用理由（要旨。全文はIssue #105の代表決定コメント参照）**:
+- **決定論**: 実行時計算はH3ライブラリのバージョン差で形状が揺れうる。CIで1回だけ計算し
+  固定するほうが安定する（plan.md §4 advisor必須修正②と同じ論理）。
+- **実行時コストを増やさない**: 起動時に13,106ヘクス分の境界計算を端末で行わずに済む。
+- 追加依存が不要（`h3-py`は既存）。
+
+**退けた案**: 案B（Dartに`h3_dart`を入れて実行時計算）・案C（`export_hex_geojson.py`の
+GeoJSONをそのまま同梱）。いずれもIssue #105の代表決定コメントに理由つきで記録済み。
+
+**丸め桁数について（圧縮ではない）**: 小数点以下7桁への丸めは、`extract_districts.py`の
+`district.geometry_geojson`が既に採用している精度（約1.1cm相当）に合わせただけであり、
+「圧縮」ではない（`hex_geometry.py`冒頭docstring参照）。
+
+**エンコード方式とサイズの実測（Issue #105受け入れ基準）**: 最初から凝った圧縮は作らず、
+まず素朴な形式（GeoJSON座標配列のJSONテキストをそのままSQLiteのTEXT列に格納）で実装し、
+実測した。
+
+| 項目 | 値 |
+|---|---|
+| `region_pack.sqlite`（`boundary_geojson`追加前・Issue #105着手前の実測） | 770,048 bytes（約752KB） |
+| `region_pack.sqlite`（`boundary_geojson`追加後・7桁丸め・本Issueで採用） | 3,313,664 bytes（約3.16MB） |
+| 参考: 7桁丸めをしない場合の境界データ単体（`hex_id`+`boundary_geojson`のみの表・比較用） | 4,157,440 bytes（約3.96MB）。7桁丸めにより約20%削減 |
+| 増分（採用した7桁丸め版 − 追加前） | 約2.44MB（13,106ヘクス、1ヘクスあたり約195バイト） |
+
+**判断（要確認）**: 上記の増分は「代表決定コメントに書かれた見積り（約300KB）」を大きく
+上回るが、以下の理由から**この実測値のまま確定してよいと判断した**。ただし本判断は
+代表確認を経ていないため要確認として記録する。
+- MVPは1エリアのみをアプリに同梱する方式であり（plan.md §3.3。拡張エリアは静的ホスティングから
+  初回DL）、対象は狭山湖エリア1つの13,106ヘクス分に限られる。
+- 同梱パック全体（`region_pack.sqlite` + `tiles.mbtiles`）でも約4.0MBであり、
+  `plan.md`・`docs/`のどこにもAPK/同梱アセットの総サイズ上限は明記されていない
+  （本README作成時点でgrep済み。Android Auto Backupの25MB上限はゲーム状態の
+  エクスポート/インポート要件であり、同梱アセットとは無関係 — plan.md §6）。
+- fog of warのソース構築コスト（plan.md §8の主基準「2秒以内」）はヘクス**数**に依存する
+  基準であり、1ヘクスあたりのバイト数（同梱サイズ）とは別の指標のため、本変更は
+  その基準に影響しない。
+- 「許容できない場合に限り圧縮を検討する」という代表決定の方針に従い、まず素朴な実装を
+  確定する。bbox相対の固定小数点等の圧縮は、代表が上記実測値を見て「許容できない」と
+  判断した場合のフォローアップIssueとする。
+
+詳細な実測条件・追加の比較値は`specs/001-mvp/research.md` §8.10参照。
 
 ## ベクタタイルMBTiles生成（T039）
 
@@ -398,7 +460,7 @@ bash bundle_region_pack.sh
 |---|---|
 | ヘクス数 | **13,106**（plan.md §3.5 の暫定上限30,000の44%） |
 | `pack_version` | `sayamako-v1-9a66e066b0d4` |
-| `region_pack.sqlite`（同梱分） | 約750KB |
+| `region_pack.sqlite`（同梱分） | 約3.16MB（Issue #105で`boundary_geojson`列を追加する前は約750KB。詳細は「ヘクス境界」節参照） |
 | `tiles.mbtiles`（同梱分） | 約680KB |
 | 地形属性の事前計算（`classify_terrain.py`） | 約6.7秒 |
 | ベクタタイル生成（`build_vector_tiles.sh`） | 約39秒〜1分20秒 |
