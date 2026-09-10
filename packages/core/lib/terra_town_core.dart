@@ -8,7 +8,9 @@
 ///   - src/geo/        HexId・TileId・Distance（T020〜T021・実装済み）
 ///   - src/terrain/    TerrainType・地形→資材マッピング（T022・T028 実装済み）
 ///   - src/position/   PositionProvider 抽象・GeoPosition（T023・実装済み）
-///   - src/pack/       RegionPack 抽象・PackVersion・District・PointOfInterest（T024・実装済み）
+///   - src/pack/       RegionPack 抽象・PackVersion・District・PointOfInterest（T024・実装済み）・
+///                     DisclosedHexSet（圧縮表現）・DisclosedHex/PackVersionResolver
+///                     （パック更新の不変性ルール）（T035〜T036・実装済み）
 ///   - src/repository/ `Repository<T, ID>` 抽象（T038・実装済み）
 ///   - src/economy/    Resource・Inventory（T026〜T027・実装済み）
 library;
@@ -20,8 +22,11 @@ export 'src/geo/distance.dart';
 export 'src/geo/hex_geometry.dart';
 export 'src/geo/hex_id.dart';
 export 'src/geo/tile_id.dart';
+export 'src/pack/disclosed_hex.dart';
+export 'src/pack/disclosed_hex_set.dart';
 export 'src/pack/district.dart';
 export 'src/pack/pack_version.dart';
+export 'src/pack/pack_version_resolver.dart';
 export 'src/pack/point_of_interest.dart';
 export 'src/pack/region_pack.dart';
 export 'src/position/geo_position.dart';
