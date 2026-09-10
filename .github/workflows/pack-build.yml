@@ -96,6 +96,9 @@ jobs:
           cp out/region_pack.sqlite out/bundle/region_pack.sqlite
           cp out/tiles.mbtiles out/bundle/tiles.mbtiles
           echo "hex_count=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute('SELECT COUNT(*) FROM hex_terrain').fetchone()[0])")"
+          # Issue #105: hex_terrain.boundary_geojson（事前計算済みヘクス境界）を
+          # 追加したため、同梱サイズをCIログにも残す（README.md「ヘクス境界」節参照）。
+          ls -l out/bundle/region_pack.sqlite out/bundle/tiles.mbtiles
 
       # 生成物はリポジトリにコミットしない方針（Issue #85）のため、確認用に
       # ワークフローのartifactとしてのみ保持する（保存期間は既定の90日）。

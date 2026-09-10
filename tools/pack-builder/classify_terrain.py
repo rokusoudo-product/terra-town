@@ -44,6 +44,7 @@ import shapely.wkb
 import config
 import terrain_rules as rules
 from hex_bridge import h3_to_feature_id, header_bits_of
+from hex_geometry import hex_boundary_lonlat
 from local_projection import LocalProjection
 
 HERE = Path(__file__).resolve().parent
@@ -247,7 +248,8 @@ def write_sqlite(
                 hex_id INTEGER PRIMARY KEY,
                 terrain_type TEXT NOT NULL,
                 feature_id INTEGER NOT NULL,
-                cell_count INTEGER NOT NULL
+                cell_count INTEGER NOT NULL,
+                boundary_geojson TEXT NOT NULL
             )
             """
         )
@@ -261,13 +263,21 @@ def write_sqlite(
         )
 
         # hex_id で安定ソートして書き込む（決定論チェックのしやすさのため）。
+        # boundary_geojson（Issue #105・案A）: H3セルの六角形境界を
+        # [[lon, lat], ..., [lon, lat]]（閉環・7桁丸め）の JSON テキストとして
+        # ここで事前計算し格納する。`location/` はこれを読むだけで、実行時に
+        # H3ライブラリで境界計算をしない（決定論・実行時コスト削減。
+        # hex_geometry.py のモジュール docstring 参照）。
         for hex_id in sorted(hex_result):
             terrain_type, _winning_priority, counter = hex_result[hex_id]
             cell_count = sum(counter.values())
             feature_id = h3_to_feature_id(hex_id)
+            boundary_geojson = json.dumps(hex_boundary_lonlat(hex_id))
             conn.execute(
-                "INSERT INTO hex_terrain (hex_id, terrain_type, feature_id, cell_count) VALUES (?, ?, ?, ?)",
-                (hex_id, terrain_type, feature_id, cell_count),
+                "INSERT INTO hex_terrain "
+                "(hex_id, terrain_type, feature_id, cell_count, boundary_geojson) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (hex_id, terrain_type, feature_id, cell_count, boundary_geojson),
             )
 
         conn.executemany(
@@ -347,6 +357,14 @@ def main() -> None:
     # （hex_bridge.py の feature_id と同じ「純関数にする」設計判断を踏襲）。
     # config.PACK_SCHEMA_VERSION のコメント参照: terrain_rules.py 等のロジックを
     # 変えたら必ず PACK_SCHEMA_VERSION をインクリメントすること。
+    #
+    # 【要確認・Issue #105】本Issueで追加した hex_terrain.boundary_geojson は
+    # PACK_SCHEMA_VERSION を上げていない。理由: 同バージョンの契約は
+    # 「同じ pack_version なら同じ *分類結果*（terrain_type の判定）になる」ことであり
+    # （config.py の PACK_SCHEMA_VERSION コメント参照）、境界ジオメトリは分類結果に
+    # 加算されるだけの付随データで、既存の分類ロジック・判定ルールを一切変えていない。
+    # ただしこの判断（「幾何の追加は非破壊的変更なのでバージョンを上げなくてよい」）は
+    # 代表確認を経ていないため要確認として記録する。
     pack_version = f"{config.AREA_SLUG}-v{config.PACK_SCHEMA_VERSION}-{input_pbf_sha256[:12]}"
 
     meta = {
@@ -356,6 +374,9 @@ def main() -> None:
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "h3_resolution": str(config.H3_RESOLUTION),
         "cell_size_m": str(config.CELL_SIZE_M),
+        # hex_terrain.boundary_geojson の格納形式（Issue #105）。`location/` 側の
+        # 読み取り実装がこの値を前提にできるよう記録する。
+        "hex_boundary_format": "geojson_ring_lonlat_closed_7dp",
         "bbox_lon_min": str(config.BBOX_LON_MIN),
         "bbox_lon_max": str(config.BBOX_LON_MAX),
         "bbox_lat_min": str(config.BBOX_LAT_MIN),

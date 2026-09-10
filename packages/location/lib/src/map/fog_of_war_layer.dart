@@ -50,10 +50,18 @@ class FogOfWarLayer {
 /// 本クラスが提供するのは「任意のヘクスを開示する API」までである。以下は
 /// 本クラスの責務**外**:
 ///   - どのヘクスを開示すべきかの判定（歩行による開示判定・T054・Issue #101）
-///   - [hexFeatureCollection] そのものの組み立て（地域パックの `hex_terrain`
-///     テーブルから実際のヘクス境界ジオメトリを算出する処理。`RegionPackRepository`
-///     ＝ T069 は本 Issue 時点で未実装のため、本クラスは呼び出し側が用意した
-///     FeatureCollection を受け取るだけに留める）
+///   - [hexFeatureCollection] そのものの組み立て。**2026-09-10・Issue #105 で解決**:
+///     地域パックの `hex_terrain` テーブルは、ヘクス境界ジオメトリ
+///     （`boundary_geojson` 列）を**パック生成時に事前計算済み**として持つ
+///     （`tools/pack-builder/hex_geometry.py`・代表決定の案A）。本パッケージの
+///     [buildFogHexFeatureCollectionFromRegionPack]（`fog_hex_source.dart`）が
+///     [RegionPackConnection] からこれを読み出し、そのまま渡せる
+///     FeatureCollection を組み立てる（T056 の責務。`core` の `RegionPack` 抽象
+///     ＝ T069・`RegionPackRepository` は幾何を扱えないため、この処理は
+///     構造的に T069 には属さない — `fog_hex_source.dart` の docstring参照）。
+///     本クラス（[install]）自体は従来どおり、組み立て済みの FeatureCollection
+///     を受け取るだけに留める（責務を分離するため、本クラスが直接
+///     [RegionPackConnection] を読むことはしない）
 ///   - 開示状態の永続化・復元（T060・Issue #102）
 ///
 /// ## ⚠️ 開示状態の正は永続ストレージである（最重要）

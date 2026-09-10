@@ -3,9 +3,11 @@
 
 `classify_terrain.py` の出力（`out/pack.sqlite`）は `cell_terrain`（生成過程の中間データ。
 細分グリッドセル単位、5m四方で約100万行）を含むため約63MB になる。しかし `app/assets/`
-に同梱する必要があるのは `hex_terrain`（H3ヘクス単位に集約済みの最終結果）と `pack_meta`
-だけであり、`cell_terrain` を落とすと約744KB まで縮む
-（実測: `specs/001-mvp/research.md` §8.1「`hex_terrain` テーブルだけを残した場合のサイズ」）。
+に同梱する必要があるのは `hex_terrain`（H3ヘクス単位に集約済みの最終結果。
+`boundary_geojson` 列＝ fog of war 用のヘクス境界を含む・Issue #105）と `pack_meta`
+だけであり、`cell_terrain` を落とすと大幅に縮む
+（実測: `specs/001-mvp/research.md` §8.1・§8.10「`hex_terrain` テーブルだけを残した場合の
+サイズ」。§8.10 は `boundary_geojson` 追加後の実測値）。
 
 `cell_terrain` は抜き取り検証（`spot_check_samples.py`）や将来のデバッグに使うため
 `classify_terrain.py` 側では引き続きデフォルトで出力する。本スクリプトは
@@ -52,13 +54,17 @@ def main() -> None:
         # ATTACH して hex_terrain / pack_meta だけを新しいDBにコピーする。
         # cell_terrain（生成過程の中間データ）は同梱対象外（本ファイル docstring 参照）。
         dst.execute("ATTACH DATABASE ? AS src", (str(input_path),))
+        # boundary_geojson（Issue #105・案A）: fog of war 用のヘクス境界。
+        # 同梱パックにも含める（`location/` が実行時に読むため。cell_terrain と異なり
+        # 生成過程の中間データではなく、fog of war の描画に必須のデータのため落とさない）。
         dst.execute(
             """
             CREATE TABLE hex_terrain (
                 hex_id INTEGER PRIMARY KEY,
                 terrain_type TEXT NOT NULL,
                 feature_id INTEGER NOT NULL,
-                cell_count INTEGER NOT NULL
+                cell_count INTEGER NOT NULL,
+                boundary_geojson TEXT NOT NULL
             )
             """
         )

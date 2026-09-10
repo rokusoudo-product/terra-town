@@ -6,8 +6,10 @@
     python verify_determinism.py
 
 `classify_terrain.py` を2回（別々の出力ファイルへ）実行し、
-両方の hex_terrain テーブルの (hex_id, terrain_type, feature_id, cell_count) の集合を
-比較する。完全一致すれば exit code 0、差分があれば内容を表示して exit code 1。
+両方の hex_terrain テーブルの (hex_id, terrain_type, feature_id, cell_count,
+boundary_geojson) の集合を比較する（boundary_geojson は Issue #105 で追加。
+境界計算＝hex_geometry.hex_boundary_lonlat も決定論的であることを検証する）。
+完全一致すれば exit code 0、差分があれば内容を表示して exit code 1。
 """
 
 from __future__ import annotations
@@ -31,9 +33,12 @@ def run_once(out_name: str) -> Path:
 def hex_rows(path: Path) -> set[tuple]:
     conn = sqlite3.connect(str(path))
     try:
+        # boundary_geojson（Issue #105）も比較対象に含める。境界計算
+        # （hex_geometry.hex_boundary_lonlat）も決定論的であるべきことを検証するため。
         return set(
             conn.execute(
-                "SELECT hex_id, terrain_type, feature_id, cell_count FROM hex_terrain"
+                "SELECT hex_id, terrain_type, feature_id, cell_count, boundary_geojson "
+                "FROM hex_terrain"
             ).fetchall()
         )
     finally:
