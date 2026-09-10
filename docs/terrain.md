@@ -148,7 +148,7 @@ fog of war は全ヘクスを1回だけ GeoJSON ソースとして地図に追�
 |--------|-----------|-------------------|
 | 1（最優先） | 海 | `natural=coastline` の海側、`natural=bay`、`place=sea`、`natural=water` かつ `water=sea` |
 | 2 | 水辺（川・湖） | `natural=water`（`water=lake` 等）、`waterway=river` / `waterway=stream` / `waterway=canal`、`natural=wetland` |
-| 3 | 山 | `natural=peak`、`natural=hill`、`natural=mountain_range`、`natural=bare_rock`、`natural=scree`、`natural=cliff`、`natural=rock`、`landuse=quarry`（Issue #71・2026-09-08 代表決定により `hill`/`cliff`/`rock` を追加。詳細は下記・§5.1参照） |
+| 3 | 山 | `natural=peak`、`natural=hill`、`natural=mountain_range`、`natural=bare_rock`、`natural=scree`、`natural=ridge`、`natural=cliff`、`natural=rock`、`landuse=quarry`（Issue #71・2026-09-08 代表決定により `hill`/`ridge`/`cliff`/`rock` を追加。詳細は下記・§5.1参照） |
 | 4 | 森 | `landuse=forest`、`natural=wood` |
 | 5（フォールバック） | 空き地 | 上記いずれにも該当しないセル（`landuse=grass`、`landuse=greenfield`、`landuse=brownfield`、道路・未分類地含む。**Issue #70（2026-09-08）により農地・市街相当のタグもここに合流**、下記参照） |
 
@@ -164,7 +164,7 @@ fog of war は全ヘクスを1回だけ GeoJSON ソースとして地図に追�
 
 - **`landuse=retail` を市街（優先度6）に追加（2026-09-08・Issue #38時点の記録）**: 当初は `landuse=residential`/`commercial`/`industrial` のみだったが、実データ検証（狭山湖周辺、`research.md` §8）で大型小売店舗の敷地（コストコ入間倉庫店・三井アウトレットパーク入間など、実在の `landuse=retail`）が該当なしとなり空き地にフォールバックしていたことが判明した。小売店舗の敷地は実態として市街地の一部であるため追加した。
 - **【Issue #71（2026-09-08）で対応・実データ検証済み】`natural=peak` による山判定の妥当性**: 実データ検証で、`natural=peak`（山頂を表す「点」タグ）にバッファを掛けて山と判定したヘクスが、周囲を森林（`landuse=forest`/`natural=wood`）に囲まれた樹林帯の中の一地点であるケースが複数確認された（例: 標高131m/192mの丘陵地の山頂ノード。`research.md` §8.5 参照）。OSM上、樹林に覆われた山体そのものを「山」として面的にタグ付けする慣行がないため、`natural=peak` のような点タグに依存する限り、実際の山の大部分は本ルール上「森」に分類され続ける（山頂ノードの周辺だけが本ルールにより例外的に「山」になる）。これは §5 のルール自体の不備というより、**OSMのタグ体系が「山」という地物を面として持たない**という構造的な制約であり、対処には標高・傾斜データ（DEM等）の別途導入が必要になる可能性がある、という論点を代表確認事項として残していた。
-  - **Issue #71での結論**: タグ拡張（`natural=hill`/`cliff`/`rock`を追加。§5参照）を行った上で同一検証エリアを再生成した結果、**追加タグに該当するOSMデータが実データ上1件も存在せず、山の出現率は3ヘクス（0.02%）のまま変化しなかった**（`research.md` §8.9）。これは「タグ拡張という手段自体が無意味」なのではなく、**この検証エリア（狭山丘陵のような樹林に覆われた低山地）では、露岩・崖・稜線に類する地物そのものがOSM上にタグ付けされていない**という、上記の構造的制約をさらに裏付ける実測結果である（山がちでゴツゴツした地形＝岩肌が露出しやすい山域であれば、これらのタグが実在し効果を持つ可能性は残る）。
+  - **Issue #71での結論**: タグ拡張（`natural=hill`/`ridge`/`cliff`/`rock`を追加。§5参照）を行った上で同一検証エリアを再生成した結果、**追加タグに該当するOSMデータが実データ上1件も存在せず、山の出現率は3ヘクス（0.02%）のまま変化しなかった**（`research.md` §8.9）。これは「タグ拡張という手段自体が無意味」なのではなく、**この検証エリア（狭山丘陵のような樹林に覆われた低山地）では、露岩・崖・稜線に類する地物そのものがOSM上にタグ付けされていない**という、上記の構造的制約をさらに裏付ける実測結果である（山がちでゴツゴツした地形＝岩肌が露出しやすい山域であれば、これらのタグが実在し効果を持つ可能性は残る）。
   - `natural=peak`のバッファ半径は、DEM等の裏付けなしに拡大するのは実測に基づく判断ではなく推測になるため、**30m据え置き**と結論した（感度分析の実測値は`research.md` §8.9.3）。
   - DEM（標高・傾斜データ）の導入要否は、本Issueでは**導入しない**と結論した（理由は`research.md` §8.9.4）。
   - 山の出現率不足の解消は、供給源設計の側（[Issue #72](https://github.com/rokusoudo-product/terra-town/issues/72)）に引き継ぐ（2026-09-08 代表決定）。
