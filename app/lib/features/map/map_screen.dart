@@ -1,15 +1,17 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import '../../design/spacing.dart';
+import '../../map/debug/fog_debug_hex_grid.dart';
+import '../../map/debug/fog_of_war_debug_panel.dart';
+import '../../map/fog_of_war_layer_factory.dart';
 import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
 
-/// マップ（ホーム）画面（tasks.md T057）。
+/// マップ（ホーム）画面（tasks.md T057・fog of war は T056・Issue #100）。
 ///
-/// DESIGN.md「画面一覧と状態」のマップ（ホーム）行に対応する。本 Issue（#99）の
-/// スコープは「実地図（同梱 MBTiles）を表示する」ところまでで、fog of war（T056）・
-/// 現在地表示と地図追従（T058）・権限リクエスト（T059）は含まないため、
+/// DESIGN.md「画面一覧と状態」のマップ（ホーム）行に対応する。
 /// DESIGN.md が定義する4状態のうち本画面が扱うのは次の2つ + ローディングのみ:
 ///   - ローディング = 地域パック読込（DESIGN.md記載どおり）
 ///   - エラー = 地域パックの読込に失敗した状態（後述の理由により、DESIGN.md
@@ -17,7 +19,10 @@ import '../../map/map_style_factory.dart';
 ///     「地域パック読込エラー」に拡張したもの。これは DESIGN.md からの逸脱ではなく
 ///     「ローディング=地域パックの読込」が失敗した場合の自然な帰結として扱う）
 ///   - 通常 = 地図が表示された状態
-/// 「空=未開示（霧のみ）」は fog of war 未実装のため本Issueでは到達しない。
+/// 「空=未開示（霧のみ）」は、開示判定ロジック（T054・Issue #101）が
+/// まだ無いため、製品として到達することは無い。ただし fog of war の描画・
+/// トグル自体（T056）は実装済みであり、`kDebugMode` 配下のデバッグパネル
+/// （[FogOfWarDebugPanel]）で代表が実機確認できる（下記コメント参照）。
 ///
 /// 【パックが無い場合の振る舞い（PR本文にも記載）】生成物（`app/assets/pack/`配下）
 /// はコミットしない方針（Issue #85）のため、`tools/pack-builder/bundle_region_pack.sh`
@@ -61,20 +66,126 @@ class MapScreen extends StatefulWidget {
       resolveBundledMbtilesPath(assetKey: mbtilesAssetKey);
 
   /// 実際に [MapView] を組み立てる既定実装。
+  ///
+  /// 【fog of war のデバッグ表示は kDebugMode 配下のみ】fog of war 自体
+  /// （T056）は製品コード（`packages/location`）として実装済みだが、
+  /// 「どのヘクスを開示するか」を決める判定ロジック（T054・Issue #101）は
+  /// まだ無いため、ここで渡せる開示対象は無い。代表が実機で
+  /// 「霧の描画」「開示トグル」「本番相当ヘクス数でのソース構築コスト」を
+  /// 確認できるよう、`kDebugMode`（release ビルドでは false）のときだけ
+  /// [_DebugAwareMapView] が合成データ（`fog_debug_hex_grid.dart`）を使った
+  /// デモを重ねる。release ビルドでは本メソッドは Issue #99 時点と同一の
+  /// 挙動（fog 関連の引数は全て null）になる。
   static Widget defaultMapBuilder(BuildContext context, String path) {
-    return MapView(
+    return _DebugAwareMapView(
       mbtilesFilePath: path,
-      initialCameraPosition: sayamakoInitialCameraPosition(),
-      backgroundColorHex: buildMapBackgroundColorHex(),
-      sourceMinzoom: regionPackSourceMinzoom,
-      sourceMaxzoom: regionPackSourceMaxzoom,
-      fillLayers: buildRegionPackFillLayers(),
-      lineLayers: buildRegionPackLineLayers(),
+      cameraPosition: sayamakoInitialCameraPosition(),
     );
   }
 
   @override
   State<MapScreen> createState() => _MapScreenState();
+}
+
+/// [MapScreen.defaultMapBuilder] が実際に返すウィジェット。
+///
+/// `kDebugMode` の場合のみ、[MapView] に fog of war のデバッグ用パラメータ
+/// （合成ヘクス・DESIGN.md 由来の色）を渡し、地図の上に
+/// [FogOfWarDebugPanel]（代表が実機確認するためのデバッグ専用UI）を重ねる。
+/// [MapView.onFogLayerReady] が発火するまでパネルは表示しない（fog レイヤー
+/// 追加はスタイル読込後の非同期処理のため）。
+///
+/// release ビルド（`kDebugMode == false`）では fog 関連のパラメータを
+/// 一切渡さない、Issue #99 時点と同一の [MapView] を返す（製品UIを汚さない）。
+class _DebugAwareMapView extends StatefulWidget {
+  const _DebugAwareMapView({
+    required this.mbtilesFilePath,
+    required this.cameraPosition,
+  });
+
+  final String mbtilesFilePath;
+  final MapCameraPosition cameraPosition;
+
+  @override
+  State<_DebugAwareMapView> createState() => _DebugAwareMapViewState();
+}
+
+class _DebugAwareMapViewState extends State<_DebugAwareMapView> {
+  FogOfWarController? _fogController;
+
+  /// レイヤー追加（地域パック本体・fog of war のいずれか）が失敗した場合の
+  /// エラー内容。デバッグパネルが出ない＝失敗なのか単に読込中なのかが実機で
+  /// 区別できないと確認手順が成立しないため、`kDebugMode` 配下で表示する
+  /// （[MapView.onLayersFailed] 参照）。
+  String? _layersError;
+
+  @override
+  Widget build(BuildContext context) {
+    final mapView = MapView(
+      mbtilesFilePath: widget.mbtilesFilePath,
+      initialCameraPosition: widget.cameraPosition,
+      backgroundColorHex: buildMapBackgroundColorHex(),
+      sourceMinzoom: regionPackSourceMinzoom,
+      sourceMaxzoom: regionPackSourceMaxzoom,
+      fillLayers: buildRegionPackFillLayers(),
+      lineLayers: buildRegionPackLineLayers(),
+      fogOfWarLayer: kDebugMode ? buildFogOfWarLayer() : null,
+      fogHexFeatureCollection: kDebugMode
+          ? buildSyntheticFogHexFeatureCollection(
+              centerLat: widget.cameraPosition.latitude,
+              centerLon: widget.cameraPosition.longitude,
+              count: FogOfWarDebugPanel.demoHexCount,
+            )
+          : null,
+      onFogLayerReady: kDebugMode
+          ? (controller) {
+              if (!mounted) return;
+              setState(() => _fogController = controller);
+            }
+          : null,
+      onLayersFailed: kDebugMode
+          ? (error, stackTrace) {
+              if (!mounted) return;
+              setState(() => _layersError = '$error');
+            }
+          : null,
+    );
+
+    if (!kDebugMode) return mapView;
+
+    final fogController = _fogController;
+    final layersError = _layersError;
+    return Stack(
+      children: [
+        mapView,
+        if (layersError != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: SafeArea(
+              child: Card(
+                margin: const EdgeInsets.all(AppSpacing.sm),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  child: Text(
+                    'レイヤー追加に失敗しました（デバッグビルドのみ表示）: $layersError',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
+            ),
+          )
+        else if (fogController != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: FogOfWarDebugPanel(controller: fogController),
+          ),
+      ],
+    );
+  }
 }
 
 class _MapScreenState extends State<MapScreen> {

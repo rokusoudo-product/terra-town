@@ -4,6 +4,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/widgets.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
+import 'fog_of_war_layer.dart';
 import 'map_camera_position.dart';
 import 'mbtiles_source.dart';
 
@@ -67,8 +68,9 @@ class MapLineLayerStyle {
 /// 同梱 MBTiles をローカル読込して表示する地図ビュー（tasks.md T055）。
 ///
 /// 【スコープ】本ウィジェットは「同梱の地域パック（ベクタタイル MBTiles）を
-/// ローカル読込して表示する」ところまでを担う。fog of war（未開示ヘクスの暗幕・
-/// plan.md §8・tasks.md T056）・現在地表示と地図追従（T058）は含まない。
+/// ローカル読込して表示する」ところと、fog of war（未開示ヘクスの暗幕・
+/// plan.md §8・tasks.md T056。[fogOfWarLayer]/[fogHexFeatureCollection] が
+/// 渡された場合のみ）を担う。現在地表示と地図追従（T058）は含まない。
 ///
 /// 【入力】[mbtilesFilePath] は呼び出し側が [resolveBundledMbtilesPath] 等で
 /// あらかじめ書き込み可能な領域に用意した、実ファイルシステム上の絶対パスを渡すこと
@@ -79,15 +81,17 @@ class MapLineLayerStyle {
 /// `demotiles.maplibre.org` への依存が HTTP 429（レート制限）を起こすことが
 /// 実測で判明しているため、オンラインのデモスタイルには依存しない。
 ///
-/// 【後から fog レイヤを載せられる構造にしておくこと（Issue #99 の要件）】
-/// `onStyleLoadedCallback`（[_addRegionPackLayers]）の中で
-/// 「①地域パックの vector source を追加 → ② fill/line レイヤーを追加」の順に
-/// 処理する。T056（fog of war・plan.md §8 の採用方式）は、この直後に同じ
-/// [MapLibreMapController] を使って `addGeoJsonSource` + `setFeatureState` に
-/// よるトグル用レイヤーを追加する形で拡張できる（[_addRegionPackLayers] 末尾の
-/// コメント参照）。[MapLibreMapController] 自体は `app` には公開しない
+/// 【fog of war（T056・plan.md §8）を後から載せられる構造にしていた（Issue #99 の
+/// 要件）ことの結果】`onStyleLoadedCallback`（[_addRegionPackLayers]）の中で
+/// 「①地域パックの vector source を追加 → ② fill/line レイヤーを追加 →
+/// ③（任意）fog of war のソース/レイヤーを追加」の順に処理する。③は
+/// [fogOfWarLayer] と [fogHexFeatureCollection] の両方が渡された場合のみ実行され、
+/// 同じ [MapLibreMapController] を [FogOfWarController.install] に渡す形で
+/// 拡張した。[MapLibreMapController] 自体は `app` には公開しない
 /// （`terra_town_location` の役割は地図SDKを隠蔽すること。`app/pubspec.yaml` は
-/// `maplibre_gl` に依存していない）。
+/// `maplibre_gl` に依存していない）。fog 側の操作窓口は [onFogLayerReady] で
+/// 返す [FogOfWarController]（同じく地図SDK型を漏らさない不透明ハンドル）を
+/// 経由する。
 ///
 /// 【色を知らない】fill/line の色は呼び出し側から `#RRGGBB` 文字列で受け取るのみで、
 /// `Color` 型・DESIGN.md のトークンには一切依存しない（Issue #57 と同じ設計。
@@ -104,6 +108,11 @@ class MapView extends StatefulWidget {
     this.fillLayers = const [],
     this.lineLayers = const [],
     this.onLayersFailed,
+    this.fogOfWarLayer,
+    this.fogHexFeatureCollection,
+    this.fogSourceId = FogOfWarController.defaultSourceId,
+    this.fogLayerId = FogOfWarController.defaultLayerId,
+    this.onFogLayerReady,
   });
 
   /// [resolveBundledMbtilesPath] 等で解決済みの、書き込み可能な領域にある
@@ -135,6 +144,37 @@ class MapView extends StatefulWidget {
   /// 実機で失敗した場合に「レイヤー追加が失敗した」ことを判別できるようにする
   /// （失敗しても背景色のみの画面になるだけで、成功時との見分けが付きにくいため）。
   final void Function(Object error, StackTrace stackTrace)? onLayersFailed;
+
+  /// fog of war の色・不透明度（T056・plan.md §8）。`app`（composition root）が
+  /// DESIGN.md の `fog` トークンから導出して注入する（Issue #57 の注入方式。
+  /// `location` はここでも配色を知らない）。
+  ///
+  /// これと [fogHexFeatureCollection] の**両方**が非 null の場合のみ、
+  /// ベースレイヤーの追加後に fog of war のソース/レイヤーを追加する。
+  /// どちらか一方でも null の場合は fog of war を一切追加しない（既存の
+  /// Issue #99 の挙動を変えない。パック未取得時のテスト・ビルドを壊さないため）。
+  final FogOfWarLayer? fogOfWarLayer;
+
+  /// fog of war の対象となる全ヘクスの GeoJSON FeatureCollection。
+  ///
+  /// 【本 Issue（#100）のスコープ外であること】このデータそのものの組み立て
+  /// （地域パックの `hex_terrain` テーブルから実際のヘクス境界ジオメトリを
+  /// 算出する処理）は `RegionPackRepository`（tasks.md T069・本 Issue 時点で
+  /// 未実装）の責務であり、[MapView] は呼び出し側が用意した完成品を
+  /// 受け取るだけである。各 Feature は直下（`properties` の外）に整数 `id` を
+  /// 持つ必要がある（[FogOfWarController.install] が実行時に検証する）。
+  final Map<String, dynamic>? fogHexFeatureCollection;
+
+  /// fog of war の GeoJSON ソース ID。
+  final String fogSourceId;
+
+  /// fog of war の fill レイヤー ID。
+  final String fogLayerId;
+
+  /// fog of war のソース/レイヤー追加が成功した直後に、開示トグルの窓口となる
+  /// [FogOfWarController] を渡す。[MapLibreMapController] 自体は公開しない
+  /// （[MapView] クラス doc コメント参照）。
+  final void Function(FogOfWarController controller)? onFogLayerReady;
 
   @override
   State<MapView> createState() => _MapViewState();
@@ -221,11 +261,47 @@ class _MapViewState extends State<MapView> {
         '地域パックのレイヤーを追加しました'
         '（fill=${widget.fillLayers.length}件・line=${widget.lineLayers.length}件）',
       );
-      // 【T056（fog of war）の拡張ポイント】ここ（ベースレイヤー追加の直後）で
-      // 同じ controller を使い、全ヘクスを1回だけ addGeoJsonSource で追加し、
+
+      // 【T056（fog of war・plan.md §8 の採用方式）】ベースレイヤー追加の直後に、
+      // 同じ controller を使って全ヘクスを1回だけ addGeoJsonSource で追加し、
       // fill レイヤの fill-opacity を feature-state（setFeatureState）で
-      // トグルする方式を実装する（plan.md §8 の採用方式）。ベースレイヤーより後に
-      // 追加することで、暗幕がベースの地図の上に重なる描画順を保証する。
+      // トグルする方式を追加する。ベースレイヤーより後に追加することで、
+      // 暗幕がベースの地図の上に重なる描画順を保証する。
+      //
+      // fogOfWarLayer・fogHexFeatureCollection のいずれかが null の場合は
+      // 何もしない（Issue #99 時点の挙動を変えない。呼び出し側が fog を
+      // まだ配線していない場合でも地図表示自体は成立させるため）。
+      final fogLayer = widget.fogOfWarLayer;
+      final fogHexes = widget.fogHexFeatureCollection;
+      if (fogLayer != null && fogHexes != null) {
+        try {
+          final fogController = await FogOfWarController.install(
+            controller,
+            fogLayer,
+            fogHexes,
+            sourceId: widget.fogSourceId,
+            layerId: widget.fogLayerId,
+          );
+          final hexCount = (fogHexes['features'] as List?)?.length ?? 0;
+          _log('fog of war のソース/レイヤーを追加しました（ヘクス数=$hexCount）');
+          widget.onFogLayerReady?.call(fogController);
+        } catch (e, stackTrace) {
+          // 【本Issueが解消しようとしているリスクそのもの】plan.md §8「未計測」＝
+          // 実際の地域パック規模（13,106ヘクス）でのソース構築が実機で失敗した
+          // 場合、ここで確実に捕捉してログに残す。地域パックの基盤レイヤーとは
+          // 独立した try/catch にすることで、「地域パックは表示できたが fog だけ
+          // 失敗した」ことを区別できるようにする。
+          _log('失敗: fog of war のソース/レイヤー追加でエラー: $e');
+          developer.log(
+            'fog of war のソース/レイヤー追加に失敗しました',
+            name: 'terra_town_location.map_view',
+            error: e,
+            stackTrace: stackTrace,
+            level: 1000,
+          );
+          widget.onLayersFailed?.call(e, stackTrace);
+        }
+      }
     } catch (e, stackTrace) {
       // 【本Issueが解消しようとしているリスクそのもの】plan.md §8「未計測」＝
       // 実際の地域パック（高ズーム・Planetiler生成）での addSource/addLayer が
