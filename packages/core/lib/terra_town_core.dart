@@ -15,9 +15,13 @@
 ///                     スナップショット方式に改訂）
 ///   - src/repository/ `Repository<T, ID>` 抽象（T038・実装済み）
 ///   - src/economy/    Resource・Inventory（T026〜T027・実装済み）
+///   - src/disclosure/ HexLocator 抽象・DisclosureService（開示判定ロジック）
+///                     （T054・実装済み。Issue #101）
 library;
 
 export 'src/terra_town_core_base.dart';
+export 'src/disclosure/disclosure_service.dart';
+export 'src/disclosure/hex_locator.dart';
 export 'src/economy/inventory.dart';
 export 'src/economy/resource.dart';
 export 'src/geo/distance.dart';
