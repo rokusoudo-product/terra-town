@@ -1,5 +1,6 @@
 import '../geo/hex_id.dart';
 import '../terrain/terrain_type.dart';
+import 'disclosed_hex.dart';
 import 'district.dart';
 import 'pack_version.dart';
 import 'point_of_interest.dart';
@@ -27,23 +28,48 @@ abstract interface class RegionPack {
   /// このパックのバージョン（plan.md §3.3）。
   ///
   /// 一度開示したヘクスの資材分類は、パック更新後も過去分は不変とする
-  /// （獲得履歴は当時の [PackVersion] で確定）。この不変性ルール自体の実装は
-  /// 別 Issue（#84・T035〜T037）が担当し、本抽象はその前提となる
-  /// バージョン値を提供するだけである。
+  /// （獲得履歴は開示時点のスナップショットで確定・[DisclosedHex] 参照）。
+  /// このバージョン値は、新規にヘクスを開示する瞬間（T054）に
+  /// [DisclosedHex.discoveredAtVersion] へ記録する監査目的の値として使われる
+  /// （2026-09-10・Issue #96・代表決定。以前は開示当時のバージョンで本パックを
+  /// 引き直す用途だったが、その経路〔`PackVersionResolver`〕は廃止した）。
   PackVersion get version;
 
   /// [hexId] の地形タイプ。このパックに収録されていないヘクスは null。
+  ///
+  /// 【呼び出してよいタイミング（重要・Issue #96）】本メソッドは、あるヘクスを
+  /// **新規に開示する瞬間**（T054）に、そのヘクスの [DisclosedHex.terrainType]
+  /// スナップショットを作るためだけに呼ぶこと。**既に開示済みのヘクスの地形分類を
+  /// 再解決するために呼んではならない**——開示済みヘクスの地形分類の正は
+  /// 常に [DisclosedHex.terrainType]（`disclosed_hex` テーブルのスナップショット列）
+  /// であり、本パックを再度引く経路は存在しない（アプリ同梱の MVP では
+  /// パック更新＝アプリ更新であり、旧パックは端末から消えるため、そもそも
+  /// 「開示当時のバージョンの本パック」を再取得できない）。
   TerrainType? terrainOf(HexId hexId);
 
   /// [hexId] が属する行政区画の識別子。未帰属（パック範囲外・水域等）は null。
   ///
   /// ヘクスと区画の帰属判定（ヘクス重心が区画内かの判定）は事前計算済みであり
   /// （plan.md §8）、`core` 側では判定ロジックを持たず結果を参照するのみ。
+  ///
+  /// 【[terrainOf] と異なりスナップショットしない（Issue #96・代表決定）】
+  /// 区画は**常に現行パックから解決する**。制覇率（Issue #7・V-C）は
+  /// 「現在の区画定義に対する割合」として意味を持つため、開示時点の区画割り当てを
+  /// 凍結すると市町村合併等の行政区域変更後に現在の区画と食い違い、制覇率が
+  /// 計算できなくなる。行政区域の変更は年単位で稀であり、OSM の日常更新
+  /// （地形分類が揺れる頻度）とは2桁違う。合併時は進捗も合算されるのが自然、
+  /// という判断も込みで「常に現行パックを引く」を採用した。
   DistrictId? districtOf(HexId hexId);
 
   /// パックに収録されている行政区画の一覧（読み取り専用）。
   Iterable<District> get districts;
 
   /// パックに収録されている名所POIの一覧（読み取り専用）。
+  ///
+  /// 【スナップショットしない（Issue #96・代表決定）】保全すべきは「プレイヤーが
+  /// 何を集めたか」であり、`packages/location` の `collection` テーブル
+  /// （T034・PR #90）が発見記録を保持する。POI が OSM から消えても
+  /// コレクションは失われない。ヘクスと POI の対応づけを別途凍結すると、
+  /// 同じ情報を二重に持つことになるため凍結しない。
   Iterable<PointOfInterest> get pointsOfInterest;
 }

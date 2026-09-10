@@ -116,8 +116,8 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - [x] T033 [P] `building` テーブル（建物種別・レベル・建築状態軸・ヘクス座標・区画）のスキーマを作成（`docs/buildings.md` §2）（Issue #83。採石場を含む8種〔`BuildingType`〕を表現）
 - [x] T034 [P] `district_progress`（制覇率・発展度）・`collection`（名所図鑑）・`quest_daily`・`settings` のスキーマを作成（Issue #83）
 - [x] T035 **開示ヘクス集合の圧縮表現**を実装（Roaring Bitmap / ビットセット・plan.md §6）。GeoJSON 保持はしない（Issue #84。`packages/core/lib/src/pack/disclosed_hex_set.dart` の `DisclosedHexSet` として実装。H3由来の疎な整数値を上位ビット〔コンテナキー〕・下位16bit〔コンテナ内位置〕に分割し、コンテナごとに疎なら配列・要素数が閾値〔4096〕を超えたらビットマップへ適応的に昇格する Roaring Bitmap 方式。`disclosed_hex` テーブル〔T031〕はこの圧縮表現の生成元であり、テーブル自体は1行1ヘクスのまま変更していない。30,000ヘクス規模のテストあり）
-- [x] T036 **パック更新の不変性ルール**を実装: 一度開示したヘクスの資材分類は、パック更新後も過去分を不変とする（獲得履歴は当時の `pack_version` で確定 — plan.md §3.3）（Issue #84。`packages/core/lib/src/pack/disclosed_hex.dart` の `DisclosedHex`〔開示当時の `PackVersion` を保持する値オブジェクト〕と `pack_version_resolver.dart` の `PackVersionResolver`〔開示当時のバージョンに対応する `RegionPack` からのみ地形分類を解決し、現行パックへの黙示的フォールバックは `PackVersionUnavailable` 例外で禁止する〕として実装）
-- [x] T037 [P] `packages/core/test/pack/pack_version_immutability_test.dart` にパック更新後も過去の開示・獲得が変わらないことのテストを作成（Issue #84。パック更新をまたいでヘクスごとに開示当時の地形分類が独立して保たれること・開示当時のバージョンのパックが登録されていない場合に現行パックへ黙ってフォールバックせず例外になることを検証）
+- [x] T036 **パック更新の不変性ルール**を実装: 一度開示したヘクスの資材分類は、パック更新後も過去分を不変とする（plan.md §3.3）（Issue #84 で実装し、**Issue #96（2026-09-10 代表決定）で実現方法を変更**。**現在の正**: `packages/core/lib/src/pack/disclosed_hex.dart` の `DisclosedHex.terrainType`（`disclosed_hex.terrain_type` 列）に**開示時点の地形分類をスナップショット**として保存し、以後パックを引かない。〔**廃止**: Issue #84 当時の `pack_version_resolver.dart` の `PackVersionResolver`〔当時のバージョンのパックを引く方式〕は、MVP がパックをアプリ同梱するため旧パックが端末に残らず原理的に成立しないことが判明し、Issue #96 で削除した〕。`pack_version` 列は監査・移行判断の記録として保持する）
+- [x] T037 [P] `packages/core/test/pack/disclosed_hex_snapshot_test.dart` にパック更新後も過去の開示・獲得が変わらないことのテストを作成（Issue #84 で作成し **Issue #96 で置き換え**。パック更新をまたいでヘクスごとに開示当時の地形分類が独立して保たれることを検証する。〔**廃止**: Issue #84 当時の `pack_version_immutability_test.dart` は `PackVersionResolver` の削除に伴い Issue #96 で削除した〕）
 - [x] T038 Repository 層の抽象を `packages/core` に定義し、実装を `location`/`app` 側に置く（将来のサーバ同期 #16 に備えた抽象化 — #10 代表回答）
 
 ### 地域パック生成パイプライン（plan.md §3・§4）
@@ -156,13 +156,13 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ### Implementation for US1
 
-- [ ] T054 [US1] `packages/core/lib/src/disclosure/disclosure_service.dart` に開示判定ロジック（通過グリッドセル→ヘクス多数決集約→`disclosed_hex` 更新）を実装。**GPS/地図に依存しない純粋ロジック**
+- [ ] T054 [US1] `packages/core/lib/src/disclosure/disclosure_service.dart` に開示判定ロジック（通過グリッドセル→ヘクス多数決集約→`disclosed_hex` 更新）を実装。**GPS/地図に依存しない純粋ロジック**。**2026-09-10 追記（Issue #96）**: 新規ヘクスを開示する瞬間に、その時点の `RegionPack.terrainOf` の結果を `DisclosedHex.terrainType`（`disclosed_hex.terrain_type` 列）としてスナップショット保存すること。開示済みヘクスの地形分類の正はこのスナップショット列であり、`RegionPack.terrainOf` を再度引く経路は存在しない（`PackVersionResolver` は Issue #96 で削除済み）
 - [ ] T055 [US1] `packages/location/lib/src/map/map_view.dart` に MapLibre 地図表示（同梱 MBTiles をローカル読込）を実装
 - [ ] T056 [US1] `packages/location/lib/src/map/fog_of_war_layer.dart` に fog of war を実装（**採用方式・2026-09-08 Issue #56 追随**: 全ヘクスを起動時／エリア切替時に**1回だけ** `addGeoJsonSource` でソースに追加し、開示は fill レイヤの `fill-opacity` を `feature-state`（`setFeatureState`）のトグルで切り替える。各 Feature は直下に整数 `id` を持たせる（`promoteId` は Android 非対応）。`maplibre_gl` 0.27.0 以降が必要（0.26.2 は Android で `setFeatureState` が `UnimplementedError`）— plan.md §8。**不採用（経緯）**: 「穴あきポリゴン1枚」の GeoJSON 差分更新は実機計測で性能基準未達（FAIL）のため不採用 — plan.md §8・research.md §6.4）
 - [ ] T057 [US1] `app/lib/features/map/map_screen.dart` にマップ画面を実装（`DESIGN.md` のトークンに準拠。色・サイズの直書きをしない）
 - [ ] T058 [US1] 現在地表示と地図追従を実装（`app/lib/features/map/`）
 - [ ] T059 [US1] 位置記録サービスの起動/停止と権限リクエスト（フォアグラウンド位置のみ）を実装（`app/lib/features/permissions/`）
-- [ ] T060 [US1] 開示状態の永続化と復元を実装し、アプリ再起動後も霧の状態が残ることを確認。**2026-09-09 追記（plan.md §8・research.md §6.4）**: 復元対象は「アプリ再起動後」だけでなく**任意の `setStyle`（スタイル再読み込み）後**も含める。実測で `setStyle` は地図側の feature-state を全て消すことが確認されており、地図の feature-state は開示状態の正ではなく永続ストレージ（T031・T035）が正であるため、素直に実装するとテーマ切替等で霧が全部消える事故になる
+- [ ] T060 [US1] 開示状態の永続化と復元を実装し、アプリ再起動後も霧の状態が残ることを確認。**2026-09-09 追記（plan.md §8・research.md §6.4）**: 復元対象は「アプリ再起動後」だけでなく**任意の `setStyle`（スタイル再読み込み）後**も含める。実測で `setStyle` は地図側の feature-state を全て消すことが確認されており、地図の feature-state は開示状態の正ではなく永続ストレージ（T031・T035）が正であるため、素直に実装するとテーマ切替等で霧が全部消える事故になる。**2026-09-10 追記（Issue #96）**: 復元時の地形分類（資材産出・建築可否判定に使う値）は `disclosed_hex.terrain_type` のスナップショットから読むこと。地域パックを引き直して復元してはならない（パック更新後は旧パックが端末に存在しないため）
 - [ ] T061 [US1] オフライン蓄積→前景復帰時の状態反映を実装（FR-7・MVP は端末内完結）
 - [ ] T062 [P] [US1] 歩行距離・歩数の表示（HUD）を実装（`app/lib/features/map/widgets/`・`DESIGN.md` の HUD 方針に準拠）
 - [ ] T063 [US1] **開放ポイント**の入手を実装（自然回復 **1P/日** ＋ GPS移動距離ベースの付与・上限 **50** — `docs/opening_points.md`）
@@ -187,7 +187,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 ### Implementation for US2
 
 - [ ] T068 [US2] `packages/core/lib/src/economy/resource_grant_service.dart` に資材付与を実装（**地域パックの事前計算済み地形属性を読む純粋関数**・実行時のタイルクエリはしない — plan.md §4）
-- [ ] T069 [US2] `packages/location/lib/src/pack/region_pack_repository.dart` に地域パック（SQLite・読み取り専用）へのアクセスを実装
+- [ ] T069 [US2] `packages/location/lib/src/pack/region_pack_repository.dart` に地域パック（SQLite・読み取り専用）へのアクセスを実装。**2026-09-10 追記（Issue #96）**: 本リポジトリが返す `RegionPack`（`terrainOf` 含む）は新規開示時のスナップショット作成にのみ使うこと。既に開示済みのヘクスの地形分類を問い合わせる経路として使わない（正は `disclosed_hex.terrain_type`）。一方、区画（`districtOf`）・名所POI（`pointsOfInterest`）は開示状態に関わらず常に本リポジトリ経由で現行パックから解決してよい（スナップショットしない設計・理由は `disclosed_hex` テーブル・`RegionPack` のドキュメント参照）
 - [ ] T070 [US2] `packages/core/lib/src/landmark/landmark_service.dart` に名所・固有オブジェクトの出現判定を実装（`docs/landmark_objects.md`）
 - [ ] T071 [US2] 名所オブジェクトの地図表示を実装（`packages/location/lib/src/map/landmark_layer.dart`）。**ポイント開放したマスでも表示する**
 - [ ] T072 [US2] **現地訪問時の追加ボーナス**を実装（遠隔開放でも取得可だが、実際に歩いて訪問するとプラス — #6 代表回答）

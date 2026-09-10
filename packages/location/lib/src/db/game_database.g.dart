@@ -18,6 +18,15 @@ class $DisclosedHexesTable extends DisclosedHexes
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  @override
+  late final GeneratedColumnWithTypeConverter<TerrainType, String> terrainType =
+      GeneratedColumn<String>(
+        'terrain_type',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      ).withConverter<TerrainType>($DisclosedHexesTable.$converterterrainType);
   static const VerificationMeta _packVersionMeta = const VerificationMeta(
     'packVersion',
   );
@@ -42,7 +51,12 @@ class $DisclosedHexesTable extends DisclosedHexes
     defaultValue: currentDateAndTime,
   );
   @override
-  List<GeneratedColumn> get $columns => [hexId, packVersion, discoveredAt];
+  List<GeneratedColumn> get $columns => [
+    hexId,
+    terrainType,
+    packVersion,
+    discoveredAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -94,6 +108,12 @@ class $DisclosedHexesTable extends DisclosedHexes
         DriftSqlType.int,
         data['${effectivePrefix}hex_id'],
       )!,
+      terrainType: $DisclosedHexesTable.$converterterrainType.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}terrain_type'],
+        )!,
+      ),
       packVersion: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}pack_version'],
@@ -109,6 +129,9 @@ class $DisclosedHexesTable extends DisclosedHexes
   $DisclosedHexesTable createAlias(String alias) {
     return $DisclosedHexesTable(attachedDatabase, alias);
   }
+
+  static JsonTypeConverter2<TerrainType, String, String> $converterterrainType =
+      const EnumNameConverter<TerrainType>(TerrainType.values);
 }
 
 class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
@@ -117,7 +140,21 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
   /// （H3 index は上位ビットにモード情報を含むが実質63bit以内に収まる）。
   final int hexId;
 
+  /// このヘクスを**開示した時点**の地形分類のスナップショット（`core` の
+  /// `TerrainType` と対応・`textEnum` で `.name` を永続化）。
+  ///
+  /// **地形分類を問い合わせる際は必ずこの列を使うこと。** パックが更新されても
+  /// この値は変わらない（不変性ルール・plan.md §3.3・Issue #96）。
+  /// v1（本 Issue 以前）にはこの列が存在しなかったため
+  /// [GameDatabase.migration] でマイグレーションを行う（そちらのドキュメント参照）。
+  final TerrainType terrainType;
+
   /// このヘクスを開示した時点の地域パックバージョン（`PackVersion.value` と対応）。
+  ///
+  /// 【用途が変わったことに注意（Issue #96）】地形分類の解決には使わない
+  /// （[terrainType] を直接参照する）。現在は「いつのパックで開示したか」という
+  /// 監査目的の記録、および将来パック形式やデータ移行が必要になった際の
+  /// 判断材料としてのみ保持する。
   final String packVersion;
 
   /// 開示した日時（端末のウォールクロック。位置記録自体の時刻は
@@ -126,6 +163,7 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
   final DateTime discoveredAt;
   const DisclosedHexRow({
     required this.hexId,
+    required this.terrainType,
     required this.packVersion,
     required this.discoveredAt,
   });
@@ -133,6 +171,11 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['hex_id'] = Variable<int>(hexId);
+    {
+      map['terrain_type'] = Variable<String>(
+        $DisclosedHexesTable.$converterterrainType.toSql(terrainType),
+      );
+    }
     map['pack_version'] = Variable<String>(packVersion);
     map['discovered_at'] = Variable<DateTime>(discoveredAt);
     return map;
@@ -141,6 +184,7 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
   DisclosedHexesCompanion toCompanion(bool nullToAbsent) {
     return DisclosedHexesCompanion(
       hexId: Value(hexId),
+      terrainType: Value(terrainType),
       packVersion: Value(packVersion),
       discoveredAt: Value(discoveredAt),
     );
@@ -153,6 +197,9 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return DisclosedHexRow(
       hexId: serializer.fromJson<int>(json['hexId']),
+      terrainType: $DisclosedHexesTable.$converterterrainType.fromJson(
+        serializer.fromJson<String>(json['terrainType']),
+      ),
       packVersion: serializer.fromJson<String>(json['packVersion']),
       discoveredAt: serializer.fromJson<DateTime>(json['discoveredAt']),
     );
@@ -162,6 +209,9 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'hexId': serializer.toJson<int>(hexId),
+      'terrainType': serializer.toJson<String>(
+        $DisclosedHexesTable.$converterterrainType.toJson(terrainType),
+      ),
       'packVersion': serializer.toJson<String>(packVersion),
       'discoveredAt': serializer.toJson<DateTime>(discoveredAt),
     };
@@ -169,16 +219,21 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
 
   DisclosedHexRow copyWith({
     int? hexId,
+    TerrainType? terrainType,
     String? packVersion,
     DateTime? discoveredAt,
   }) => DisclosedHexRow(
     hexId: hexId ?? this.hexId,
+    terrainType: terrainType ?? this.terrainType,
     packVersion: packVersion ?? this.packVersion,
     discoveredAt: discoveredAt ?? this.discoveredAt,
   );
   DisclosedHexRow copyWithCompanion(DisclosedHexesCompanion data) {
     return DisclosedHexRow(
       hexId: data.hexId.present ? data.hexId.value : this.hexId,
+      terrainType: data.terrainType.present
+          ? data.terrainType.value
+          : this.terrainType,
       packVersion: data.packVersion.present
           ? data.packVersion.value
           : this.packVersion,
@@ -192,6 +247,7 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
   String toString() {
     return (StringBuffer('DisclosedHexRow(')
           ..write('hexId: $hexId, ')
+          ..write('terrainType: $terrainType, ')
           ..write('packVersion: $packVersion, ')
           ..write('discoveredAt: $discoveredAt')
           ..write(')'))
@@ -199,37 +255,45 @@ class DisclosedHexRow extends DataClass implements Insertable<DisclosedHexRow> {
   }
 
   @override
-  int get hashCode => Object.hash(hexId, packVersion, discoveredAt);
+  int get hashCode =>
+      Object.hash(hexId, terrainType, packVersion, discoveredAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is DisclosedHexRow &&
           other.hexId == this.hexId &&
+          other.terrainType == this.terrainType &&
           other.packVersion == this.packVersion &&
           other.discoveredAt == this.discoveredAt);
 }
 
 class DisclosedHexesCompanion extends UpdateCompanion<DisclosedHexRow> {
   final Value<int> hexId;
+  final Value<TerrainType> terrainType;
   final Value<String> packVersion;
   final Value<DateTime> discoveredAt;
   const DisclosedHexesCompanion({
     this.hexId = const Value.absent(),
+    this.terrainType = const Value.absent(),
     this.packVersion = const Value.absent(),
     this.discoveredAt = const Value.absent(),
   });
   DisclosedHexesCompanion.insert({
     this.hexId = const Value.absent(),
+    required TerrainType terrainType,
     required String packVersion,
     this.discoveredAt = const Value.absent(),
-  }) : packVersion = Value(packVersion);
+  }) : terrainType = Value(terrainType),
+       packVersion = Value(packVersion);
   static Insertable<DisclosedHexRow> custom({
     Expression<int>? hexId,
+    Expression<String>? terrainType,
     Expression<String>? packVersion,
     Expression<DateTime>? discoveredAt,
   }) {
     return RawValuesInsertable({
       if (hexId != null) 'hex_id': hexId,
+      if (terrainType != null) 'terrain_type': terrainType,
       if (packVersion != null) 'pack_version': packVersion,
       if (discoveredAt != null) 'discovered_at': discoveredAt,
     });
@@ -237,11 +301,13 @@ class DisclosedHexesCompanion extends UpdateCompanion<DisclosedHexRow> {
 
   DisclosedHexesCompanion copyWith({
     Value<int>? hexId,
+    Value<TerrainType>? terrainType,
     Value<String>? packVersion,
     Value<DateTime>? discoveredAt,
   }) {
     return DisclosedHexesCompanion(
       hexId: hexId ?? this.hexId,
+      terrainType: terrainType ?? this.terrainType,
       packVersion: packVersion ?? this.packVersion,
       discoveredAt: discoveredAt ?? this.discoveredAt,
     );
@@ -252,6 +318,11 @@ class DisclosedHexesCompanion extends UpdateCompanion<DisclosedHexRow> {
     final map = <String, Expression>{};
     if (hexId.present) {
       map['hex_id'] = Variable<int>(hexId.value);
+    }
+    if (terrainType.present) {
+      map['terrain_type'] = Variable<String>(
+        $DisclosedHexesTable.$converterterrainType.toSql(terrainType.value),
+      );
     }
     if (packVersion.present) {
       map['pack_version'] = Variable<String>(packVersion.value);
@@ -266,6 +337,7 @@ class DisclosedHexesCompanion extends UpdateCompanion<DisclosedHexRow> {
   String toString() {
     return (StringBuffer('DisclosedHexesCompanion(')
           ..write('hexId: $hexId, ')
+          ..write('terrainType: $terrainType, ')
           ..write('packVersion: $packVersion, ')
           ..write('discoveredAt: $discoveredAt')
           ..write(')'))
@@ -2348,12 +2420,14 @@ abstract class _$GameDatabase extends GeneratedDatabase {
 typedef $$DisclosedHexesTableCreateCompanionBuilder =
     DisclosedHexesCompanion Function({
       Value<int> hexId,
+      required TerrainType terrainType,
       required String packVersion,
       Value<DateTime> discoveredAt,
     });
 typedef $$DisclosedHexesTableUpdateCompanionBuilder =
     DisclosedHexesCompanion Function({
       Value<int> hexId,
+      Value<TerrainType> terrainType,
       Value<String> packVersion,
       Value<DateTime> discoveredAt,
     });
@@ -2370,6 +2444,12 @@ class $$DisclosedHexesTableFilterComposer
   ColumnFilters<int> get hexId => $composableBuilder(
     column: $table.hexId,
     builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<TerrainType, TerrainType, String>
+  get terrainType => $composableBuilder(
+    column: $table.terrainType,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
   );
 
   ColumnFilters<String> get packVersion => $composableBuilder(
@@ -2397,6 +2477,11 @@ class $$DisclosedHexesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get terrainType => $composableBuilder(
+    column: $table.terrainType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get packVersion => $composableBuilder(
     column: $table.packVersion,
     builder: (column) => ColumnOrderings(column),
@@ -2419,6 +2504,12 @@ class $$DisclosedHexesTableAnnotationComposer
   });
   GeneratedColumn<int> get hexId =>
       $composableBuilder(column: $table.hexId, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<TerrainType, String> get terrainType =>
+      $composableBuilder(
+        column: $table.terrainType,
+        builder: (column) => column,
+      );
 
   GeneratedColumn<String> get packVersion => $composableBuilder(
     column: $table.packVersion,
@@ -2469,20 +2560,24 @@ class $$DisclosedHexesTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> hexId = const Value.absent(),
+                Value<TerrainType> terrainType = const Value.absent(),
                 Value<String> packVersion = const Value.absent(),
                 Value<DateTime> discoveredAt = const Value.absent(),
               }) => DisclosedHexesCompanion(
                 hexId: hexId,
+                terrainType: terrainType,
                 packVersion: packVersion,
                 discoveredAt: discoveredAt,
               ),
           createCompanionCallback:
               ({
                 Value<int> hexId = const Value.absent(),
+                required TerrainType terrainType,
                 required String packVersion,
                 Value<DateTime> discoveredAt = const Value.absent(),
               }) => DisclosedHexesCompanion.insert(
                 hexId: hexId,
+                terrainType: terrainType,
                 packVersion: packVersion,
                 discoveredAt: discoveredAt,
               ),
