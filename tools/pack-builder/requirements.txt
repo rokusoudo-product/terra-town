@@ -6,3 +6,8 @@ osmium==4.3.1
 h3==4.5.0
 shapely==2.1.2
 numpy==2.5.3
+# Issue #86（T041）: 行政区域ポリゴンのトポロジ保持簡略化に使用。
+# 依存は numpy・shapely・packaging のみ（geopandas 等の重い依存は使わない。
+# extract_districts.py は topojson.Topology.to_geojson() のみ使用しており
+# geopandas を要する to_gdf() は使わない）。
+topojson==1.10
