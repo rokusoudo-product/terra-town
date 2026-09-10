@@ -116,8 +116,8 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - [x] T033 [P] `building` テーブル（建物種別・レベル・建築状態軸・ヘクス座標・区画）のスキーマを作成（`docs/buildings.md` §2）（Issue #83。採石場を含む8種〔`BuildingType`〕を表現）
 - [x] T034 [P] `district_progress`（制覇率・発展度）・`collection`（名所図鑑）・`quest_daily`・`settings` のスキーマを作成（Issue #83）
 - [x] T035 **開示ヘクス集合の圧縮表現**を実装（Roaring Bitmap / ビットセット・plan.md §6）。GeoJSON 保持はしない（Issue #84。`packages/core/lib/src/pack/disclosed_hex_set.dart` の `DisclosedHexSet` として実装。H3由来の疎な整数値を上位ビット〔コンテナキー〕・下位16bit〔コンテナ内位置〕に分割し、コンテナごとに疎なら配列・要素数が閾値〔4096〕を超えたらビットマップへ適応的に昇格する Roaring Bitmap 方式。`disclosed_hex` テーブル〔T031〕はこの圧縮表現の生成元であり、テーブル自体は1行1ヘクスのまま変更していない。30,000ヘクス規模のテストあり）
-- [x] T036 **パック更新の不変性ルール**を実装: 一度開示したヘクスの資材分類は、パック更新後も過去分を不変とする（獲得履歴は当時の `pack_version` で確定 — plan.md §3.3）（Issue #84。`packages/core/lib/src/pack/disclosed_hex.dart` の `DisclosedHex`〔開示当時の `PackVersion` を保持する値オブジェクト〕と `pack_version_resolver.dart` の `PackVersionResolver`〔開示当時のバージョンに対応する `RegionPack` からのみ地形分類を解決し、現行パックへの黙示的フォールバックは `PackVersionUnavailable` 例外で禁止する〕として実装）
-- [x] T037 [P] `packages/core/test/pack/pack_version_immutability_test.dart` にパック更新後も過去の開示・獲得が変わらないことのテストを作成（Issue #84。パック更新をまたいでヘクスごとに開示当時の地形分類が独立して保たれること・開示当時のバージョンのパックが登録されていない場合に現行パックへ黙ってフォールバックせず例外になることを検証）
+- [x] T036 **パック更新の不変性ルール**を実装: 一度開示したヘクスの資材分類は、パック更新後も過去分を不変とする（plan.md §3.3）（Issue #84 で実装し、**Issue #96（2026-09-10 代表決定）で実現方法を変更**。**現在の正**: `packages/core/lib/src/pack/disclosed_hex.dart` の `DisclosedHex.terrainType`（`disclosed_hex.terrain_type` 列）に**開示時点の地形分類をスナップショット**として保存し、以後パックを引かない。〔**廃止**: Issue #84 当時の `pack_version_resolver.dart` の `PackVersionResolver`〔当時のバージョンのパックを引く方式〕は、MVP がパックをアプリ同梱するため旧パックが端末に残らず原理的に成立しないことが判明し、Issue #96 で削除した〕。`pack_version` 列は監査・移行判断の記録として保持する）
+- [x] T037 [P] `packages/core/test/pack/disclosed_hex_snapshot_test.dart` にパック更新後も過去の開示・獲得が変わらないことのテストを作成（Issue #84 で作成し **Issue #96 で置き換え**。パック更新をまたいでヘクスごとに開示当時の地形分類が独立して保たれることを検証する。〔**廃止**: Issue #84 当時の `pack_version_immutability_test.dart` は `PackVersionResolver` の削除に伴い Issue #96 で削除した〕）
 - [x] T038 Repository 層の抽象を `packages/core` に定義し、実装を `location`/`app` 側に置く（将来のサーバ同期 #16 に備えた抽象化 — #10 代表回答）
 
 ### 地域パック生成パイプライン（plan.md §3・§4）
