@@ -1,19 +1,15 @@
 import 'package:terra_town_core/terra_town_core.dart';
 import 'package:test/test.dart';
 
+import 'fake_position_provider.dart';
+
 /// plan.md §10「テストでは PositionProvider のフェイク実装＋録画済み歩行ルートの
-/// リプレイテストを行う」の実証。固定の [GeoPosition] 列を [positionUpdates] から
-/// 流すだけのフェイクであり、実 GPS・地図SDKには一切依存しない
-/// （`tools/check_import_direction.sh` が test/ も走査するため、ここに GPS/地図SDK
-/// 由来の import が無いこと自体が「core が GPS 型を露出していない」ことの裏付けになる）。
-class FakePositionProvider implements PositionProvider {
-  FakePositionProvider(this._recordedRoute);
-
-  final List<GeoPosition> _recordedRoute;
-
-  @override
-  Stream<GeoPosition> get positionUpdates => Stream.fromIterable(_recordedRoute);
-}
+/// リプレイテストを行う」の実証。[FakePositionProvider]（T051・Issue #101で
+/// `fake_position_provider.dart` へ抽出。旧・本ファイル内定義）は固定の [GeoPosition] 列を
+/// [PositionProvider.positionUpdates] から流すだけのフェイクであり、実 GPS・地図SDKには
+/// 一切依存しない（`tools/check_import_direction.sh` が test/ も走査するため、ここに
+/// GPS/地図SDK 由来の import が無いこと自体が「core が GPS 型を露出していない」ことの
+/// 裏付けになる）。
 
 void main() {
   group('PositionProvider', () {
