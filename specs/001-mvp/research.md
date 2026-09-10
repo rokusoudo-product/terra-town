@@ -232,6 +232,31 @@ plan.md §1 が最大の実装リスクとして挙げた2系統を比較した�
 >
 > **本件が明らかにした `tools/check_toolchain_versions.sh`（Issue #59）の限界**: このチェックは `ci.yml` と `docs/dev-setup.md` §2 という**2つの文書間の一致**を検査するものであり、**文書と実環境のズレは検出できない**。今回は両文書とも JDK 17 の記述で一致していたためチェックはPASSしていたが、実際にビルドを壊していたのは「両文書は17で揃っているが、（非対話シェルの）実環境は21である」というズレそのものだった。文書間整合チェックは「ドキュメントの自己矛盾」は防げても「ドキュメントと現実の乖離」までは防げない、という限界として記録する。
 
+> **【2026-09-10 追記・Issue #67 対応（案A採用）】** `android.builtInKotlin=true`（Blocker A の暫定対応）は「1行・可逆・影響範囲が最小」という前提で採用したが、この前提は誤りだったことが Issue #83（PR #90、SQLite/Drift 導入）で `path_provider` を追加した際の CI 失敗により判明した。秘書セッションが実機ビルドを4回実施して次を実測で確定した（2026-09-10）。
+>
+> | `android.builtInKotlin` の設定 | 結果 |
+> |---|---|
+> | `true`（Issue #67 の暫定対応時点の状態） | `path_provider` の組み込みが失敗（`kotlin-android` を適用するため）。`path_provider_android` を 2.2.23 に下げても同じ |
+> | `false`（Flutter 既定） | `maplibre_gl` 0.27.0 が失敗（`Could not find method kotlin()` — 本節冒頭で述べた問題そのもの） |
+>
+> つまり `builtInKotlin=true` と `false` は相互排他であり、`true` を採用している限り **KGP（kotlin-android）を適用するあらゆる Flutter プラグインが `maplibre_gl` と共存できない**。`path_provider` は最も一般的なプラグインの一つであり、今後 `geolocator` や `permission_handler` を追加しても同じ壁に当たる。すなわち Issue #67 は「暫定対応の後片付け」ではなく、**プラグインを追加できないブロッカー**だった。
+>
+> 上流 `maplibre/flutter-maplibre-gl` を確認したところ、我々が報告した Issue #1018 に対する修正 PR **#1020「fix(android): apply KGP when AGP does not compile Kotlin itself」が 2026-09-08 に main へマージ済み**（commit `2dff788c650f0d49677397aae55423774aecb8f2`）であることを確認した。ただし pub.dev は 0.27.0（2026-08-19）のままで、この修正を含む版は未リリースである。
+>
+> 次の git 依存構成で `flutter build apk --debug` の成功を実測した（2026-09-10、`android.builtInKotlin=false` の状態）。
+>
+> ```yaml
+>   maplibre_gl:
+>     git:
+>       url: https://github.com/maplibre/flutter-maplibre-gl.git
+>       ref: 2dff788c650f0d49677397aae55423774aecb8f2
+>       path: maplibre_gl
+> ```
+>
+> 上流はワークスペース構成（ルートの pubspec は `name: maplibre_gl_workspace`）になっているため、`path: maplibre_gl` の指定が必須である。`flutter clean` 後のクリーンビルドで確認したところ、Flutter が以前出していた「Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): maplibre_gl」という非推奨警告は**出力に現れなかった**（Issue #67 の未解決の質問への回答: 警告は誤検知ではなく、`builtInKotlin=true` の状態には `path_provider` 等を壊す実害があった。ただし `maplibre_gl` 自身については上流 #1020 の修正により AGP 9 環境で KGP を適用しなくなったため、警告の直接の指摘対象は解消したと考えられる）。
+>
+> **【代表決定・2026-09-10】この git 依存への切り替え（案A）を採用する。** これは Issue #55（2026-09-07 代表決定・pub.dev 版 `maplibre_gl: ^0.27.0` の採用）の一時的な差し戻しである。上流が 0.27.1 以降を pub.dev にリリースし次第、pub.dev 版へ戻し Issue #55 の決定に復帰する（追跡 Issue は秘書セッションが別途起票）。詳細・実施は Issue #67 / PR「fix/issue-67-remove-builtinkotlin-workaround」を参照。
+
 ### 6.2 T012 / R1: ローカルMBTiles読込
 
 > **【2026-09-09 実施・判定確定】** 以下は代表が Pixel 7a で `spikes/map_spike_gl`

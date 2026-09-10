@@ -4,7 +4,7 @@ doc: plan.md (TDD 相当 / 実装計画)
 feature: 001-mvp
 status: approved            # 承認ゲート② 通過（2026-07-25 代表承認・advisor=Fable 5 検証済み）
 created: 2026-07-25
-updated: 2026-09-09   # Issue #24 実機検証結果に基づく§3・§8・§14・§16の改定（2026-09-09代表承認）。ゲート②承認自体は2026-07-25のまま
+updated: 2026-09-10   # Issue #67対応（§14 Blocker A 解消・案A採用）に伴う改定（2026-09-10代表承認）。直前の改定: Issue #24実機検証結果に基づく§3・§8・§14・§16（2026-09-09代表承認）。ゲート②承認自体は2026-07-25のまま
 gate: "② plan 承認 → 次工程 tasks.md（/speckit.tasks）へ"
 related: ["specs/001-mvp/spec.md", "docs/terrain.md", "docs/architecture.md", "DESIGN.md"]
 advisor_reviewed: 2026-07-25   # Flutter+MapLibre構成を検証。地域パック方式・資材事前計算の2点を必須修正として反映
@@ -237,7 +237,7 @@ terra-town/
 
 **R1 追記（2026-09-08、Issue #55 / PR #66 / 追跡 #67）**: R1 は「ローカルMBTiles読込・動的レイヤ操作・feature-state という必要APIが露出しているか」を検証対象として想定していたが、`maplibre_gl` 0.27.0 を実際に組み込んで最初に詰まったのはその手前の**ビルド統合**だった。しかもビルド統合には独立した2つの詰まりどころ（Blocker）があることが判明した。
 
-- **Blocker A（対応済み）**: AGP 9.0.1 ＋ `android.builtInKotlin=false` の組み合わせで `flutter build apk --debug` が `Could not find method kotlin()` で失敗。暫定対応として `app/android/gradle.properties` の `android.builtInKotlin` を `true` に変更し解消。Flutter が非推奨として案内する互換シムであり恒久対応ではないため、撤去条件・撤去タイミングは Issue #67 で追跡する。
+- **Blocker A（解消済み・2026-09-10、Issue #67）**: AGP 9.0.1 ＋ `android.builtInKotlin=false` の組み合わせで `flutter build apk --debug` が `Could not find method kotlin()` で失敗する問題。暫定対応として `android.builtInKotlin=true` に変更していたが（PR #66）、この設定は `kotlin-android` を適用する他の Flutter プラグイン（`path_provider` 等）を一切使えなくする相互排他を生む**ブロッカー**だったことが Issue #83（PR #90）の CI 失敗により判明した（実測 2026-09-10）。上流 `maplibre/flutter-maplibre-gl` の修正 PR #1020「fix(android): apply KGP when AGP does not compile Kotlin itself」が 2026-09-08 に main へマージ済み（pub.dev は 0.27.0 のまま未リリース）であることを確認し、`packages/location/pubspec.yaml` の `maplibre_gl` をこの commit（`2dff788c650f0d49677397aae55423774aecb8f2`）への git 依存に切り替えたうえで `android.builtInKotlin` を Flutter 既定の `false` に戻した。クリーンビルドで `flutter build apk --debug` の成功と、Flutter が出していた KGP 非推奨警告が消えたことの両方を実測確認済み（詳細: research.md §6.1）。**この対応は Issue #55（2026-09-07 代表決定・pub.dev 版 `maplibre_gl: ^0.27.0` の採用）の一時的な差し戻しである**。上流が 0.27.1 以降を pub.dev にリリースし次第、pub.dev 版に戻し Issue #55 の決定に復帰する（追跡 Issue は別途起票）。
 - **Blocker B（解決済み・2026-09-08 代表決定）**: `maplibre_gl-0.27.0/android/build.gradle` が Java/Kotlin のコンパイルターゲットを AGP バージョンに関係なく無条件で `JavaVersion.VERSION_21` / `JVM_21` に固定しているため、JDK 21 でのビルドが別途必須だった。**JDK をプロジェクト既定として 17 → 21 へ引き上げることを決定した**（`ci.yml` の `java-version`・`docs/dev-setup.md` §2 を同一PR＝#66 で更新済み、`tools/check_toolchain_versions.sh` PASS 確認済み）。
 
   **この決定は §8 の fog of war 方式決定から強制されるものである**: §8 で承認済みの feature-state 方式は Android で `setFeatureState` が動く `maplibre_gl` 0.27.0 以降を前提としており（0.26.2 は `UnimplementedError`）、その 0.27.0 が JDK 21 を無条件で要求する。JDK 21 を採らない場合は §8 の fog of war 方式の決定そのものを開き直す必要があり、割に合わないと判断した。JDK 21 は LTS で AGP 9.0.1 / Kotlin 2.3.20 いずれとも対応する。Issue #67（Blocker A `builtInKotlin=true` の撤去条件）とは独立した制約で、上流の Built-in Kotlin 対応が進んでも本件（JDK 21 要求）は解消しない。詳細は research.md §6.1。
