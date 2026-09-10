@@ -42,9 +42,29 @@ dependencies:
       ref: 2dff788c650f0d49677397aae55423774aecb8f2
       path: maplibre_gl
 
+  # 永続化（Issue #83・tasks.md T030〜T034）。plan.md §6「ストレージ: SQLite（Drift 等）。
+  # ゲーム状態・地域パック（読み取り専用）を分離」に対応する。
+  # core への SQLite/Drift 依存の持ち込みは禁止（GPS_ARCHITECTURE・tools/check_import_direction.sh）
+  # なので、DB 層は本パッケージ（location）側に置く。
+  drift: ^2.34.4
+  # ネイティブ sqlite3 バイナリの同梱。本パッケージ（Flutter プラグイン形式）に依存を置くだけで
+  # app 側の pubspec.yaml を編集せずに Android への同梱が完結する
+  # （Flutter のプラグイン機構により app の依存グラフへ推移的に伝播するため）。
+  sqlite3_flutter_libs: ^0.6.0+eol
+  # RegionPackConnection が読み取り専用オープン（OpenMode.readOnly）に直接使う。
+  # drift 経由の推移的依存にせず、直接使用するパッケージとして明示する。
+  sqlite3: ^3.5.2
+  path: ^1.9.1
+  # ゲーム状態DB・地域パックDB それぞれのファイルパス解決に使用する。
+  path_provider: ^2.1.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Drift のコード生成（*.g.dart）。CI（.github/workflows/ci.yml）は build_runner を
+  # 実行しないため、生成物はコミットする方針とする（詳細は PR 本文参照）。
+  drift_dev: ^2.34.6
+  build_runner: ^2.15.1
 
 flutter:
