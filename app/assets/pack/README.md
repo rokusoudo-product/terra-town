@@ -19,7 +19,7 @@ bash bundle_region_pack.sh
 
 | ファイル | 内容 | 生成元 |
 |---|---|---|
-| `region_pack.sqlite` | ヘクス地形属性（`hex_terrain`）とパックメタ（`pack_meta`。`pack_version` を含む） | `classify_terrain.py` → `slim_pack_for_bundle.py` |
+| `region_pack.sqlite` | ヘクス地形属性・境界ジオメトリ（`hex_terrain`。`boundary_geojson` 列＝fog of war用のヘクス境界を含む・Issue #105）とパックメタ（`pack_meta`。`pack_version` を含む） | `classify_terrain.py` → `slim_pack_for_bundle.py` |
 | `tiles.mbtiles` | ベクタタイル（表示専用の基盤地図） | `build_vector_tiles.sh`（Planetiler） |
 
 ## pubspec.yaml との関係
@@ -32,11 +32,19 @@ bash bundle_region_pack.sh
 （13件全PASS）を確認した。CIの `ci.yml`「Test app」ステップもこの状態で走る）。
 ビルド・実機実行時に地図表示を試す場合は、事前に `bundle_region_pack.sh` の実行が必要。
 
-## 地図表示（T055）で読む際の注意
+## 地図表示（T055）・fog of war（T056）で読む際の注意
 
-- `region_pack.sqlite` の `hex_terrain` から、`location/` が実行時に fog of war 用の
-  GeoJSON FeatureCollection を組み立てる（各 Feature 直下に `feature_id` 列の値を
-  整数 `id` として持たせること。`promoteId` は Android 非対応 — plan.md §8）。
+- **⚠️ 旧記述の訂正（Issue #105）**: 本節はかつて「`location/` が実行時に
+  `hex_terrain` から境界ジオメトリを組み立てる（＝H3ライブラリで計算する）」と
+  書いていたが、これは実装が存在しない設計意図倒れだったと Issue #105 で判明した。
+- **現在の採用方式**: ヘクスの境界ジオメトリ（六角形の座標列）は
+  `tools/pack-builder/`（`hex_geometry.py`）がパック生成時に**事前計算**し、
+  `hex_terrain.boundary_geojson` 列に格納済みである。`location/`
+  （`packages/location/lib/src/map/fog_hex_source.dart` の
+  `buildFogHexFeatureCollectionFromRegionPack`）は**この値を読むだけ**で
+  GeoJSON FeatureCollection を組み立てる（H3 での再計算はしない）。
+  各 Feature 直下には `feature_id` 列の値を整数 `id` として持たせる
+  （`promoteId` は Android 非対応 — plan.md §8）。
   本ディレクトリに GeoJSON ファイルとして同梱しているわけではない
   （参考実装・検証は `tools/pack-builder/export_hex_geojson.py`）。
 - `tiles.mbtiles` は Planetiler 標準プロファイル（OpenMapTiles互換スキーマ）で生成した
@@ -56,7 +64,9 @@ bash bundle_region_pack.sh
    bash bundle_region_pack.sh
    ```
    `app/assets/pack/region_pack.sqlite`・`app/assets/pack/tiles.mbtiles` が生成されることを
-   確認する（実測: 狭山湖周辺エリアでそれぞれ約750KB・約680KB）。
+   確認する（実測: 狭山湖周辺エリアでそれぞれ約3.16MB・約680KB。`region_pack.sqlite` は
+   Issue #105（`hex_terrain.boundary_geojson`＝fog of war用のヘクス境界を追加）により
+   従来の約750KBから増加した。詳細は `tools/pack-builder/README.md`「ヘクス境界」節参照）。
 2. **非対話シェルでビルド/実行する**（対話シェルは sdkman が `JAVA_HOME` を JDK17に
    固定し、`maplibre_gl` 0.27.0系が要求する JDK21 でビルドできず失敗する。
    `docs/dev-setup.md` §2 参照）。**非対話シェル（`bash -lc`）は `~/.bashrc` の
