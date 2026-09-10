@@ -21,6 +21,17 @@ import '../geo/hex_id.dart';
 /// [_arrayToBitmapThreshold]（Roaring Bitmap の一般的な閾値 4096 = 65536/16 を踏襲）を
 /// 超えたら配列からビットマップへ昇格する。
 ///
+/// 【閾値の厳密さについて】本実装の [_ArrayContainer] は `List<int>`（Dart の Smi は
+/// 64bit環境で8byteスロット）で保持しており、本家 Roaring Bitmap の `uint16[]`
+/// （2byte/要素）ではない。本家の閾値4096は「配列(2byte×4096=8KB) とビットマップ
+/// (8KB固定) が釣り合う点」から導かれているため、8byteスロットの本実装では
+/// 厳密な損益分岐点は約1024要素になる（4096はRoaring Bitmapの慣例値をそのまま
+/// 踏襲したものであり、本実装のメモリ特性に対して最適化された値ではない）。
+/// 1エリア暫定上限30,000ヘクス規模では正しさ・性能とも問題にならないため
+/// 本 Issue ではこのままとするが、メモリ最適化が必要になった場合は
+/// [_ArrayContainer] を `Uint16List` ベースに置き換えるか、閾値を約1024へ
+/// 見直すことを検討すること。
+///
 /// pub.dev の外部 Roaring Bitmap 実装には依存しない（GPS_ARCHITECTURE・
 /// `packages/core` は純粋 Dart のみという方針、`tools/check_import_direction.sh` が
 /// 依存追加を機械的に検査するわけではないが、外部パッケージ追加はネットワーク取得を

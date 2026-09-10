@@ -58,6 +58,28 @@ void main() {
       expect(packV2.terrainOf(hex), TerrainType.vacantLot);
     });
 
+    test('獲得履歴（資材産出）もパック更新の影響を受けず開示当時のまま変わらない', () {
+      // 「資材分類」の実体は terrainYieldOf（T028・純粋関数）が地形タイプから導く
+      // 産出資材である。resolveTerrain が返す地形タイプさえ不変であれば、
+      // terrainYieldOf は純粋関数であるため獲得資材も自動的に不変になる
+      // （本テストはその連鎖が実際に成立することを確認する）。
+      final packV1 = _FakeRegionPack(
+        version: v1,
+        terrainByHex: {hex: TerrainType.forest}, // 森 → 木
+      );
+      final packV2 = _FakeRegionPack(
+        version: v2,
+        terrainByHex: {hex: TerrainType.vacantLot}, // 空き地 → 産出なし
+      );
+      final resolver = PackVersionResolver([packV1, packV2]);
+      const disclosed = DisclosedHex(hexId: hex, discoveredAtVersion: v1);
+
+      final resolvedTerrain = resolver.resolveTerrain(disclosed);
+      expect(resolvedTerrain, isNotNull);
+      // v2 更新後も、開示当時（v1）の地形＝森に基づく獲得資材（木）のまま。
+      expect(terrainYieldOf(resolvedTerrain!), {Resource.wood});
+    });
+
     test('パック更新をまたいでも、ヘクスごとの開示当時分類がそれぞれ独立して確定する', () {
       const hexA = HexId(1); // v1 で開示済み → v2 で分類が変わるが不変性ルールで保護される
       const hexB = HexId(2); // v2 時点で新規に地形が判明する（v1 には存在しない）
