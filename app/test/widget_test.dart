@@ -3,10 +3,25 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:terra_town_location/terra_town_location.dart';
 
 import 'package:terra_town/design/app_theme.dart';
 import 'package:terra_town/design/color_tokens.dart';
+import 'package:terra_town/features/map/map_screen.dart';
 import 'package:terra_town/main.dart';
+
+/// 【Issue #99】`MapScreen`（地図タブ）は既定で実アセットから地域パックを解決し、
+/// `packages/location` の `MapView`（MapLibre の実プラットフォームビュー）を描画する。
+/// これは widget テスト環境（`flutter test`）では動作しない
+/// （プラットフォームチャンネル未接続のため）ので、ナビ/テーマのみを検証する本ファイルの
+/// テストは全て、この「パック未取得」を返すフェイクを注入して地図の実描画を回避する。
+/// 地図画面自体の状態（ローディング/エラー/成功）の検証は
+/// `test/features/map/map_screen_test.dart` が担当する。
+Future<String> _missingPackResolver() {
+  return Future<String>.error(
+    const PackAssetMissingException(MapScreen.mbtilesAssetKey),
+  );
+}
 
 void main() {
   group('AppTheme light', () {
@@ -103,7 +118,7 @@ void main() {
   testWidgets('MaterialApp に light/dark 両テーマが Material3 で適用されている', (
     tester,
   ) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(MyApp(mapPathResolver: _missingPackResolver));
 
     final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(materialApp.theme!.useMaterial3, isTrue);
@@ -113,7 +128,7 @@ void main() {
   });
 
   testWidgets('下部ナビは地図/建設/図鑑/設定の4タブで構成される', (tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(MyApp(mapPathResolver: _missingPackResolver));
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationDestination), findsNWidgets(4));
@@ -124,7 +139,7 @@ void main() {
   });
 
   testWidgets('タブ切り替えでカウンターデモは存在しない（+ボタン・カウンター文言なし）', (tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(MyApp(mapPathResolver: _missingPackResolver));
 
     expect(find.byIcon(Icons.add), findsNothing);
     expect(find.byType(FloatingActionButton), findsNothing);
@@ -138,7 +153,7 @@ void main() {
       addTearDown(tester.platformDispatcher.clearLocaleTestValue);
       addTearDown(tester.platformDispatcher.clearLocalesTestValue);
 
-      await tester.pumpWidget(const MyApp());
+      await tester.pumpWidget(MyApp(mapPathResolver: _missingPackResolver));
       await tester.pumpAndSettle();
 
       final context = tester.element(find.byType(NavigationBar));
@@ -159,7 +174,7 @@ void main() {
       addTearDown(tester.platformDispatcher.clearLocaleTestValue);
       addTearDown(tester.platformDispatcher.clearLocalesTestValue);
 
-      await tester.pumpWidget(const MyApp());
+      await tester.pumpWidget(MyApp(mapPathResolver: _missingPackResolver));
       await tester.pumpAndSettle();
 
       final context = tester.element(find.byType(NavigationBar));

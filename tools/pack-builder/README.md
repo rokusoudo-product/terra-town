@@ -403,61 +403,13 @@ bash bundle_region_pack.sh
 | 地形属性の事前計算（`classify_terrain.py`） | 約6.7秒 |
 | ベクタタイル生成（`build_vector_tiles.sh`） | 約39秒〜1分20秒 |
 
-## 実機での読込確認手順（代表向け・plan.md §8「未計測」の解消）
+## 実機での地図表示確認手順（代表向け）
 
-`plan.md` §8「未計測」に残る「実際の地域パック（Planetiler生成・日本・高ズーム）での
-MBTiles読込は未実施」（T012が確認したのはMapLibre公式デモの世界地図サンプルであって
-terra-town自身の地域パックではない）を解消するための手順。**実機実行は代表が行う
-ため、以下は手順の用意のみ（本Issueのスコープ）。**
-
-`spikes/map_spike_gl`のハーネス（`spikes/map_spike_gl/lib/map_probe_page.dart`）が
-そのまま使える。**⚠️ ただしこのブランチ（`feature/issue-24-map-spike-harness`系）は
-まだ`main`にマージされていない**（`git ls-tree -r main -- spikes/`が空であることを
-確認済み。作業ディレクトリに残っている`spikes/`はビルド成果物のみで`lib/`を含まない）。
-別途チェックアウトが必要:
-
-```bash
-git fetch origin feature/issue-24-map-spike-harness
-git worktree add ../terra-town-spike origin/feature/issue-24-map-spike-harness
-cd ../terra-town-spike/spikes/map_spike_gl
-```
-
-このハーネスは検証時のフィクスチャ（MapLibre公式デモの`maplibre.mbtiles`。世界地図・
-z0-6）に合わせて**layer名・ズーム範囲・カメラ位置をソースコードに直書き**している
-（`kFixtureFillSourceLayer = 'countries'`・`kFixtureLineSourceLayer = 'geolines'`・
-`kFixtureMinZoom/MaxZoom = 0/6`・`kOriginLat/Lng`＝東京駅付近）。terra-townのパックは
-`countries`・`geolines`という層を持たず、ズーム0-14・狭山湖周辺という別のデータのため、
-**書き換えずに実行すると「レイヤーが見つからない」「ズーム範囲外で何も描画されない」
-「カメラが無関係の場所を向いている」のいずれかで失敗する**。
-
-1. terra-townリポジトリ側で`bash bundle_region_pack.sh`を実行し、
-   `app/assets/pack/tiles.mbtiles`を生成する。
-2. 生成した`tiles.mbtiles`を、ハーネス側の`spikes/map_spike_gl/assets/sample.mbtiles`
-   に**上書きコピー**する（ファイル名を`sample.mbtiles`のままにすることで、
-   `rootBundle.load('assets/sample.mbtiles')`やタブ①「同梱フィクスチャをコピーして
-   使う」ボタンをコード変更なしで流用できる）。
-3. `spikes/map_spike_gl/lib/map_probe_page.dart`の以下を書き換える:
-   - `kFixtureFillSourceLayer = 'countries'` → `'building'`（または`'water'`・
-     `'landuse'`など。上記「実測」のレイヤ一覧から見た目で確認しやすいもの）
-   - `kFixtureLineSourceLayer = 'geolines'` → `'transportation'`
-   - `kFixtureMinZoom = 0` / `kFixtureMaxZoom = 6` → `0` / `14`（terra-townのパックは
-     zoom 0-14。`building`はminzoom 13のため、maxzoomを6のままにすると
-     ズーム範囲外で常に空振りする）
-4. `spikes/map_spike_gl/lib/hex_grid.dart`の`kOriginLat`/`kOriginLng`
-   （既定は東京駅付近: 35.681236 / 139.767125）を、狭山湖周辺のパック中心付近
-   （`tiles.mbtiles`のmetadata実測値: 緯度35.82581・経度139.41317）に書き換える
-   （`map_probe_page.dart`の`initialCameraPosition`と各ベンチマークページのカメラが
-   この定数を参照しているため、変更しないと無関係の場所（東京駅周辺）にカメラが
-   向いたままになる）。
-5. `flutter run`で実機にインストールし、タブ①「同梱フィクスチャをコピーして使う」→
-   ②/③のボタンで`addSource`/`addLayer`が例外なく成功し、建物・道路等が実際に
-   描画されるかを目視確認する。
-6. ソース構築コストの計測は、ハーネスの性能計測タブが**ヘクス数を指定して合成ジオメトリを
-   生成する**方式のため、terra-townの実パックそのものの計測ではない。
-   **本Issueで生成した実際のヘクス数（13,106）を指定して計測すること**を手順として
-   明記する。これは「同じFeature数・合成ジオメトリでの代理計測」であり、
-   実パックのジオメトリ複雑さを反映した計測ではない点に注意（plan.md §3.5の
-   「実測で確定する」という宿題に対して、この代理計測がどこまで有効かは代表の判断に委ねる）。
+> **本節は Issue #99 で置き換えられた。** `spikes/map_spike_gl` の検証ハーネスを
+> 使う旧手順（別ワークツリーを用意し `kFixtureFillSourceLayer` 等を書き換える方法）は
+> もう使わない。アプリ本体（T055・T057）が地図を表示するようになったため、
+> 実機での確認手順は `app/assets/pack/README.md`「実機での地図表示確認手順」に
+> 集約した。plan.md §8「未計測」の解消もそちらを参照。
 
 ## ファイル構成
 
