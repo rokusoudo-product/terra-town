@@ -2,13 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'design/app_theme.dart';
+import 'features/map/map_screen.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, this.mapPathResolver});
+
+  /// テスト用の差し替えフック（既定 null では [MapScreen] が実アセットから
+  /// 地域パックを解決する）。
+  ///
+  /// `packages/location` の `MapView` は MapLibre の実プラットフォームビューに
+  /// 依存しており widget テスト環境では動作しない（`app/test/widget_test.dart`
+  /// 冒頭コメント参照）。ナビ/テーマのみを検証するテストは、ここにパック未取得を
+  /// 返すフェイクを注入することで、地図の実描画に一切触れずに済ませる。
+  final Future<String> Function()? mapPathResolver;
 
   @override
   Widget build(BuildContext context) {
@@ -28,17 +38,20 @@ class MyApp extends StatelessWidget {
       ],
       supportedLocales: const [Locale('ja')],
       locale: const Locale('ja'),
-      home: const RootScaffold(),
+      home: RootScaffold(mapPathResolver: mapPathResolver),
     );
   }
 }
 
 /// 下部ナビ4タブ（地図 / 建設 / 図鑑 / 設定）の骨組み（DESIGN.md「余白・レイアウト」）。
 ///
-/// 各タブの中身（4状態の実装）は Issue #25 のスコープ外。
-/// tasks.md の各画面タスク（T057・T075・T076・T089・T093・T103）に委ねる。
+/// 地図タブ（T057・Issue #99）以外の中身（4状態の実装）は Issue #25 のスコープ外。
+/// tasks.md の各画面タスク（T075・T076・T089・T093・T103）に委ねる。
 class RootScaffold extends StatefulWidget {
-  const RootScaffold({super.key});
+  const RootScaffold({super.key, this.mapPathResolver});
+
+  /// [MyApp.mapPathResolver] をそのまま [MapScreen] まで橋渡しするテスト用フック。
+  final Future<String> Function()? mapPathResolver;
 
   @override
   State<RootScaffold> createState() => _RootScaffoldState();
@@ -68,8 +81,12 @@ class _RootScaffoldState extends State<RootScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    final Widget body = _selectedIndex == 0
+        ? MapScreen(resolveMbtilesPath: widget.mapPathResolver)
+        : _PlaceholderScreen(label: _tabs[_selectedIndex].label);
+
     return Scaffold(
-      body: _PlaceholderScreen(label: _tabs[_selectedIndex].label),
+      body: body,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) =>
