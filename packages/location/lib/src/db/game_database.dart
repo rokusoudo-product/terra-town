@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:terra_town_core/terra_town_core.dart' show TerrainType;
 
 import 'building_type.dart';
 
@@ -21,17 +22,34 @@ enum BuildingConstructionState {
   built,
 }
 
-/// `disclosed_hex` テーブル（T031）。
+/// `disclosed_hex` テーブル（T031・T035〜T037・Issue #96 で改訂）。
 ///
 /// 出典: `specs/001-mvp/plan.md` §6「`disclosed_hex`（開示済みヘクス・`pack_version`）」。
-/// 1ヘクスにつき1行（[hexId] が主キー）。[packVersion] は開示**当時**のパックバージョンを
-/// 記録する列であり、パック更新後も過去分は不変とする不変性ルール（plan.md §3.3）の
-/// 前提となる。**不変性ルールそのものの実装は別 Issue（#84・T035〜T037）が担当し、
-/// 本テーブルはそのための列を用意するに留める。**
+/// 1ヘクスにつき1行（[hexId] が主キー）。
 ///
-/// 開示ヘクス集合の圧縮表現（Roaring Bitmap / ビットセット・plan.md §6）は同じく
-/// Issue #84（T035）が担当するため、本テーブルは1行1ヘクスの素直な表現とする
-/// （集合の圧縮は読み出し側でこのテーブルを集約して行う想定）。
+/// ## 不変性ルールの実現方法（2026-09-10・Issue #96・代表決定・案A）
+/// 当初（Issue #84・T036・PR #95）は「[packVersion] を使って開示当時の `RegionPack` を
+/// 引き直す」方式（`core` の `PackVersionResolver`）を想定していたが、MVP は
+/// パックをアプリ同梱するため（plan.md §3.3）パック更新＝アプリ更新であり、
+/// **旧バージョンのパックファイルは端末から消える**。当時のバージョンを引く方式は
+/// 原理的に成立しないため、`PackVersionResolver` は Issue #96 で削除した。
+///
+/// 代わりに [terrainType] 列を追加し、**ヘクスを開示した瞬間の地形分類を
+/// スナップショットとしてこの行自体に保存する**。以後、このヘクスの地形分類を
+/// 問い合わせる経路は常にこの列であり、地域パック（`RegionPackConnection`・
+/// tasks.md T069）を再度引くことはない（地域パックを引くのは新規開示の瞬間だけ）。
+/// **地形分類の参照経路はこの列に一本化されており、パックを引く経路は残っていない。**
+///
+/// ## 区画・POI をこのテーブルに含めない理由（Issue #96・代表決定）
+/// 地形分類とは異なり、**区画（`district`）・名所POI の対応づけはスナップショットしない**。
+/// - 区画: 制覇率（Issue #7・V-C）は「現在の区画定義に対する割合」として意味を持つため、
+///   開示時点の区画割り当てを凍結すると市町村合併後に現在の区画と食い違い、制覇率が
+///   計算できなくなる。行政区域の変更は年単位で稀であり、OSM の日常更新とは頻度が
+///   2桁違うため、区画は常に地域パック（現行）から解決する
+///   （`core` の `RegionPack.districtOf` のドキュメント参照）。
+/// - 名所POI: 保全すべきは「プレイヤーが何を集めたか」であり、[Collections]
+///   テーブル（T034）が獲得記録を持つ。POI が OSM から消えてもコレクションは
+///   失われないため、ヘクスと POI の対応づけを別途凍結すると同じ情報の二重管理になる。
 @DataClassName('DisclosedHexRow')
 class DisclosedHexes extends Table {
   @override
@@ -42,7 +60,21 @@ class DisclosedHexes extends Table {
   /// （H3 index は上位ビットにモード情報を含むが実質63bit以内に収まる）。
   IntColumn get hexId => integer()();
 
+  /// このヘクスを**開示した時点**の地形分類のスナップショット（`core` の
+  /// `TerrainType` と対応・`textEnum` で `.name` を永続化）。
+  ///
+  /// **地形分類を問い合わせる際は必ずこの列を使うこと。** パックが更新されても
+  /// この値は変わらない（不変性ルール・plan.md §3.3・Issue #96）。
+  /// v1（本 Issue 以前）にはこの列が存在しなかったため
+  /// [GameDatabase.migration] でマイグレーションを行う（そちらのドキュメント参照）。
+  TextColumn get terrainType => textEnum<TerrainType>()();
+
   /// このヘクスを開示した時点の地域パックバージョン（`PackVersion.value` と対応）。
+  ///
+  /// 【用途が変わったことに注意（Issue #96）】地形分類の解決には使わない
+  /// （[terrainType] を直接参照する）。現在は「いつのパックで開示したか」という
+  /// 監査目的の記録、および将来パック形式やデータ移行が必要になった際の
+  /// 判断材料としてのみ保持する。
   TextColumn get packVersion => text()();
 
   /// 開示した日時（端末のウォールクロック。位置記録自体の時刻は
@@ -284,17 +316,48 @@ class GameDatabase extends _$GameDatabase {
   factory GameDatabase.forTesting() => GameDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
+  /// 【v1 → v2 マイグレーション（Issue #96）で `disclosed_hex.terrain_type` を
+  /// テーブルの再作成で追加している理由】
+  /// `terrainType` は NOT NULL 列（デフォルト値なし）として定義した（[DisclosedHexes]
+  /// 参照）。地形分類の解決経路をこの列に一本化する以上、値が欠けた行を許容する
+  /// （nullable にする）と「スナップショットが無い開示済みヘクス」という
+  /// 不変性ルール上あり得てはならない状態を型で表現できなくなってしまう。
+  ///
+  /// 一方、SQLite は `ALTER TABLE ... ADD COLUMN` で NOT NULL 列を追加する際、
+  /// **デフォルト値が無いと DDL 自体を拒否する**（`Cannot add a NOT NULL column
+  /// with default value NULL`）。【要確認】これは SQLite 公式ドキュメントの記載に
+  /// 基づく判断であり、本 Issue の作業環境には `sqlite3` CLI が無く実機で確認は
+  /// 取れていない（このため `Migrator.addColumn` を試すのではなく、確認不要な
+  /// テーブル再作成方式を最初から選んだ）。本 Issue の対象バージョン（v1）は
+  /// git タグ・GitHub Releases・ストア配布のいずれも存在せず**一度もリリースされて
+  /// いない**（2026-09-10 時点で確認）ため、実運用で v1 の `disclosed_hex` に
+  /// 既存データが存在するケースはない。そのため、
+  /// 意味のあるデフォルト値を捏造する（例: 全て `vacantLot` 扱いにする）よりも、
+  /// **テーブルを作り直す**方が正直な選択だと判断した。特に `vacantLot` は
+  /// 「建築可能な唯一の地形」（terrain.md §2）であるため、これをデフォルトにすると
+  /// 「移行前の全ヘクスが建築可能になる」という、まさに plan.md §3.3
+  /// が防ごうとしている種類のデータ破損を自ら作り出してしまう。
+  ///
+  /// v1 が将来リリースされた後にスキーマ変更が必要になった場合は、この
+  /// テーブル再作成方式を踏襲せず、実データを保持する `stepByStep` 移行
+  /// （列追加＋バックフィル等）に切り替えること。
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
           await m.createAll();
         },
-        // 将来のスキーマ変更（列追加・テーブル追加等）は schemaVersion を上げたうえで
-        // ここに onUpgrade のステップを追加すること
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            await m.deleteTable(disclosedHexes.actualTableName);
+            await m.createTable(disclosedHexes);
+          }
+        },
+        // 将来のスキーマ変更（列追加・テーブル追加等）はさらに schemaVersion を
+        // 上げたうえで、ここに onUpgrade のステップを追加すること
         // （https://drift.simonbinder.eu/docs/advanced-features/migrations/ の
-        // stepByStep 方式を推奨）。本 Issue（#83）は初期スキーマ（v1）の導入のみを
-        // 担当するため、onUpgrade は未実装。
+        // stepByStep 方式を推奨。実データが載ったバージョンからの移行では
+        // 上記のテーブル再作成方式を使わないこと）。
       );
 }

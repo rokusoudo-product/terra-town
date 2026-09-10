@@ -156,13 +156,13 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 ### Implementation for US1
 
-- [ ] T054 [US1] `packages/core/lib/src/disclosure/disclosure_service.dart` に開示判定ロジック（通過グリッドセル→ヘクス多数決集約→`disclosed_hex` 更新）を実装。**GPS/地図に依存しない純粋ロジック**
+- [ ] T054 [US1] `packages/core/lib/src/disclosure/disclosure_service.dart` に開示判定ロジック（通過グリッドセル→ヘクス多数決集約→`disclosed_hex` 更新）を実装。**GPS/地図に依存しない純粋ロジック**。**2026-09-10 追記（Issue #96）**: 新規ヘクスを開示する瞬間に、その時点の `RegionPack.terrainOf` の結果を `DisclosedHex.terrainType`（`disclosed_hex.terrain_type` 列）としてスナップショット保存すること。開示済みヘクスの地形分類の正はこのスナップショット列であり、`RegionPack.terrainOf` を再度引く経路は存在しない（`PackVersionResolver` は Issue #96 で削除済み）
 - [ ] T055 [US1] `packages/location/lib/src/map/map_view.dart` に MapLibre 地図表示（同梱 MBTiles をローカル読込）を実装
 - [ ] T056 [US1] `packages/location/lib/src/map/fog_of_war_layer.dart` に fog of war を実装（**採用方式・2026-09-08 Issue #56 追随**: 全ヘクスを起動時／エリア切替時に**1回だけ** `addGeoJsonSource` でソースに追加し、開示は fill レイヤの `fill-opacity` を `feature-state`（`setFeatureState`）のトグルで切り替える。各 Feature は直下に整数 `id` を持たせる（`promoteId` は Android 非対応）。`maplibre_gl` 0.27.0 以降が必要（0.26.2 は Android で `setFeatureState` が `UnimplementedError`）— plan.md §8。**不採用（経緯）**: 「穴あきポリゴン1枚」の GeoJSON 差分更新は実機計測で性能基準未達（FAIL）のため不採用 — plan.md §8・research.md §6.4）
 - [ ] T057 [US1] `app/lib/features/map/map_screen.dart` にマップ画面を実装（`DESIGN.md` のトークンに準拠。色・サイズの直書きをしない）
 - [ ] T058 [US1] 現在地表示と地図追従を実装（`app/lib/features/map/`）
 - [ ] T059 [US1] 位置記録サービスの起動/停止と権限リクエスト（フォアグラウンド位置のみ）を実装（`app/lib/features/permissions/`）
-- [ ] T060 [US1] 開示状態の永続化と復元を実装し、アプリ再起動後も霧の状態が残ることを確認。**2026-09-09 追記（plan.md §8・research.md §6.4）**: 復元対象は「アプリ再起動後」だけでなく**任意の `setStyle`（スタイル再読み込み）後**も含める。実測で `setStyle` は地図側の feature-state を全て消すことが確認されており、地図の feature-state は開示状態の正ではなく永続ストレージ（T031・T035）が正であるため、素直に実装するとテーマ切替等で霧が全部消える事故になる
+- [ ] T060 [US1] 開示状態の永続化と復元を実装し、アプリ再起動後も霧の状態が残ることを確認。**2026-09-09 追記（plan.md §8・research.md §6.4）**: 復元対象は「アプリ再起動後」だけでなく**任意の `setStyle`（スタイル再読み込み）後**も含める。実測で `setStyle` は地図側の feature-state を全て消すことが確認されており、地図の feature-state は開示状態の正ではなく永続ストレージ（T031・T035）が正であるため、素直に実装するとテーマ切替等で霧が全部消える事故になる。**2026-09-10 追記（Issue #96）**: 復元時の地形分類（資材産出・建築可否判定に使う値）は `disclosed_hex.terrain_type` のスナップショットから読むこと。地域パックを引き直して復元してはならない（パック更新後は旧パックが端末に存在しないため）
 - [ ] T061 [US1] オフライン蓄積→前景復帰時の状態反映を実装（FR-7・MVP は端末内完結）
 - [ ] T062 [P] [US1] 歩行距離・歩数の表示（HUD）を実装（`app/lib/features/map/widgets/`・`DESIGN.md` の HUD 方針に準拠）
 - [ ] T063 [US1] **開放ポイント**の入手を実装（自然回復 **1P/日** ＋ GPS移動距離ベースの付与・上限 **50** — `docs/opening_points.md`）
@@ -187,7 +187,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 ### Implementation for US2
 
 - [ ] T068 [US2] `packages/core/lib/src/economy/resource_grant_service.dart` に資材付与を実装（**地域パックの事前計算済み地形属性を読む純粋関数**・実行時のタイルクエリはしない — plan.md §4）
-- [ ] T069 [US2] `packages/location/lib/src/pack/region_pack_repository.dart` に地域パック（SQLite・読み取り専用）へのアクセスを実装
+- [ ] T069 [US2] `packages/location/lib/src/pack/region_pack_repository.dart` に地域パック（SQLite・読み取り専用）へのアクセスを実装。**2026-09-10 追記（Issue #96）**: 本リポジトリが返す `RegionPack`（`terrainOf` 含む）は新規開示時のスナップショット作成にのみ使うこと。既に開示済みのヘクスの地形分類を問い合わせる経路として使わない（正は `disclosed_hex.terrain_type`）。一方、区画（`districtOf`）・名所POI（`pointsOfInterest`）は開示状態に関わらず常に本リポジトリ経由で現行パックから解決してよい（スナップショットしない設計・理由は `disclosed_hex` テーブル・`RegionPack` のドキュメント参照）
 - [ ] T070 [US2] `packages/core/lib/src/landmark/landmark_service.dart` に名所・固有オブジェクトの出現判定を実装（`docs/landmark_objects.md`）
 - [ ] T071 [US2] 名所オブジェクトの地図表示を実装（`packages/location/lib/src/map/landmark_layer.dart`）。**ポイント開放したマスでも表示する**
 - [ ] T072 [US2] **現地訪問時の追加ボーナス**を実装（遠隔開放でも取得可だが、実際に歩いて訪問するとプラス — #6 代表回答）
