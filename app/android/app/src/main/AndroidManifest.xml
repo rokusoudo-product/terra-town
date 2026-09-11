@@ -1,4 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Issue #123 (T046〜T048)。plan.md §10・Issue #10 の代表回答により
+         フォアグラウンド位置のみを要求する。ACCESS_BACKGROUND_LOCATION は要求しない
+         （background location 権限のストア審査を回避する設計判断・plan.md §10）。 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- Android 14 (API 34) 以降、foregroundServiceType="location" の foreground service を
+         開始するには本権限の宣言が必要（マニフェスト宣言のみで、実行時許可ダイアログの対象外）。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Android 13 (API 33) 以降、常駐通知の表示には実行時許可が必要。許可されない場合も
+         foreground service 自体は起動する（通知が表示されないだけ）。実行時のリクエストは
+         T059（権限リクエストUI）のスコープ。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="terra_town"
         android:name="${applicationName}"
@@ -30,6 +44,15 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Issue #123 (T046〜T048): 位置記録 foreground service。
+             exported=false（他アプリから起動不可。app 内の composition root からのみ起動する）。
+             権限が付与されていない場合は LocationTrackingService#onStartCommand が
+             自ら stopSelf() する（サービス自体は「起動できてしまう」が、記録・通知は開始しない）。 -->
+        <service
+            android:name=".location.LocationTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

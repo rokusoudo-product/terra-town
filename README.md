@@ -21,6 +21,7 @@
 | [specs/001-mvp/plan.md](specs/001-mvp/plan.md) | MVP 実装計画（技術スタック・アーキ）。ゲート② 承認済み |
 | [DESIGN.md](DESIGN.md) | UIデザイン仕様（Material 3 ＋ 独自トークン） |
 | [docs/architecture.md](docs/architecture.md) | 環境構成図（Mermaid・詳細版） |
+| [docs/location-track-db.md](docs/location-track-db.md) | 位置記録DB（Kotlin所有）のスキーマ・受け渡し方法（Issue #123・#124） |
 | [docs/opening_points.md](docs/opening_points.md) | 開放ポイント（未踏破エリアの開放手段）定義（Issue #4） |
 | [docs/terrain.md](docs/terrain.md) | エリア（ヘクス）の形状・地形タイプ定義（2026-07-23、Issue #3） |
 | [docs/landmark_objects.md](docs/landmark_objects.md) | 名所・固有オブジェクト（大量配置POI）システム定義（2026-07-26、Issue #6） |
@@ -40,15 +41,19 @@ flowchart TB
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画"]
             loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装"]
         end
-        native["Kotlin ネイティブ (Pigeon channel)<br/>foreground位置記録・モック/速度検出・歩数・Health Connect<br/>（未実装・予定）"]
-        gamedb[("ゲーム状態 SQLite<br/>disclosed_hex（開示時点の地形分類スナップショット）等")]
+        fg["Kotlin foreground service<br/>fused location・距離ベース記録・elapsedRealtime<br/>✅ 実装済み（Issue #123）"]
+        pigeon["Pigeon channel (NativePositionProvider)<br/>モック/速度検出・歩数・Health Connect<br/>（未実装・予定）"]
+        gamedb[("ゲーム状態 SQLite（Drift管理）<br/>disclosed_hex（開示時点の地形分類スナップショット）等")]
+        trackdb[("位置記録DB（Kotlin所有・別ファイル）<br/>location_track.sqlite。Dartは読み取り専用（未実装・Issue #124）")]
         pack[("地域パック（読取専用・別接続）<br/>tiles.mbtiles＋cell_terrain/hex_terrain（境界事前計算済）＋district＋poi")]
     end
 
     ci["🛠 パック生成（手動実行の CI）<br/>tools/pack-builder/（Planetiler＋Python）"]
 
-    user -.GPS移動（未実装）.-> native
-    native -.-> gamedb
+    user -->|GPS移動| fg
+    fg --> trackdb
+    trackdb -.読取専用（未実装）.-> pigeon
+    pigeon -.-> loc
     ui <--> core
     loc -->|core の抽象を実装| core
     core <--> gamedb
@@ -59,7 +64,7 @@ flowchart TB
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
     classDef planned stroke-dasharray: 5 5,fill:#f5f5f5,stroke:#9e9e9e;
     class core pure
-    class native planned
+    class pigeon planned
 ```
 
 > 依存方向: `core/`（純粋ロジック）は `location/`（GPS・地図SDK・SQLite）を import しない一方向依存（[GPS_ARCHITECTURE 準拠](docs/architecture.md)）。拡張フェーズの地域パック配布（CDN）は MVP の構成要素ではない — 詳細は [docs/architecture.md](docs/architecture.md)。
