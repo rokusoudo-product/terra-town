@@ -38,6 +38,17 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // Issue #108: com.uber:h3 の Android ネイティブ（jniLibs.srcDir 参照。下記
+    // extractH3NativeLibs タスクのドキュメント参照）。
+    sourceSets {
+        getByName("main") {
+            // AGP 9 の SourceSet API は Provider<Directory> を直接受け付けない
+            // （"You cannot add Provider instances to the Android SourceSet API"）ため
+            // .get().asFile で確定パスに変換して渡す。
+            jniLibs.srcDir(layout.buildDirectory.dir("h3-jni-libs").get().asFile)
+        }
+    }
 }
 
 kotlin {
@@ -49,6 +60,11 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// Issue #108: com.uber:h3 の jar から Android 用ネイティブ（.so）だけを取り出すための
+// 専用 configuration（implementation とは別に、jarファイル自体を zipTree で開くために
+// 使う。implementation の依存グラフには影響しない）。
+val h3Natives: Configuration by configurations.creating
 
 dependencies {
     // Issue #123 (T046): 位置記録 foreground service の fused location provider。
@@ -74,6 +90,7 @@ dependencies {
     // `H3HexIndexer` の初期化（H3Core.newInstance()）が失敗する制約がある
     // （`H3HexIndexer` のドキュメント参照）。
     implementation("com.uber:h3:4.5.0")
+    h3Natives("com.uber:h3:4.5.0")
 
     // Issue #108: このリポジトリ初めての Kotlin 単体テスト。JVM 単体テスト
     // （`app:testDebugUnitTest`）用。
@@ -83,9 +100,64 @@ dependencies {
     // Android の SQLiteOpenHelper ライフサイクル全体を動かす Robolectric は導入コストが
     // 重い・不安定になりやすいと判断し不採用（判断は PR 本文参照）。代わりに移行SQL自体
     // （ALTER TABLE・UPDATE・本番と同じ文字列定数）を xerial の sqlite-jdbc（JVM から
-    // 直接使える純粋な SQLite 実装）に対して実行し検証する。**テスト対象は移行SQL文
-    // そのものであり、Android の `SQLiteDatabase`/`SQLiteOpenHelper` の実装や
-    // `onUpgrade` の呼び出しタイミングそのものはテスト対象外**（実機での検証は
+    // 直接使える純粋な SQLite 実装）に対して実行し検証する。テスト対象は移行SQL文
+    // そのものであり、Android の SQLiteDatabase/SQLiteOpenHelper の実装や
+    // onUpgrade の呼び出しタイミングそのものはテスト対象外（実機での検証は
     // 秘書セッションが上書きインストールで行う。PR本文参照）。
     testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
+}
+
+// Issue #108（重要・ビルド時にAPKへ実際に同梱されることを確認して判明した問題への対処）:
+//
+// com.uber:h3:4.5.0 のネイティブ（libh3-java.so）は、jar内で
+// android-arm64/libh3-java.so・android-arm/libh3-java.so のようなパス
+// （AndroidのABI名"arm64-v8a"・"armeabi-v7a"ではなく h3-java 独自の命名）に
+// 置かれている。AGPの通常のリソースマージ（mergeDebugJavaResource等）は
+// 拡張子 .so のファイル全般を「ネイティブライブラリはjniLibsパッケージング専用」
+// として除外し、一方でネイティブライブラリのパッケージング（mergeDebugJniLibFolders等）は
+// lib/<ABI>配下の.so（jar内）または jniLibs.srcDirs 配下 <ABI>配下の.so という
+// Android ABI名のディレクトリ構造しか拾わない。結果として、
+// implementation("com.uber:h3:4.5.0") を追加しただけでは
+// .so がAPKに一切同梱されない（.dylib/.dll等 .so 以外の拡張子は
+// 素通しでリソースとして残るため、unzip -l で見ると一見「動いているように」
+// 誤読しやすい点に注意。実際に app-debug.apk を展開して確認し、
+// android-arm64/libh3-java.so 等が失われていることを実測で発見した）。
+//
+// 対処: h3 jarから android-arm64・android-arm の.soだけを取り出し、
+// Androidの正しいABI名（arm64-v8a・armeabi-v7a）のディレクトリへリネームして
+// build/h3-jni-libs/ に展開し、android.sourceSets.main.jniLibs.srcDir
+// （上記 android ブロック）でAGPに認識させる。android-x86_64 はそもそも
+// jarに同梱されていないため対象外（H3HexIndexer のドキュメント参照）。
+//
+// 未検証（PR本文にも明記）: 本タスク自体はJVM単体テスト実行環境（linux-x64の
+// ネイティブを直接ロードするJVMテスト）には関与しない。効果（実機でAndroidネイティブが
+// 正しく読み込めるか）は秘書セッションの実機確認が必要。
+//
+// 【注記】このコメントは意図的に行コメント（//）にしている。Kotlinはブロックコメント
+// （/* */）を入れ子として扱うため、本文中にファイルパスの例として "/*" を含む文字列
+// （glob風の表記）を書くと、閉じ "*/" の数が対応せず後続のコード全体が静かにコメント
+// として飲み込まれる事故が起きる（本Issueの実装中に実際に発生し、tasks.registerの
+// 呼び出しが実行されないという症状で発覚した）。以後、このファイルでコード直前の
+// 長文コメントは行コメントを使うこと。
+val extractH3NativeLibs =
+    tasks.register<Copy>("extractH3NativeLibs") {
+        from({ h3Natives.map { file -> zipTree(file) } }) {
+            include("android-arm64/libh3-java.so", "android-arm/libh3-java.so")
+            eachFile {
+                path =
+                    when {
+                        path.startsWith("android-arm64/") -> path.replaceFirst("android-arm64/", "arm64-v8a/")
+                        path.startsWith("android-arm/") -> path.replaceFirst("android-arm/", "armeabi-v7a/")
+                        else -> path
+                    }
+            }
+            includeEmptyDirs = false
+        }
+        into(layout.buildDirectory.dir("h3-jni-libs"))
+    }
+
+// mergeXxxJniLibFolders（バリアントごとに生成される）が jniLibs.srcDirs を読み取る前に、
+// 展開タスクを必ず完了させる。バリアント名を決め打ちにせず名前一致で広く拾う。
+tasks.matching { it.name.contains("JniLibFolders") }.configureEach {
+    dependsOn(extractH3NativeLibs)
 }

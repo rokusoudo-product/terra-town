@@ -15,7 +15,7 @@
 
 【Issue #108・2026-09-11 追記】以前（Issue #115）は本フィクスチャは
 `packages/location/test/position/fixtures/h3_py_reference.json` に置き、Dart側
-`h3_locator_h3_test.dart`（`h3_flutter`）と突き合わせていた。緯度経度→H3の変換が
+`hex_locator_h3_test.dart`（`h3_flutter`）と突き合わせていた。緯度経度→H3の変換が
 Kotlin側（`H3HexIndexer`）に移行したことに伴い、出力先を
 `app/android/app/src/test/resources/h3_py_reference.json`（Kotlin の JVM 単体テストの
 クラスパスリソース）に変更した。旧Dart側テスト・フィクスチャは撤去済み。

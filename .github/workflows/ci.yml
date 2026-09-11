@@ -126,3 +126,11 @@ jobs:
       - name: Build Android debug APK
         run: flutter build apk --debug
         working-directory: app
+
+      # Issue #108: Kotlin単体テスト（このリポジトリ初）。H3HexIndexerTestが
+      # h3-py生成のフィクスチャ（app/android/app/src/test/resources/h3_py_reference.json）
+      # との一致を、LocationTrackMigrationV1ToV2Testがv1→v2スキーマ移行のSQLを
+      # それぞれPRごとに機械的に検証する。上のAPKビルドと同じ環境（JDK 21）で走る。
+      - name: Test Android (Kotlin unit tests)
+        run: ./gradlew :app:testDebugUnitTest
+        working-directory: app/android
