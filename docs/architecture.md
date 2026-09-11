@@ -4,7 +4,7 @@
 > **MVP の外部通信はゼロ**（対象1エリアの地域パックは**アプリに同梱**・`plan.md` §3.3。通信ゼロ・規約リスクゼロ・プライバシー完全）。**歩行位置はサーバに送信しない。**
 > 都道府県/市域単位に広げる**拡張フェーズ**（下記）で初めて地域パックの静的ホスティングからの初回DLが発生するが、これは MVP の構成要素ではない。
 > 変更を伴う実装をしたら、コードと同じコミットで本図と README を更新する。
-> 位置記録DB（`location_track.sqlite`）のスキーマ・受け渡し方法の詳細は [docs/location-track-db.md](location-track-db.md)（Issue #123・#124）。
+> 位置記録DB（`location_track.sqlite`）のスキーマ・受け渡し方法の詳細は [docs/location-track-db.md](location-track-db.md)（Issue #123・#124・#126）。
 
 ## MVP 構成（端末内完結・外部通信ゼロ）
 
@@ -17,17 +17,18 @@ flowchart TB
         subgraph flutter["Flutter アプリ (Dart)"]
             ui["UI 層<br/>地図・建設・図鑑・HUD<br/>(MapLibre GL / Material 3)"]
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画集計<br/>抽象を定義: PositionProvider / HexLocator / RegionPack"]
+            reward["RewardPolicy（core・純粋）<br/>モック→開拓無効化（DisclosureServiceに配線済み）<br/>速度(SpeedFilter)・歩数不一致→付与倍率算出<br/>✅ 判定は実装済み（Issue #126・T099・T101）<br/>⚠️ 倍率を消費する資材付与処理自体は未実装"]
             loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator＝RecordedHexLocator。Kotlin側で確定済みのhex_idを読むだけ）"]
         end
         subgraph native["Kotlin ネイティブ"]
             fg["foreground service<br/>fused location・距離ベース記録（暫定15m＋5分上限・T015で確定）・elapsedRealtime<br/>✅ 実装済み（Issue #123・T046〜T048）"]
             pigeon["Pigeon platform channel<br/>LocationTrackingHostApi: 起動/停止/状態問い合わせ＋位置データの取得（getLocationPoints）<br/>（§下記注記参照）<br/>✅ 実装済み（Issue #124・T049・Issue #131）"]
-            anti["モック検出・速度/テレポート判定・歩数センサー突合<br/>(未実装・T099・T101)"]
+            anti["モック検出（isMock/isFromMockProvider）<br/>✅ 実装済み（Issue #123・#126）<br/>歩数センサー（TYPE_STEP_COUNTER・ACTIVITY_RECOGNITION）<br/>✅ 実装済み（Issue #126・T101）"]
             health["Health Connect（オプトイン）<br/>(未実装・T102)"]
         end
         subgraph store["端末内ストレージ（SQLite・接続を分離）"]
             gamedb[("ゲーム状態DB（Drift管理）<br/>disclosed_hex（開示済みヘクス・開示時点の地形分類スナップショット terrainType）<br/>inventory・building・district_progress・collection 等")]
-            trackdb[("位置記録DB（Kotlin所有・別ファイル・Drift管理下ではない）<br/>location_track.sqlite: location_point（session_id・elapsedRealtimeNanos・緯度経度・accuracy・possible_mock_location 等）<br/>開くのは Kotlin だけ（Dart は開かない・Issue #131）<br/>✅ 実装済み（Issue #123・docs/location-track-db.md）")]
+            trackdb[("位置記録DB（Kotlin所有・別ファイル・Drift管理下ではない）<br/>location_track.sqlite: location_point（session_id・elapsedRealtimeNanos・緯度経度・accuracy・possible_mock_location・hex_id・step_count 等）<br/>schema v3（Issue #126・段階的移行ループ）<br/>開くのは Kotlin だけ（Dart は開かない・Issue #131）<br/>✅ 実装済み（Issue #123・#108・#126・docs/location-track-db.md）")]
             pack[("地域パック DB（読取専用・別接続）<br/>tiles.mbtiles（表示専用ベクタタイル）<br/>region_pack.sqlite: cell_terrain / hex_terrain（境界 boundary_geojson は生成時に事前計算済） / district / hex_district / poi / pack_meta")]
         end
         exp["エクスポート/インポート<br/>端末内ファイル・共有シート（サーバに送らない）<br/>(未実装・T105)"]
@@ -37,7 +38,8 @@ flowchart TB
     fg <-->|書き込み・読み取り（Kotlin のみ）| trackdb
     loc -->|起動/停止/状態問い合わせ・位置データ取得（Pigeon・実装済み）| pigeon
     pigeon <--> fg
-    anti -.-> core
+    anti -->|GeoPosition.spoofSuspected/cumulativeStepCount（Pigeon経由・実装済み）| reward
+    reward -->|allowsDisclosure（配線済み）| core
     health -.オプトイン（未実装）.-> core
     loc -->|core の抽象を実装| core
     ui <--> core
@@ -58,8 +60,8 @@ flowchart TB
 
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
     classDef planned stroke-dasharray: 5 5,fill:#f5f5f5,stroke:#9e9e9e;
-    class core pure
-    class anti,health,exp planned
+    class core,reward pure
+    class health,exp planned
 ```
 
 **図の注記（実装済みの主要設計決定）**:
@@ -71,7 +73,8 @@ flowchart TB
 - **緯度経度 → H3 インデックス変換は Kotlin 側（`app/android/`・`H3HexIndexer`・`com.uber:h3` 4.5.0）で行う**（Issue #108・2026-09-11）。位置記録 foreground service が記録時点で `hex_id` を確定し `location_point` に保存、Pigeon 経由で Dart へ渡す。`packages/core` が定義する `HexLocator` 抽象の本番実装（`packages/location` の `RecordedHexLocator`）は `GeoPosition.hexId`（Kotlin側で確定済みの値）を返すだけで、変換ロジック自体は持たない。以前の暫定実装（Dart側・`h3_flutter`。Issue #107・#115）は撤去済み。
 - **位置記録 foreground service は実装済み（Issue #123・2026-09-11・T046〜T048）**: fused location provider・距離ベースサンプリング（暫定値・T015で確定）・単調時計 `elapsedRealtime` で記録し、Kotlin 側所有の専用DB（`location_track.sqlite`）へ直接書き込む。**Drift 管理下のゲーム状態DB（`disclosed_hex` 等）には書き込まない**（スキーマの二重管理を避けるため。理由・スキーマ・受け渡し方法の詳細は `docs/location-track-db.md`）。
 - **Pigeon platform channel・`NativePositionProvider` は実装済み（Issue #124・2026-09-11・T049・T050、Issue #131 で位置データの経路を変更）**。**`location_track.sqlite` を開くのは Kotlin だけ**であり、`NativePositionProvider`（`packages/location`）は Pigeon の host API（`pigeons/location_api.dart`・`LocationTrackingHostApi.getLocationPoints`）で Kotlin から位置データを受け取る（上図の `loc -> pigeon -> fg -> trackdb`）。Pigeon は起動・停止・状態問い合わせという制御面もあわせて運ぶ。⚠️ 当初（Issue #124）は Dart が `package:sqlite3` でこのファイルを読み取り専用で直接開いていたが、**同じアプリプロセス内で2つの SQLite（Kotlin 側は Android 標準、Dart 側は同梱版）が同じ WAL ファイルを扱うとロックの協調が成り立たず**（[sqlite.org「How To Corrupt An SQLite Database File」§2.2.1](https://www.sqlite.org/howtocorrupt.html)）、新しい位置が Dart に届かない不具合が実機で再現したため撤回した（Issue #131・2026-09-11 代表決定）。**同じ SQLite ファイルを Kotlin と Dart の両方から開いてはならない**（今後ファイルを追加する場合も同じ）。Pigeon の `StandardMessageCodec` はバイナリ形式で Kotlin の `Long` ⇔ Dart の `int`（64bit）をそのまま運ぶため、`elapsed_realtime_nanos` の 2^53 丸め（`docs/terrain.md` §4.4 は JSON 経路の話）は起きない。`GeoPosition`（`packages/core`）には本 Issue でプラットフォーム中立な `spoofSuspected`（既定 false）・`trackingSessionId`（既定 null）を追加し、`location_track.sqlite` の `possible_mock_location`・`session_id` 列をそのまま写す（判定ロジック自体は Issue #126）。
-- **図中の点線ノード（モック検出・歩数突合・Health Connect・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T099・T101・T102・T105）。実装が完了するまで実線には変更しない。
+- **モック検出の無効化・歩数センサー突合（Issue #126・2026-09-11・T099・T101）は実装済み**。Kotlin側のモック検出自体（`isMock`/`isFromMockProvider`）はIssue #123で、歩数センサー（`TYPE_STEP_COUNTER`・`ACTIVITY_RECOGNITION`権限）はIssue #126で実装した。判定を1か所に集約する `RewardPolicy`（`packages/core/lib/src/antispoof/reward_policy.dart`）を新設し、`allowsDisclosure`（モックのみを見て開拓可否を判定）は `DisclosureService.recordPosition` に配線済み。`classify`（速度・歩数から区間ごとの資材付与倍率を算出）も実装済みだが、**その倍率を消費する資材付与処理そのものは未実装**（Issue #126 のスコープ外。将来の付与処理が実装される際に利用する）。
+- **図中の点線ノード（Health Connect・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T102・T105）。実装が完了するまで実線には変更しない。
 
 ## 依存方向（GPS_ARCHITECTURE 準拠）
 
