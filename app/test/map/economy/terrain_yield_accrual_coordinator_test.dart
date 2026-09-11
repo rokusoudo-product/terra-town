@@ -146,7 +146,7 @@ void main() {
 
       // ウォーターマーク以下の行なので ledger への書き込みは一切発生しない。
       expect(ledger.calls, hasLength(2));
-      expect(await InventoryTotalsForTest.wood(ledger), 1);
+      expect(await _InventoryTotalsForTest.wood(ledger), 1);
     });
 
     test('(b) 再起動をまたいでも最初の未計上区間が失われない（ウォーターマークの行がprevとして復元される）', () async {
@@ -257,7 +257,7 @@ void main() {
 
 /// テストの可読性のための小さなヘルパー（`_FakeLedger` の最終状態から
 /// 「木」の合計付与量を再構成する）。
-class InventoryTotalsForTest {
+class _InventoryTotalsForTest {
   static Future<int> wood(_FakeLedger ledger) async {
     var total = 0;
     for (final call in ledger.calls) {
