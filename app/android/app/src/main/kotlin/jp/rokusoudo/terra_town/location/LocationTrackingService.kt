@@ -97,7 +97,9 @@ class LocationTrackingService : Service() {
         super.onCreate()
         sessionId = UUID.randomUUID().toString()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        dbHelper = LocationTrackDatabaseHelper(this)
+        // Issue #131: Pigeon の読み取りハンドラ（LocationApiHandler）と同じインスタンスを
+        // 共有する（LocationTrackDatabaseHelper.getInstance のドキュメント参照）。
+        dbHelper = LocationTrackDatabaseHelper.getInstance(this)
         createNotificationChannel()
     }
 
@@ -145,6 +147,12 @@ class LocationTrackingService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
 
+        // 【Issue #124・追加】Pigeon の状態問い合わせ（LocationApiHandler.getTrackingStatus）
+        // が「現在稼働中か・現在の session_id」を答えられるようにするための記帳のみ。
+        // 起動シーケンス・権限判定・位置取得のロジックは一切変更していない
+        // （startForeground() が成功した直後に設定するだけの追加行）。
+        runningSessionId = sessionId
+
         startLocationUpdates()
         handler.removeCallbacks(timeCapRunnable)
         handler.postDelayed(timeCapRunnable, policy.timeCapMillis)
@@ -160,7 +168,15 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(timeCapRunnable)
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        dbHelper.closeQuietly()
+        // Issue #131: dbHelper は Pigeon の読み取りハンドラ（LocationApiHandler）と
+        // プロセス内で共有している（LocationTrackDatabaseHelper.getInstance）ため、
+        // サービス停止時に close() しない。閉じてしまうと、次に Pigeon 側が読み取ろうと
+        // したときに接続が壊れる（再オープンが必要になり、それ自体が Issue #131 で
+        // 明示的に不採用とした「ポーリングごとに接続を開き直す」案と同じ問題を
+        // Kotlin 側で再現してしまう）。詳細・WALが無制限に肥大化しない理由は
+        // LocationTrackDatabaseHelper.getInstance のドキュメント参照。
+        // Issue #124・追加: 稼働中フラグの記帳を解除する（runningSessionId のdoc参照）。
+        runningSessionId = null
         super.onDestroy()
     }
 
@@ -307,6 +323,18 @@ class LocationTrackingService : Service() {
         private const val TAG = "LocationTrackingService"
         private const val NOTIFICATION_CHANNEL_ID = "location_tracking"
         private const val NOTIFICATION_ID = 1001
+
+        /**
+         * 【Issue #124・追加】現在 foreground 状態で稼働中のセッションID。未稼働なら null。
+         *
+         * `Pigeon`（`LocationApiHandler.kt`・`getTrackingStatus`）が「稼働中か・現在の
+         * session_id」を答えるための記帳専用フィールド。[onStartCommand] が
+         * `startForeground()` 成功直後に設定し、[onDestroy] で null に戻す。
+         * **既存の起動シーケンス・権限判定・位置取得ロジックには一切影響しない**
+         * （読み取り専用の記帳。スコープの厳守: PR #128 本体の挙動は変えない）。
+         */
+        @Volatile
+        var runningSessionId: String? = null
 
         /**
          * フォアグラウンド位置権限（`ACCESS_FINE_LOCATION` または `ACCESS_COARSE_LOCATION`）が

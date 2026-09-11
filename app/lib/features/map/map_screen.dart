@@ -5,6 +5,7 @@ import 'package:terra_town_location/terra_town_location.dart';
 import '../../design/spacing.dart';
 import '../../map/debug/fog_debug_hex_grid.dart';
 import '../../map/debug/fog_of_war_debug_panel.dart';
+import '../../map/debug/location_tracking_debug_panel.dart';
 import '../../map/fog_of_war_layer_factory.dart';
 import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
@@ -158,25 +159,35 @@ class _DebugAwareMapViewState extends State<_DebugAwareMapView> {
     return Stack(
       children: [
         mapView,
-        if (layersError != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            child: SafeArea(
-              child: Card(
-                margin: const EdgeInsets.all(AppSpacing.sm),
-                child: Padding(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  child: Text(
-                    'レイヤー追加に失敗しました（デバッグビルドのみ表示）: $layersError',
-                    style: Theme.of(context).textTheme.bodySmall,
+        // 画面上部: レイヤー追加エラー（あれば）＋ 位置記録デバッグパネル
+        // （Issue #124・T049・T050）を縦に並べる。位置記録パネルは fog レイヤーの
+        // 準備完了を待つ必要が無いため常に表示する。
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (layersError != null)
+                SafeArea(
+                  bottom: false,
+                  child: Card(
+                    margin: const EdgeInsets.all(AppSpacing.sm),
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.sm),
+                      child: Text(
+                        'レイヤー追加に失敗しました（デバッグビルドのみ表示）: $layersError',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          )
-        else if (fogController != null)
+              const LocationTrackingDebugPanel(),
+            ],
+          ),
+        ),
+        if (fogController != null)
           Positioned(
             left: 0,
             right: 0,

@@ -39,6 +39,7 @@ export 'src/pack/point_of_interest.dart';
 export 'src/pack/region_pack.dart';
 export 'src/position/geo_position.dart';
 export 'src/position/position_provider.dart';
+export 'src/position/tracking_session.dart';
 export 'src/repository/repository.dart';
 export 'src/terrain/terrain_type.dart';
 export 'src/terrain/terrain_yield.dart';

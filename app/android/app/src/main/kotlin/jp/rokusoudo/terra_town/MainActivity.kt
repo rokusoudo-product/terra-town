@@ -4,12 +4,29 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import jp.rokusoudo.terra_town.location.LocationApiHandler
+import jp.rokusoudo.terra_town.location.LocationTrackingHostApi
 import jp.rokusoudo.terra_town.location.LocationTrackingService
 
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleDebugLocationServiceIntent(intent)
+    }
+
+    /**
+     * Pigeon の [LocationTrackingHostApi]（`pigeons/location_api.dart`・Issue #124・T049）を
+     * Dart 側の呼び出しに応答できるよう登録する。位置記録サービスの起動・停止・状態問い合わせに
+     * 加え、位置データ本体（`getLocationPoints`）も本チャンネル経由で渡す
+     * （Issue #131・`LocationApiHandler` docs参照）。
+     */
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        LocationTrackingHostApi.setUp(
+            flutterEngine.dartExecutor.binaryMessenger,
+            LocationApiHandler(applicationContext),
+        )
     }
 
     override fun onNewIntent(intent: Intent) {

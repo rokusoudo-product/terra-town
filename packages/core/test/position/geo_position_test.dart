@@ -32,6 +32,53 @@ void main() {
       expect(position.accuracy, isNull);
     });
 
+    // Issue #124: spoofSuspected・trackingSessionId を省略しても
+    // 既存の生成箇所（本ファイルの他のテストも含む）が壊れないことを保証する。
+    test('spoofSuspected・trackingSessionId を省略すると既定値（false・null）になる', () {
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 9),
+      );
+
+      expect(position.spoofSuspected, isFalse);
+      expect(position.trackingSessionId, isNull);
+    });
+
+    test('spoofSuspected・trackingSessionId を明示的に指定できる', () {
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 9),
+        spoofSuspected: true,
+        trackingSessionId: 'session-a',
+      );
+
+      expect(position.spoofSuspected, isTrue);
+      expect(position.trackingSessionId, 'session-a');
+    });
+
+    test('spoofSuspected・trackingSessionId のいずれかが異なれば等価にならない', () {
+      final at = DateTime.utc(2026, 9, 9);
+      final base = GeoPosition(latitude: 35.0, longitude: 135.0, timestamp: at);
+
+      expect(
+        base,
+        isNot(GeoPosition(latitude: 35.0, longitude: 135.0, timestamp: at, spoofSuspected: true)),
+      );
+      expect(
+        base,
+        isNot(
+          GeoPosition(
+            latitude: 35.0,
+            longitude: 135.0,
+            timestamp: at,
+            trackingSessionId: 'session-a',
+          ),
+        ),
+      );
+    });
+
     test('緯度が範囲外（-90.0〜90.0 の外）だと assert で弾く', () {
       expect(
         () => GeoPosition(

@@ -86,5 +86,6 @@ dev_dependencies:
   # 実行しないため、生成物はコミットする方針とする（詳細は PR 本文参照）。
   drift_dev: ^2.34.6
   build_runner: ^2.15.1
+  pigeon: ^28.1.0
 
 flutter:
