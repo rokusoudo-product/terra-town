@@ -120,6 +120,46 @@ void main() {
       );
     });
 
+    // Issue #126: cumulativeStepCount を省略しても既存の生成箇所（本ファイルの
+    // 他のテストも含む）が壊れないことを保証する（hexId と同じ方針）。
+    test('cumulativeStepCount を省略すると既定値（null）になる', () {
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 9),
+      );
+
+      expect(position.cumulativeStepCount, isNull);
+    });
+
+    test('cumulativeStepCount を明示的に指定できる', () {
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 9),
+        cumulativeStepCount: 1234,
+      );
+
+      expect(position.cumulativeStepCount, 1234);
+    });
+
+    test('cumulativeStepCount が異なれば等価にならない', () {
+      final at = DateTime.utc(2026, 9, 9);
+      final base = GeoPosition(latitude: 35.0, longitude: 135.0, timestamp: at);
+
+      expect(
+        base,
+        isNot(
+          GeoPosition(
+            latitude: 35.0,
+            longitude: 135.0,
+            timestamp: at,
+            cumulativeStepCount: 1,
+          ),
+        ),
+      );
+    });
+
     test('緯度が範囲外（-90.0〜90.0 の外）だと assert で弾く', () {
       expect(
         () => GeoPosition(

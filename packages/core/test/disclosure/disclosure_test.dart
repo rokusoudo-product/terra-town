@@ -210,6 +210,38 @@ void main() {
       expect(known.isEmpty, isTrue);
     });
 
+    // Issue #126（T099）: モック位置検出時は開拓（霧を晴らす処理）そのものを
+    // 無効化する（RewardPolicy.allowsDisclosure・Issue #9代表回答9-1）。
+    test('spoofSuspectedがtrueの位置は未開示ヘクスでも開拓されず、hexLocator/regionPack/knownに一切触れない', () async {
+      const locator = _GridHexLocator();
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 10, 9, 0),
+        spoofSuspected: true,
+      );
+      final hexId = locator.locate(position);
+      final pack = _CountingFakeRegionPack(
+        version: const PackVersion('v1'),
+        terrainByHex: {hexId: TerrainType.forest},
+      );
+      final repository = _InMemoryDisclosedHexRepository();
+      final known = DisclosedHexSet();
+      final service = DisclosureService(
+        hexLocator: locator,
+        regionPack: pack,
+        known: known,
+        repository: repository,
+      );
+
+      final disclosed = await service.recordPosition(position);
+
+      expect(disclosed, isNull);
+      expect(repository.saveCalls, isEmpty);
+      expect(known.isEmpty, isTrue);
+      expect(pack.terrainOfCallCounts, isEmpty, reason: 'モック検出時はterrainOfの問い合わせにすら進まない');
+    });
+
     test('起動時に既に開示済み（knownへ事前登録済み）のヘクスは、何度訪れてもterrainOfが呼ばれない', () async {
       const locator = _GridHexLocator();
       final position = _pos(35.0, 135.0);

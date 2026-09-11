@@ -1,3 +1,4 @@
+import '../antispoof/reward_policy.dart';
 import '../geo/hex_id.dart';
 import '../pack/disclosed_hex.dart';
 import '../pack/disclosed_hex_set.dart';
@@ -19,6 +20,10 @@ import 'hex_locator.dart';
 /// - 地形分類: [RegionPack.terrainOf]。**新規開示の瞬間にのみ**呼ぶ（下記参照）。
 ///
 /// ## 開示判定のアルゴリズム（`docs/terrain.md` §4 の折衷方式に従う）
+/// 0. [RewardPolicy.allowsDisclosure] で偽装（モック位置）の疑いを確認する
+///    （Issue #126・T099）。疑いがあれば以降の処理は一切行わず `null` を返す
+///    （開拓の無効化。Issue #9 代表回答 9-1 の最も強いペナルティ段階）。
+///    速度超過・歩数不一致はここでは判定しない（開拓を止めるのはモックのみ）。
 /// 1. 位置ごとに [HexLocator.locate] でヘクスIDへ変換する
 ///    （細分グリッドセル→ヘクスへの写像は [HexLocator] 実装側の責務。
 ///    `hex_locator.dart` のドキュメント参照）。
@@ -79,8 +84,20 @@ class DisclosureService {
   /// 1件の位置観測を処理する。
   ///
   /// 新規にヘクスが開示された場合はその [DisclosedHex] を返す。
-  /// 既に開示済み、またはパック範囲外で何も起きなかった場合は `null` を返す。
+  /// 既に開示済み、パック範囲外、または偽装（モック位置）の疑いがあり開拓不可
+  /// （[RewardPolicy.allowsDisclosure]・Issue #126）で何も起きなかった場合は
+  /// `null` を返す。
   Future<DisclosedHex?> recordPosition(GeoPosition position) async {
+    // Issue #126（T099）: モック位置検出時は開拓そのものを無効化する
+    // （Issue #9 代表回答 9-1「段階的ペナルティ」の最も強い段階）。
+    // 速度超過・歩数不一致（[RewardPolicy] のウィンドウ判定）はここには
+    // 持ち込まない（開拓を止めるのはモックのみ・`RewardPolicy` クラスdoc
+    // 「開拓を止めるのはモックだけ」参照）。ヘクスへの変換（[hexLocator.locate]）
+    // より前に確認し、無駄な計算・[known] への問い合わせを避ける。
+    if (!RewardPolicy.allowsDisclosure(position)) {
+      return null;
+    }
+
     final hexId = hexLocator.locate(position);
 
     // ヘクス単位への集約（docs/terrain.md §4.1）: 既知のヘクスなら何もしない。
