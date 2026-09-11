@@ -68,6 +68,14 @@ class LocationTrackingService : Service() {
     // 「精度不足で何件捨てられたか」を確認する材料にする。永続化はしない（デバッグ用）。
     private var discardedByAccuracyCount = 0
 
+    // 【2026-09-11 実機検証（PR #128 コメント「新たに見つかった問題」）】アプリ側の距離フィルタ。
+    // fused location provider は setMinUpdateDistanceMeters を厳密には守らず、実機（Pixel 7a）では
+    // 直前の記録から 0.86m しか離れていない fix が通常経路（forcedByTimeCap=false）で配送された。
+    // OS のフィルタに頼らず、記録の直前に直前の記録地点からの距離をアプリ側で確認する。
+    // サービスのインスタンスごとに保持するため、セッション（= サービス起動）をまたがない。
+    private var lastRecordedLocation: Location? = null
+    private var discardedByDistanceCount = 0
+
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             for (location in result.locations) {
@@ -164,8 +172,9 @@ class LocationTrackingService : Service() {
         val request =
             LocationRequest.Builder(currentPolicy.priority, currentPolicy.intervalMillis)
                 .setMinUpdateIntervalMillis(currentPolicy.minUpdateIntervalMillis)
-                // OS 側の距離フィルタ。しきい値未満の移動ではコールバック自体が配送されないため、
-                // 「停止中は省電力」が距離しきい値によっても担保される。
+                // OS に対する省電力のヒント。配送頻度を減らす効果はあるが、しきい値未満の fix が
+                // 配送されないことは保証されない（2026-09-11 実機で 0.86m の fix が配送された）。
+                // 距離しきい値の判定は handleLocationFix でアプリ側が行う。
                 .setMinUpdateDistanceMeters(currentPolicy.distanceThresholdMeters)
                 .build()
         fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
@@ -202,15 +211,37 @@ class LocationTrackingService : Service() {
             return
         }
 
-        // fusedLocationClient.requestLocationUpdates 側の setMinUpdateDistanceMeters により、
-        // 通常経路のコールバックはすでに距離しきい値を満たしている。時間上限による強制記録
-        // （forcedByTimeCap）は距離を問わず記録する。
+        // 距離しきい値の確認はアプリ側で行う。
+        // setMinUpdateDistanceMeters（startLocationUpdates）は OS に対する省電力のヒントであり、
+        // 距離しきい値の保証ではない。2026-09-11 の実機検証（Pixel 7a）で、直前の記録から
+        // 0.86m・46秒後の fix が通常経路で配送され、そのまま記録されることを確認した
+        // （以前このコメントは「通常経路のコールバックはすでに距離しきい値を満たしている」と
+        // 書いていたが、実機ではこの前提が成り立たなかった）。
+        // 時間上限による強制記録（forcedByTimeCap=true）は距離を問わず記録する。
+        val previous = lastRecordedLocation
+        if (!forcedByTimeCap && previous != null) {
+            val movedMeters = location.distanceTo(previous)
+            if (movedMeters < currentPolicy.distanceThresholdMeters) {
+                discardedByDistanceCount++
+                Log.d(
+                    TAG,
+                    "位置破棄（移動距離不足）: session=$sessionId " +
+                        "moved=${movedMeters}m threshold=${currentPolicy.distanceThresholdMeters}m " +
+                        "discardedByDistanceCount=$discardedByDistanceCount",
+                )
+                // 時間上限のタイマーは記録したときだけ張り直す。ここで張り直すと、
+                // 静止中に距離不足の fix が届き続けるかぎり時間上限の強制記録が永久に来なくなる。
+                return
+            }
+        }
+
         Log.d(
             TAG,
             "位置記録: session=$sessionId forcedByTimeCap=$forcedByTimeCap " +
                 "accuracy=${location.accuracy}m",
         )
         recordPoint(location)
+        lastRecordedLocation = location
 
         handler.removeCallbacks(timeCapRunnable)
         handler.postDelayed(timeCapRunnable, currentPolicy.timeCapMillis)
