@@ -10,6 +10,13 @@ import 'package:terra_town/design/color_tokens.dart';
 import 'package:terra_town/features/map/map_screen.dart';
 import 'package:terra_town/main.dart';
 
+/// 【Issue #135】設定タブが実際に [SettingsScreen] を表示することを確認するテスト
+/// （下記「設定タブに切り替えるとスイッチが表示される」）は、`app` から初めて
+/// [GameDatabase] を開く。ここでは `path_provider` の実プラットフォーム実装なしに
+/// 決定的に検証するため [GameDatabase.forTesting]（インメモリ）を注入する。
+/// スイッチの状態遷移・保存失敗時の挙動の詳細は
+/// `test/features/settings/settings_screen_test.dart` が担当する。
+
 /// 【Issue #99】`MapScreen`（地図タブ）は既定で実アセットから地域パックを解決し、
 /// `packages/location` の `MapView`（MapLibre の実プラットフォームビュー）を描画する。
 /// これは widget テスト環境（`flutter test`）では動作しない
@@ -144,6 +151,24 @@ void main() {
     expect(find.byIcon(Icons.add), findsNothing);
     expect(find.byType(FloatingActionButton), findsNothing);
     expect(find.textContaining('pushed the button'), findsNothing);
+  });
+
+  testWidgets('設定タブに切り替えるとスイッチ（歩数判定オプトアウト・Issue #135）が表示される', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MyApp(
+        mapPathResolver: _missingPackResolver,
+        gameDatabaseBuilder: GameDatabase.forTesting,
+      ),
+    );
+
+    await tester.tap(find.text('設定'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('歩数による判定を使わない'), findsOneWidget);
+    expect(find.byType(Switch), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
   });
 
   group('日本語ロケール（Issue #51）', () {

@@ -185,6 +185,64 @@ void main() {
     });
   });
 
+  group('RewardPolicy.classify - useStepCheck（Issue #135・歩数判定の自己申告オプトアウト）', () {
+    test('useStepCheck:falseなら、歩数不一致になるはずの区間でも倍率1・reasonはnone', () {
+      // 上の「移動距離に対して歩数がほぼ伴わない場合」と同じルート
+      // （useStepCheck: trueなら3区間目以降がstepMismatchになる設定）。
+      final route = _walkingRoute(count: 6, speedKmh: 8.0, stepsPerPoint: 0);
+      final policy = RewardPolicy(useStepCheck: false);
+
+      final segments = policy.classify(route);
+
+      expect(segments, hasLength(5));
+      for (final segment in segments) {
+        expect(segment.multiplier, 1.0);
+        expect(segment.reason, RewardSegmentReason.none);
+      }
+    });
+
+    test('useStepCheck:falseでもモック位置検出（倍率0・mockSuspected）は変わらない', () {
+      final legitBefore = _walkingRoute(count: 5, speedKmh: 5.0, stepsPerPoint: 0);
+      final mockJumpTime = legitBefore.last.timestamp.add(const Duration(seconds: 15));
+      final mockPosition = GeoPosition(
+        latitude: legitBefore.last.latitude + _latDeltaForMeters(5000),
+        longitude: 135.0,
+        timestamp: mockJumpTime,
+        trackingSessionId: 'session-a',
+        spoofSuspected: true,
+      );
+      final route = [...legitBefore, mockPosition];
+      final policy = RewardPolicy(useStepCheck: false);
+
+      final segments = policy.classify(route);
+
+      expect(segments.last.multiplier, 0.0);
+      expect(segments.last.reason, RewardSegmentReason.mockSuspected);
+    });
+
+    test('useStepCheck:falseでも速度超過（倍率0・overSpeed）は変わらない', () {
+      // 時速15km（閾値10km超）・歩数は付与しない（歩数判定オフなので無関係のはず）。
+      final route = _walkingRoute(count: 10, speedKmh: 15.0, stepsPerPoint: 0);
+      final policy = RewardPolicy(useStepCheck: false);
+
+      final segments = policy.classify(route);
+
+      for (final segment in segments) {
+        expect(segment.multiplier, 0.0);
+        expect(segment.reason, RewardSegmentReason.overSpeed);
+      }
+    });
+
+    test('既定（useStepCheckを指定しない）はtrue＝歩数判定を使う（後方互換）', () {
+      final route = _walkingRoute(count: 6, speedKmh: 8.0, stepsPerPoint: 0);
+      final policy = RewardPolicy();
+
+      final segments = policy.classify(route);
+
+      expect(segments.last.reason, RewardSegmentReason.stepMismatch);
+    });
+  });
+
   group('RewardPolicy.classify - 速度超過との関係', () {
     test('速度超過区間は歩数が一致していても倍率0・reasonはoverSpeed（二重に扱わない）', () {
       // 時速15km（閾値10km超）で、歩幅相応の歩数（歩数的には一致）を付与しても
