@@ -17,9 +17,11 @@ import '../../design/spacing.dart';
 /// 【本パネルが確認できること（秘書セッションの実機確認手順・PR本文参照）】
 /// - 「起動」ボタン: Pigeon の `startTracking()` を呼ぶ。権限が無い場合は
 ///   `TrackingStartOutcome.permissionDenied` が返り、アプリはクラッシュしない
-///   （`LocationApiHandler.kt` のドキュメント参照。**adb の debug Intent 経由の
-///   起動は権限拒否時にクラッシュする既知の問題があるため、権限拒否の確認は
-///   必ずこのボタン経由で行うこと**）。
+///   （`LocationTrackingService.Companion.start()` が権限を確認してから
+///   `startForegroundService()` を呼ぶ実装。PR #130・`LocationApiHandler.kt`
+///   のドキュメント参照。既存の adb debug Intent 経由の起動も同じ `Companion.start()`
+///   を経由するため同様にクラッシュしないが、**Pigeon 経由でのこの組み合わせの
+///   動作は実機未確認**であり、本パネルはその確認のために存在する）。
 /// - 「停止」ボタン: Pigeon の `stopTracking()` を呼ぶ。
 /// - 「状態確認」ボタン: `getTrackingStatus()` を呼び、稼働中か・`session_id` を表示する。
 /// - 位置ログ: `NativePositionProvider.positionUpdates` を購読し、
