@@ -59,4 +59,11 @@ dependencies {
     // このオーバーロードは Flutter embedding が推移的に持ち込む androidx.core より新しいバージョンを
     // 要求するため明示的に依存を足す。
     implementation("androidx.core:core-ktx:1.13.1")
+
+    // Issue #131: Pigeon 28.1.0 は @async の HostApi メソッドを Kotlin の suspend fun として
+    // 生成し、生成コード（LocationApi.g.kt）自身が kotlinx.coroutines
+    // （CoroutineScope(Dispatchers.Main).launch・suspendCancellableCoroutine）を import する。
+    // Flutter embedding は coroutines を推移的に持ち込まないため明示的に依存を足す。
+    // -android アーティファクトは -core を含み、Dispatchers.Main（Android の Looper 実装）を提供する。
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

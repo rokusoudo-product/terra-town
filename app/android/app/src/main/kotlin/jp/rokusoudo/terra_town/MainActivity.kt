@@ -17,8 +17,9 @@ class MainActivity : FlutterActivity() {
 
     /**
      * Pigeon の [LocationTrackingHostApi]（`pigeons/location_api.dart`・Issue #124・T049）を
-     * Dart 側の呼び出しに応答できるよう登録する。位置データ本体は運ばず、
-     * 位置記録サービスの起動・停止・状態問い合わせのみを扱う（`LocationApiHandler` docs参照）。
+     * Dart 側の呼び出しに応答できるよう登録する。位置記録サービスの起動・停止・状態問い合わせに
+     * 加え、位置データ本体（`getLocationPoints`）も本チャンネル経由で渡す
+     * （Issue #131・`LocationApiHandler` docs参照）。
      */
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

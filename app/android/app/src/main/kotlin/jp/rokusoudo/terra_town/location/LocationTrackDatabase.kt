@@ -4,7 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import android.util.Log
 import java.io.File
 
 /**
@@ -19,20 +18,33 @@ import java.io.File
  * Kotlin の書き込みはそれを知らないため、**例外を出さずに静かに壊れる**（Issue #123 本文）。
  *
  * そのため位置記録は完全に別のファイル [DATABASE_FILE_NAME] に置き、**このスキーマの
- * 所有者は Kotlin 側のみ**とする。Dart 側（Issue #124）はこのファイルを
- * `packages/location/lib/src/db/region_pack_connection.dart` と同じ手法
- * （`sqlite3.OpenMode.readOnly`）で読み取り専用に開く想定であり、書き込みはしない
- * （＝SQLite自身が書き込みを拒否するため構造的に防がれる）。
+ * 所有者は Kotlin 側のみ**とする。
  *
- * ## 保存先ディレクトリ（Kotlin ⇔ Dart の受け渡し方法・重要）
+ * ## ⚠️ このファイルを開くのは Kotlin だけ（Issue #131・2026-09-11 代表決定。方針転換）
+ * 当初（Issue #123・#124）は、Dart 側が `packages/location/lib/src/db/region_pack_connection.dart`
+ * と同じ手法（`sqlite3.OpenMode.readOnly`）でこのファイルを直接読み取り専用に開く設計
+ * だった。**しかし実機検証（PR #129・Pixel 7a）で、この設計が SQLite 公式が警告する
+ * 「同一プロセス内の複数の SQLite」構成
+ * （[How To Corrupt An SQLite Database File §2.2.1](https://www.sqlite.org/howtocorrupt.html)）
+ * に該当し、Kotlin が書いた新しい行が Dart 側に最大2分以上届かない不具合を起こすことが
+ * 判明したため、この方針は撤回した**（詳細: Issue #131・
+ * [PR #129 の検証コメント](https://github.com/rokusoudo-product/terra-town/pull/129#issuecomment-5629791422)）。
+ *
+ * 現在の設計: **Dart はこのファイルを一切開かない**。読み取りも Kotlin
+ * （[LocationTrackDatabaseHelper.selectPointsAfter]）が行い、Pigeon の host API
+ * （`LocationTrackingHostApi.getLocationPoints`・`LocationApiHandler.kt`）経由で
+ * Dart の `NativePositionProvider` に行を渡す。**同じ SQLite ファイルを Kotlin と Dart の
+ * 両方から開いてはならない、という一般ルールは今後 Drift のゲーム状態DB等に他のファイルを
+ * 追加する場合にも適用される**（`docs/location-track-db.md` §3 参照）。
+ *
+ * ## 保存先ディレクトリ
  * このファイルは `context.getDir("flutter", Context.MODE_PRIVATE)` に置く。
  * これは Flutter エンジン自身の `io.flutter.util.PathUtils.getDataDirectory(context)`
  * （`getApplicationDocumentsPath` の実体）と**全く同じディレクトリ**であり、
  * `packages/location/lib/src/db/game_database.dart` の `game_state.sqlite` も
  * ここに置かれている（`path_provider` の `getApplicationDocumentsDirectory()`）。
- * つまり Issue #124 の Dart 実装は、**新しいプラットフォームチャンネルを介さず**
- * `getApplicationDocumentsDirectory()` を呼ぶだけでこのファイルを見つけられる。
- * 詳細・検証方法は `docs/location-track-db.md` に記録する。
+ * このディレクトリを Dart 側から直接読みに行くことはもう無いが、Kotlin 側の
+ * 保存先自体はこれまでどおり（詳細・検証方法は `docs/location-track-db.md`）。
  *
  * ## スキーマ本体
  * DDL は [LocationTrackSchema] に集約する。`docs/location-track-db.md` にはこの
@@ -44,8 +56,15 @@ object LocationTrackSchema {
 
     /**
      * スキーマバージョン。[LocationTrackDatabaseHelper] のバージョン引数と同じ値を
-     * `location_track_meta` テーブルにも書き込み、Dart 側（Issue #124）が
-     * マイグレーション未対応の古い前提で読んでいないかを確認できるようにする。
+     * `location_track_meta` テーブルにも書き込む。
+     *
+     * 【Issue #131 追記】以前（Issue #124）は Dart 側の `LocationTrackConnection` が
+     * このメタ情報を読み、マイグレーション未対応の古い前提で読んでいないかを自前で
+     * 確認していた。現在は読み取りも同じ [LocationTrackDatabaseHelper] インスタンス
+     * （[getInstance]）を介して Kotlin が行うため、スキーマの整合性は
+     * `SQLiteOpenHelper` のバージョン機構（[onUpgrade]）がそもそも保証しており、
+     * Dart 側での二重確認は不要になった。この列自体はデバッグ・実機確認用の
+     * メタ情報として残す。
      */
     const val SCHEMA_VERSION = 1
 
@@ -130,8 +149,25 @@ object LocationTrackSchema {
  * `app_flutter/` 配下（Dart 側 `game_state.sqlite` と同じディレクトリ）に置く。
  * `Context#getDatabasePath` は名前が `/` から始まる場合、そのディレクトリをそのまま
  * 使う（Android フレームワークの既定動作）。
+ *
+ * ## プロセス内で1インスタンスに共有する理由（Issue #131）
+ * このファイル（`location_track.sqlite`）は、書き込み側（[LocationTrackingService]）と
+ * 読み取り側（`LocationApiHandler.kt`・Pigeon 経由）の**両方から Kotlin だけが**
+ * アクセスする設計に変更した（Issue #131 本文・`pigeons/location_api.dart` の
+ * ドキュメント参照。以前は Dart 側が `package:sqlite3` で直接この WAL ファイルを
+ * 開いており、同一プロセス内に2つの別々の SQLite 実装が存在する構成——SQLite公式
+ * [How To Corrupt An SQLite Database File §2.2.1](https://www.sqlite.org/howtocorrupt.html)
+ * が警告する構成——が実機で不具合を引き起こしていた）。
+ *
+ * 書き込み側と読み取り側で**別々の `SQLiteOpenHelper` インスタンス**を作ってしまうと、
+ * Android 標準の SQLite 実装同士とはいえ、同一プロセス内で同じファイルに対する
+ * ロック・キャッシュ管理が二重になる（`SQLiteDatabase` はプロセス内のロック調停を
+ * 前提にしており、`SQLiteDatabaseConfiguration`・接続プールはインスタンス単位で
+ * 管理される）。そのため [getInstance] で**プロセス内に1インスタンスだけ**を
+ * 生成し、[LocationTrackingService]（書き込み）と Pigeon ハンドラ（読み取り）の
+ * 双方がこの同じインスタンスを共有する。
  */
-class LocationTrackDatabaseHelper(context: Context) :
+class LocationTrackDatabaseHelper private constructor(context: Context) :
     SQLiteOpenHelper(
         context.applicationContext,
         LocationTrackSchema.resolveDatabaseFile(context).absolutePath,
@@ -141,10 +177,12 @@ class LocationTrackDatabaseHelper(context: Context) :
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
-        // Kotlin（書き込み）と Dart（Issue #124・読み取り専用の別接続）が同時にファイルへ
-        // アクセスできるよう WAL を使う。docs/location-track-db.md に取り出し手順（-wal/-shm
-        // を含めて pull する、またはサービス停止〔close()で自動チェックポイント〕後に
-        // pull する）を記録する。
+        // Issue #131: 書き込み（LocationTrackingService）と読み取り（LocationApiHandler・
+        // Pigeon 経由）は、いずれもこの同じ LocationTrackDatabaseHelper インスタンス
+        // （getInstance 参照）を介した Android 標準 SQLite の接続。WAL を有効にすることで
+        // 書き込み中でも読み取り側がブロックされない（SQLiteOpenHelper が内部で管理する
+        // 接続プールが協調する）。取り出し手順（常に -wal/-shm を含めて pull する）は
+        // docs/location-track-db.md §8.3 に記録する。
         db.enableWriteAheadLogging()
     }
 
@@ -201,32 +239,124 @@ class LocationTrackDatabaseHelper(context: Context) :
     }
 
     /**
-     * `onDestroy` から呼ぶ。
+     * `location_point` から `id` が [afterId] より大きい行を `id` 昇順で最大 [limit] 件返す
+     * （Issue #131・Pigeon `LocationTrackingHostApi.getLocationPoints` の実体）。
      *
-     * 【`PRAGMA wal_checkpoint` を明示実行しない理由】
-     * `wal_checkpoint` は結果を1行返すPRAGMAであり、Android の `SQLiteDatabase#execSQL` は
-     * 行を返すSQL文を受け付けない（OSバージョンによっては
-     * `SQLiteException: Queries can be performed using SQLiteDatabase query or rawQuery
-     * methods only` を投げる）。これを `onDestroy` で踏むと、まさに代表がサービスを止めて
-     * データを取り出そうとした瞬間にアプリがクラッシュする。
+     * **呼び出し前提**: 呼び出し側（`LocationApiHandler`）が
+     * [LocationTrackSchema.resolveDatabaseFile] の存在を確認済みであること。
+     * このメソッド自身はファイルの存在確認を行わない（[readableDatabase] を呼んだ時点で
+     * ファイルが無ければ `SQLiteOpenHelper` が新規作成してしまうため、「ファイル無し＝
+     * 記録0件」という意味を保つ責務は呼び出し側にある。クラスdoc・
+     * `LocationApiHandler.kt` 参照）。
      *
-     * 代わりに単に [close] を呼ぶ。WALデータベースは**最後の接続が閉じられた時点で
-     * SQLite自身が自動的にチェックポイントし `-wal`/`-shm` を解消する**ため、
-     * 明示的なPRAGMAが無くても同じ効果が得られる（`docs/location-track-db.md` §3・§8.2）。
-     * また [close] は一度も `writableDatabase`/`readableDatabase` を呼んでいない
-     * （＝DBファイルを一度も開いていない）状態では何もしない安全な no-op であるため、
-     * 権限が無く記録が一度も行われなかった経路（`onStartCommand` → `stopSelf` →
-     * `onDestroy`）でも空のDBファイルを新規作成してしまうことがない。
+     * **呼び出しスレッド**: このメソッドはブロッキング I/O（`SQLiteDatabase#rawQuery`）を
+     * 行う。メインスレッドから呼ばないこと（`LocationApiHandler.getLocationPoints` が
+     * `Dispatchers.IO` 上で呼ぶ）。
      */
-    fun closeQuietly() {
-        try {
-            close()
-        } catch (e: Exception) {
-            Log.e(TAG, "location_track.sqlite のクローズに失敗しました", e)
+    fun selectPointsAfter(afterId: Long, limit: Int): List<LocationPointRow> {
+        val rows = mutableListOf<LocationPointRow>()
+        readableDatabase.rawQuery(
+            "SELECT " +
+                "${LocationTrackSchema.COLUMN_ID}, " +
+                "${LocationTrackSchema.COLUMN_SESSION_ID}, " +
+                "${LocationTrackSchema.COLUMN_ELAPSED_REALTIME_NANOS}, " +
+                "${LocationTrackSchema.COLUMN_LATITUDE}, " +
+                "${LocationTrackSchema.COLUMN_LONGITUDE}, " +
+                "${LocationTrackSchema.COLUMN_ACCURACY_METERS}, " +
+                "${LocationTrackSchema.COLUMN_POSSIBLE_MOCK_LOCATION} " +
+                "FROM ${LocationTrackSchema.TABLE_POINT} " +
+                "WHERE ${LocationTrackSchema.COLUMN_ID} > ? " +
+                "ORDER BY ${LocationTrackSchema.COLUMN_ID} ASC " +
+                "LIMIT ?",
+            arrayOf(afterId.toString(), limit.toString()),
+        ).use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_ID)
+            val sessionIdIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_SESSION_ID)
+            val elapsedRealtimeNanosIndex =
+                cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_ELAPSED_REALTIME_NANOS)
+            val latitudeIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_LATITUDE)
+            val longitudeIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_LONGITUDE)
+            val accuracyMetersIndex =
+                cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_ACCURACY_METERS)
+            val possibleMockLocationIndex =
+                cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_POSSIBLE_MOCK_LOCATION)
+            while (cursor.moveToNext()) {
+                rows.add(
+                    LocationPointRow(
+                        id = cursor.getLong(idIndex),
+                        sessionId = cursor.getString(sessionIdIndex),
+                        // Long のまま取り出す。64bit整数の丸めについては
+                        // pigeons/location_api.dart の LocationPointMessage.elapsedRealtimeNanos
+                        // ドキュメント参照（このカーソル読み取り自体もJSONを経由しない）。
+                        elapsedRealtimeNanos = cursor.getLong(elapsedRealtimeNanosIndex),
+                        latitude = cursor.getDouble(latitudeIndex),
+                        longitude = cursor.getDouble(longitudeIndex),
+                        accuracyMeters =
+                            if (cursor.isNull(accuracyMetersIndex)) {
+                                null
+                            } else {
+                                cursor.getFloat(accuracyMetersIndex)
+                            },
+                        possibleMockLocation = cursor.getInt(possibleMockLocationIndex) != 0,
+                    ),
+                )
+            }
         }
+        return rows
     }
 
     companion object {
-        private const val TAG = "LocationTrackDatabase"
+        @Volatile
+        private var instance: LocationTrackDatabaseHelper? = null
+
+        /**
+         * プロセス内で共有する唯一の [LocationTrackDatabaseHelper] を返す（Issue #131）。
+         *
+         * ## なぜ [onDestroy] 相当のクローズ処理を持たないのか（重要な設計決定）
+         * 以前の実装は `LocationTrackingService.onDestroy()` がヘルパーの `close()` を
+         * 呼んでいた（WALの自動チェックポイントを期待して）。しかしヘルパーを
+         * サービスと Pigeon ハンドラで共有する今の設計では、**サービス停止時に閉じると
+         * Pigeon ハンドラ側の読み取りが壊れる**（次回読み取り時に新しい接続を作り直す
+         * 実装が必要になり、それ自体が「ポーリングごとに接続を開き直す」という
+         * Issue #131 で明示的に不採用とした案と同じ問題——`-shm` の再初期化判定が
+         * Kotlin 側の WAL インデックスを壊しうる——を Kotlin 側で再現してしまう）。
+         *
+         * そのため、**このインスタンスはアプリのプロセスが生存している間、開いたまま
+         * にする**（明示的な `close()` は行わない）。プロセスは同じインスタンスを
+         * 使い続けるため、開きっぱなしによる複数接続のリークは発生しない
+         * （`getInstance` を何度呼んでも同じインスタンスが返る）。WAL は SQLite が
+         * 既定で約1000ページごとに自動チェックポイントするため、`-wal` ファイルが
+         * 無制限に肥大化することもない。プロセスが終了すればOSがファイル
+         * ディスクリプタを回収する。
+         *
+         * この変更により、`docs/location-track-db.md` §3・§8.3 が前提としていた
+         * 「サービス停止＝`close()`＝チェックポイント」という関係は成り立たなくなった
+         * （ドキュメント側を実態に合わせて修正済み。取り出しは常に `-wal`/`-shm` を
+         * 含む3ファイルまとめて行うこと）。
+         */
+        fun getInstance(context: Context): LocationTrackDatabaseHelper {
+            return instance ?: synchronized(this) {
+                instance ?: LocationTrackDatabaseHelper(context.applicationContext).also {
+                    instance = it
+                }
+            }
+        }
     }
 }
+
+/**
+ * [LocationTrackDatabaseHelper.selectPointsAfter] が返す1行分（Issue #131）。
+ *
+ * Pigeon が生成する `LocationPointMessage`（`pigeons/location_api.dart`）とは
+ * 意図的に別の型にしてある。DB層（本ファイル）が Pigeon の生成コードを知らなくて済むよう
+ * にするため（変換は `LocationApiHandler.kt` の責務）。
+ */
+data class LocationPointRow(
+    val id: Long,
+    val sessionId: String,
+    val elapsedRealtimeNanos: Long,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float?,
+    val possibleMockLocation: Boolean,
+)

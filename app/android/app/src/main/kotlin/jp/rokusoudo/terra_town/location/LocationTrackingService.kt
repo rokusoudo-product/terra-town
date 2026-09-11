@@ -97,7 +97,9 @@ class LocationTrackingService : Service() {
         super.onCreate()
         sessionId = UUID.randomUUID().toString()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        dbHelper = LocationTrackDatabaseHelper(this)
+        // Issue #131: Pigeon の読み取りハンドラ（LocationApiHandler）と同じインスタンスを
+        // 共有する（LocationTrackDatabaseHelper.getInstance のドキュメント参照）。
+        dbHelper = LocationTrackDatabaseHelper.getInstance(this)
         createNotificationChannel()
     }
 
@@ -166,7 +168,13 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(timeCapRunnable)
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        dbHelper.closeQuietly()
+        // Issue #131: dbHelper は Pigeon の読み取りハンドラ（LocationApiHandler）と
+        // プロセス内で共有している（LocationTrackDatabaseHelper.getInstance）ため、
+        // サービス停止時に close() しない。閉じてしまうと、次に Pigeon 側が読み取ろうと
+        // したときに接続が壊れる（再オープンが必要になり、それ自体が Issue #131 で
+        // 明示的に不採用とした「ポーリングごとに接続を開き直す」案と同じ問題を
+        // Kotlin 側で再現してしまう）。詳細・WALが無制限に肥大化しない理由は
+        // LocationTrackDatabaseHelper.getInstance のドキュメント参照。
         // Issue #124・追加: 稼働中フラグの記帳を解除する（runningSessionId のdoc参照）。
         runningSessionId = null
         super.onDestroy()
