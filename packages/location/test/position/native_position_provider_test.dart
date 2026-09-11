@@ -75,6 +75,8 @@ LocationPointMessage _row({
   // 壊さないよう既定値を用意する（値そのものに意味はない。hexId の変換を検証する
   // テストは個別に明示的な値を渡す）。
   int hexId = 1,
+  // Issue #126: 既定値は null（既存テストは歩数を意識しない）。
+  int? stepCount,
 }) {
   return LocationPointMessage(
     id: id,
@@ -85,6 +87,7 @@ LocationPointMessage _row({
     accuracyMeters: accuracyMeters,
     possibleMockLocation: possibleMockLocation,
     hexId: hexId,
+    stepCount: stepCount,
   );
 }
 
@@ -178,6 +181,44 @@ void main() {
 
     final position = await provider.positionUpdates.first;
     expect(position.spoofSuspected, isTrue);
+  });
+
+  test('stepCount（歩数センサーの累積歩数）がそのままcumulativeStepCountに写る（Issue #126）', () async {
+    fakeApi.addRow(
+      _row(
+        id: 1,
+        sessionId: 'session-a',
+        elapsedRealtimeNanos: 1000,
+        latitude: 35.0,
+        longitude: 135.0,
+        stepCount: 1234,
+      ),
+    );
+
+    final provider = makeProvider();
+    addTearDown(provider.close);
+
+    final position = await provider.positionUpdates.first;
+    expect(position.cumulativeStepCount, 1234);
+  });
+
+  test('stepCountがnullの行（歩数センサー無し・権限無し・未取得）はcumulativeStepCountもnullになる（Issue #126）',
+      () async {
+    fakeApi.addRow(
+      _row(
+        id: 1,
+        sessionId: 'session-a',
+        elapsedRealtimeNanos: 1000,
+        latitude: 35.0,
+        longitude: 135.0,
+      ),
+    );
+
+    final provider = makeProvider();
+    addTearDown(provider.close);
+
+    final position = await provider.positionUpdates.first;
+    expect(position.cumulativeStepCount, isNull);
   });
 
   test('accuracyMeters が null の行は accuracy が null になる', () async {
@@ -351,6 +392,7 @@ void main() {
           accuracyMeters: 12.5,
           possibleMockLocation: true,
           hexId: measuredMaxHexId,
+          stepCount: 4567,
         );
 
         final codec = LocationTrackingHostApi.pigeonChannelCodec;
@@ -365,6 +407,7 @@ void main() {
         expect(decoded.accuracyMeters, message.accuracyMeters);
         expect(decoded.possibleMockLocation, message.possibleMockLocation);
         expect(decoded.hexId, measuredMaxHexId);
+        expect(decoded.stepCount, 4567);
       },
     );
   });

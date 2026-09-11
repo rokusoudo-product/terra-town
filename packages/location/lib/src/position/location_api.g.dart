@@ -306,6 +306,7 @@ class LocationPointMessage {
     this.accuracyMeters,
     required this.possibleMockLocation,
     required this.hexId,
+    this.stepCount,
   });
 
   /// `location_point.id`（`INTEGER PRIMARY KEY AUTOINCREMENT`）。挿入順に単調増加し、
@@ -355,6 +356,17 @@ class LocationPointMessage {
   /// なるため採らない）。
   int hexId;
 
+  /// `location_point.step_count`（Issue #126・T101・schema v3）。
+  ///
+  /// この観測時点までの、Android の歩数センサー（`TYPE_STEP_COUNTER`）による
+  /// 起動後の累積歩数。**nullable**（[hexId] とは対照的）: 歩数センサーを持たない
+  /// 端末・`ACTIVITY_RECOGNITION` 権限が無い端末・まだ最初のセンサーイベントを
+  /// 受け取っていない場合は null になる（罰しない側に倒す・Issue #126 本文
+  /// 「⚠️ 歩数センサーについて」）。[GeoPosition.cumulativeStepCount]
+  /// （`packages/core`）へそのまま写される（`NativePositionProvider` の
+  /// ドキュメント参照）。
+  int? stepCount;
+
   List<Object?> _toList() {
     return <Object?>[
       id,
@@ -365,6 +377,7 @@ class LocationPointMessage {
       accuracyMeters,
       possibleMockLocation,
       hexId,
+      stepCount,
     ];
   }
 
@@ -382,6 +395,7 @@ class LocationPointMessage {
       accuracyMeters: result[5] as double?,
       possibleMockLocation: result[6]! as bool,
       hexId: result[7]! as int,
+      stepCount: result[8] as int?,
     );
   }
 
@@ -394,7 +408,7 @@ class LocationPointMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(id, other.id) && _deepEquals(sessionId, other.sessionId) && _deepEquals(elapsedRealtimeNanos, other.elapsedRealtimeNanos) && _deepEquals(latitude, other.latitude) && _deepEquals(longitude, other.longitude) && _deepEquals(accuracyMeters, other.accuracyMeters) && _deepEquals(possibleMockLocation, other.possibleMockLocation) && _deepEquals(hexId, other.hexId);
+    return _deepEquals(id, other.id) && _deepEquals(sessionId, other.sessionId) && _deepEquals(elapsedRealtimeNanos, other.elapsedRealtimeNanos) && _deepEquals(latitude, other.latitude) && _deepEquals(longitude, other.longitude) && _deepEquals(accuracyMeters, other.accuracyMeters) && _deepEquals(possibleMockLocation, other.possibleMockLocation) && _deepEquals(hexId, other.hexId) && _deepEquals(stepCount, other.stepCount);
   }
 
   @override
@@ -403,7 +417,7 @@ class LocationPointMessage {
 
   @override
   String toString() {
-    return 'LocationPointMessage(id: $id, sessionId: $sessionId, elapsedRealtimeNanos: $elapsedRealtimeNanos, latitude: $latitude, longitude: $longitude, accuracyMeters: $accuracyMeters, possibleMockLocation: $possibleMockLocation, hexId: $hexId)';
+    return 'LocationPointMessage(id: $id, sessionId: $sessionId, elapsedRealtimeNanos: $elapsedRealtimeNanos, latitude: $latitude, longitude: $longitude, accuracyMeters: $accuracyMeters, possibleMockLocation: $possibleMockLocation, hexId: $hexId, stepCount: $stepCount)';
   }
 }
 
