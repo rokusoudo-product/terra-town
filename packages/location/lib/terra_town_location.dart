@@ -18,6 +18,8 @@
 ///     `location_track.sqlite` は Issue #131（2026-09-11 代表決定）により
 ///     **Kotlin 側のみが開く**ため、Dart 側の読み取り専用接続クラス
 ///     （`LocationTrackConnection`）は削除済み（`docs/location-track-db.md` §2・§3）。
+///     RewardSettingsRepository（Issue #135・歩数判定オプトアウト設定の
+///     `settings` テーブルへの読み書き・`RewardPolicy` への橋渡し）もここに置く。
 library;
 
 import 'package:terra_town_core/terra_town_core.dart';
@@ -25,6 +27,7 @@ import 'package:terra_town_core/terra_town_core.dart';
 export 'src/db/building_type.dart';
 export 'src/db/game_database.dart';
 export 'src/db/region_pack_connection.dart';
+export 'src/db/reward_settings_repository.dart';
 export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';
 export 'src/map/map_camera_position.dart';
