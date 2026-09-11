@@ -107,6 +107,28 @@ import 'speed_filter.dart';
 ///   無効化に近い強いペナルティは避ける」という判断であり、確たる実測根拠は
 ///   まだない。
 ///
+/// ### 歩数判定そのものを無効化する設定（Issue #135・自己申告オプトアウト）
+/// 車いす・時速10km未満の自転車など、**歩数がほぼ出ない正規の移動手段**の利用者は、
+/// 上記の判定だけでは正規の移動でも歩数不一致（倍率0.5）が継続的にかかってしまう
+/// （代表要望・2026-09-11）。代表決定は「自動判定ではなく自己申告の設定」（車いすと
+/// ジョイスティックによる位置偽装を区別できないため）。[useStepCheck] を `false`
+/// にすると、[classify] は本クラスdoc「歩数突合（T101）の設計」の判定を一切行わず
+/// （[stepMismatchMultiplier] を返すことはなく [RewardSegmentReason.stepMismatch] も
+/// 出ない）、当該区間は歩数の観点では倍率1として扱う。
+///
+/// **①モック位置検出（[allowsDisclosure]）・②速度判定（[SpeedFilter]・時速10km超）は
+/// [useStepCheck] の値に関わらず常に適用する**（電動車いすも時速6km以下のため
+/// 速度判定には掛からない）。自己申告のため誰でも歩数判定を回避できるが、MVP の
+/// 脅威モデル（チートの被害者は本人のみ・`plan.md` §9）では許容する
+/// （`specs/001-mvp/spec.md` NFR-5・`plan.md` §9 参照）。
+///
+/// この値の永続化・UI（設定タブのスイッチ）は `packages/location`
+/// （`RewardSettingsRepository`）・`app`（設定画面）側の責務であり、本クラスは
+/// 単純な bool を受け取るだけで、Drift・Flutter・設定の保存方法を一切知らない
+/// （`tools/check_import_direction.sh`）。実際の資材付与処理（`classify` の結果を
+/// 使って付与量を計算する処理）はまだ存在しない（tasks.md T068）ため、本設定が
+/// 実際の付与に効くのは T068 の実装後になる。
+///
 /// **最終調整は `tasks.md` T017（代表の実機スパイク）で行う**（Issue #126 本文）。
 class RewardPolicy {
   RewardPolicy({
@@ -115,6 +137,7 @@ class RewardPolicy {
     this.minWindowDistanceMeters = defaultMinWindowDistanceMeters,
     this.maxStrideMeters = defaultMaxStrideMeters,
     this.stepMismatchMultiplier = defaultStepMismatchMultiplier,
+    this.useStepCheck = true,
   })  : speedFilter = speedFilter ?? SpeedFilter(),
         stepWindow = stepWindow ?? (speedFilter ?? SpeedFilter()).smoothingWindow,
         assert(minWindowDistanceMeters >= 0, '最小ウィンドウ距離は非負でなければならない'),
@@ -144,6 +167,13 @@ class RewardPolicy {
   /// 歩数不一致と判定された区間に適用する倍率（0<倍率<1・無効化ではない）。
   static const double defaultStepMismatchMultiplier = 0.5;
   final double stepMismatchMultiplier;
+
+  /// 歩数突合そのものを行うか（既定 `true`＝使う）。`false` にすると
+  /// [classify] は歩数不一致（[RewardSegmentReason.stepMismatch]）を一切出さない
+  /// （クラスdoc「歩数判定そのものを無効化する設定」参照・Issue #135）。
+  /// モック位置検出（[allowsDisclosure]）・速度判定（[SpeedFilter]）はこの値に
+  /// 関わらず常に適用される。
+  final bool useStepCheck;
 
   /// この観測地点で開拓（[DisclosedHex] の生成・霧を晴らす処理）を行ってよいか。
   ///
@@ -207,7 +237,12 @@ class RewardPolicy {
       if (j > i) {
         final run = session.sublist(i, j + 1);
         final speedSegments = speedFilter.classify(run);
-        final stepMultipliers = _stepWindowMultipliers(run);
+        // Issue #135: useStepCheck が false なら歩数突合そのものをスキップし、
+        // 全区間を「不一致なし」（倍率1）として扱う（速度判定は下の
+        // speedSegment.rewardEligible 分岐でこれまでどおり別途適用される）。
+        final stepMultipliers = useStepCheck
+            ? _stepWindowMultipliers(run)
+            : List<double>.filled(speedSegments.length, 1.0);
         for (var s = 0; s < speedSegments.length; s++) {
           final k = i + s;
           final speedSegment = speedSegments[s];
