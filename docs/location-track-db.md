@@ -301,6 +301,13 @@ v1→v3（複数ステップの一括適用）・v2→v3（単一ステップ）
 T106・未作成）。作成時はそこへ移す。** 最終調整は `tasks.md` T017（代表の
 実機スパイク）で行う。
 
+**利用者は設定（設定タブ）でこの歩数突合そのものを無効化できる**（Issue #135・
+車いす・時速10km未満の自転車など歩数が出ない移動手段への配慮・自己申告）。
+無効化しても①モック位置検出・②速度判定（本節とは別の仕組み）は引き続き適用
+される。設定値は `RewardSettingsRepository`（`packages/location`）が
+`settings` テーブルに保存し、`RewardPolicy.useStepCheck` に渡す
+（`reward_settings_repository.dart`・`reward_policy.dart` 参照）。
+
 ## 5. 時刻の扱い（T048・重要な決定）
 
 ### 5.1 `elapsedRealtime` は端末再起動でリセットされる → セッションIDで区切る
