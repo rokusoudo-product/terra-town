@@ -113,6 +113,7 @@ class MapView extends StatefulWidget {
     this.fogSourceId = FogOfWarController.defaultSourceId,
     this.fogLayerId = FogOfWarController.defaultLayerId,
     this.onFogLayerReady,
+    this.onMapControllerReady,
   });
 
   /// [resolveBundledMbtilesPath] 等で解決済みの、書き込み可能な領域にある
@@ -176,8 +177,47 @@ class MapView extends StatefulWidget {
   /// （[MapView] クラス doc コメント参照）。
   final void Function(FogOfWarController controller)? onFogLayerReady;
 
+  /// マップ作成直後（`onMapCreated`）に、[MapCameraReader]（カメラ中心の取得のみに
+  /// 限定した窓口。Issue #137）を渡す。[MapLibreMapController] 自体は公開しない
+  /// （[MapView] クラス doc コメント参照）。
+  ///
+  /// 【用途】デバッグパネルの「地図の中心のヘクスを開示」ボタン（`kDebugMode` 限定・
+  /// `app/lib/map/debug/`）が、地図の中心に最も近いパック内ヘクスを選ぶために
+  /// カメラ中心の緯度経度を必要とする。本コールバックはそのためだけに用意した
+  /// 最小限の口であり、カメラ移動・ズーム操作等は含まない。
+  final void Function(MapCameraReader reader)? onMapControllerReady;
+
   @override
   State<MapView> createState() => _MapViewState();
+}
+
+/// [MapView.onMapControllerReady] が渡す、カメラ中心の読み取りに限定した窓口
+/// （Issue #137）。
+///
+/// `location` は地図SDKの型（`MapLibreMapController`）を `app` に公開しない方針
+/// （[MapView] クラス doc コメント参照）を保つため、必要な操作（カメラ中心の取得）
+/// だけをピンポイントで許可する薄いラッパーとして用意した。
+@immutable
+class MapCameraReader {
+  const MapCameraReader(this._controller);
+
+  final MapLibreMapController _controller;
+
+  /// 現在のカメラ中心。スタイル読込前・`onCameraMove`/`onCameraIdle` が
+  /// まだ一度も発火していない場合は null（`MapLibreMapController.cameraPosition`
+  /// のドキュメント参照）。利用者の操作に追従するには `MapLibreMap` の
+  /// `trackCameraPosition: true` が必要（[_MapViewState.build] で指定済み）。
+  MapCameraPosition? get center {
+    final position = _controller.cameraPosition;
+    if (position == null) return null;
+    return MapCameraPosition(
+      latitude: position.target.latitude,
+      longitude: position.target.longitude,
+      zoom: position.zoom,
+      tilt: position.tilt,
+      bearing: position.bearing,
+    );
+  }
 }
 
 class _MapViewState extends State<MapView> {
@@ -196,7 +236,16 @@ class _MapViewState extends State<MapView> {
         tilt: widget.initialCameraPosition.tilt,
         bearing: widget.initialCameraPosition.bearing,
       ),
-      onMapCreated: (controller) => _controller = controller,
+      // maplibre_gl の `MapLibreMapController.cameraPosition` は、これを true に
+      // しないと利用者が地図を動かしても更新されず、初期カメラ位置のままになる
+      // （既定は false）。[MapCameraReader.center] が「現在の」カメラ中心を返すために
+      // 必要（2026-09-11 実機検証で、地図を動かしても初期中心のヘクスしか選ばれない
+      // ことを確認して追加）。
+      trackCameraPosition: true,
+      onMapCreated: (controller) {
+        _controller = controller;
+        widget.onMapControllerReady?.call(MapCameraReader(controller));
+      },
       onStyleLoadedCallback: _addRegionPackLayers,
     );
   }

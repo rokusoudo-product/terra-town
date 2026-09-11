@@ -18,7 +18,13 @@ import 'package:terra_town/features/map/map_screen.dart';
 /// そのため本ファイルは `MapScreen` の「ローディング/エラー/成功」の状態遷移と
 /// DESIGN.md トークンの使用のみを検証し、[MapScreen.mapBuilder] を差し替えて
 /// 実 [MapView] を一切 pump しない。実際に地図が描画されることの確認は
-/// 代表が実機で行う（PR本文「代表が実機で確認する手順」参照）。
+/// 代表が実機で行う（PR本文「実機確認は未実施」参照）。
+///
+/// 【Issue #137】`MapScreen` は MBTiles（表示専用タイル）と地域パック
+/// （`region_pack.sqlite`・fog of war 用のヘクス境界・`RegionPack` 実装のソース）の
+/// **両方**を解決してから [mapBuilder] を呼ぶようになった。実アセットへ
+/// 依存しないよう、全テストで両方の解決関数を明示的に差し替える
+/// （既定の同梱アセット解決に一切触れさせない）。
 Widget _wrap(Widget child) {
   return MaterialApp(theme: AppTheme.light(), home: Scaffold(body: child));
 }
@@ -27,14 +33,15 @@ void main() {
   testWidgets('パック解決中はローディング表示になる', (tester) async {
     // Timer ベースの遅延ではなく、意図的に完了させない Completer を使う
     // （Timer を残したままテストを終えると "A Timer is still pending" で失敗するため）。
-    final completer = Completer<String>();
-    addTearDown(() => completer.complete('/fake/tiles.mbtiles'));
+    final mbtilesCompleter = Completer<String>();
+    addTearDown(() => mbtilesCompleter.complete('/fake/tiles.mbtiles'));
 
     await tester.pumpWidget(
       _wrap(
         MapScreen(
-          resolveMbtilesPath: () => completer.future,
-          mapBuilder: (context, path) => Text('map:$path'),
+          resolveMbtilesPath: () => mbtilesCompleter.future,
+          resolveRegionPackPath: () async => '/fake/region_pack.sqlite',
+          mapBuilder: (context, assets) => Text('map:${assets.mbtilesFilePath}'),
         ),
       ),
     );
@@ -43,14 +50,15 @@ void main() {
     expect(find.textContaining('map:'), findsNothing);
   });
 
-  testWidgets('パック未取得の場合はエラー表示になり、対処方法を提示する', (tester) async {
+  testWidgets('MBTilesパック未取得の場合はエラー表示になり、対処方法を提示する', (tester) async {
     await tester.pumpWidget(
       _wrap(
         MapScreen(
           resolveMbtilesPath: () => Future<String>.error(
             const PackAssetMissingException('assets/pack/tiles.mbtiles'),
           ),
-          mapBuilder: (context, path) => Text('map:$path'),
+          resolveRegionPackPath: () async => '/fake/region_pack.sqlite',
+          mapBuilder: (context, assets) => Text('map:${assets.mbtilesFilePath}'),
         ),
       ),
     );
@@ -61,12 +69,34 @@ void main() {
     expect(find.textContaining('map:'), findsNothing);
   });
 
-  testWidgets('パック解決に成功したら mapBuilder が解決済みパスで呼ばれる', (tester) async {
+  testWidgets('地域パック未取得の場合もエラー表示になり、対処方法を提示する', (tester) async {
     await tester.pumpWidget(
       _wrap(
         MapScreen(
           resolveMbtilesPath: () async => '/fake/tiles.mbtiles',
-          mapBuilder: (context, path) => Text('map:$path'),
+          resolveRegionPackPath: () => Future<String>.error(
+            const PackAssetMissingException('assets/pack/region_pack.sqlite'),
+          ),
+          mapBuilder: (context, assets) => Text('map:${assets.mbtilesFilePath}'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('地図を表示できませんでした'), findsOneWidget);
+    expect(find.textContaining('bundle_region_pack.sh'), findsOneWidget);
+    expect(find.textContaining('map:'), findsNothing);
+  });
+
+  testWidgets('両方のパック解決に成功したら mapBuilder が解決済みアセット一式で呼ばれる', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        MapScreen(
+          resolveMbtilesPath: () async => '/fake/tiles.mbtiles',
+          resolveRegionPackPath: () async => '/fake/region_pack.sqlite',
+          mapBuilder: (context, assets) => Text('map:${assets.mbtilesFilePath}'),
         ),
       ),
     );
@@ -83,7 +113,8 @@ void main() {
           resolveMbtilesPath: () => Future<String>.error(
             StateError('予期しないエラー'),
           ),
-          mapBuilder: (context, path) => Text('map:$path'),
+          resolveRegionPackPath: () async => '/fake/region_pack.sqlite',
+          mapBuilder: (context, assets) => Text('map:${assets.mbtilesFilePath}'),
         ),
       ),
     );

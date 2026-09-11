@@ -80,9 +80,10 @@ class _RootScaffoldState extends State<RootScaffold> {
   int _selectedIndex = 0;
 
   /// ゲーム状態DB（Issue #135 で `app` から初めて開く）。設定タブ（[SettingsScreen]）
-  /// が [RewardSettingsRepository] 経由で読み書きする。`LazyDatabase` のため
-  /// このフィールド初期化自体はディスクI/Oを起こさない（[MyApp.gameDatabaseBuilder]
-  /// のドキュメント参照）。
+  /// が [RewardSettingsRepository] 経由で読み書きするほか、地図タブ（[MapScreen]）が
+  /// 開示済みヘクスの永続化（`disclosed_hex`・T060・Issue #137）に使う、
+  /// 単一の共有インスタンス。`LazyDatabase` のためこのフィールド初期化自体は
+  /// ディスクI/Oを起こさない（[MyApp.gameDatabaseBuilder] のドキュメント参照）。
   late final GameDatabase _gameDatabase =
       (widget.gameDatabaseBuilder ?? GameDatabase.defaultConnection)();
   late final RewardSettingsRepository _rewardSettingsRepository =
@@ -116,7 +117,10 @@ class _RootScaffoldState extends State<RootScaffold> {
   @override
   Widget build(BuildContext context) {
     final Widget body = switch (_selectedIndex) {
-      0 => MapScreen(resolveMbtilesPath: widget.mapPathResolver),
+      0 => MapScreen(
+          resolveMbtilesPath: widget.mapPathResolver,
+          gameDatabase: _gameDatabase,
+        ),
       3 => SettingsScreen(store: _rewardSettingsRepository),
       _ => _PlaceholderScreen(label: _tabs[_selectedIndex].label),
     };
