@@ -205,7 +205,8 @@ class MapCameraReader {
 
   /// 現在のカメラ中心。スタイル読込前・`onCameraMove`/`onCameraIdle` が
   /// まだ一度も発火していない場合は null（`MapLibreMapController.cameraPosition`
-  /// のドキュメント参照）。
+  /// のドキュメント参照）。利用者の操作に追従するには `MapLibreMap` の
+  /// `trackCameraPosition: true` が必要（[_MapViewState.build] で指定済み）。
   MapCameraPosition? get center {
     final position = _controller.cameraPosition;
     if (position == null) return null;
@@ -235,6 +236,12 @@ class _MapViewState extends State<MapView> {
         tilt: widget.initialCameraPosition.tilt,
         bearing: widget.initialCameraPosition.bearing,
       ),
+      // maplibre_gl の `MapLibreMapController.cameraPosition` は、これを true に
+      // しないと利用者が地図を動かしても更新されず、初期カメラ位置のままになる
+      // （既定は false）。[MapCameraReader.center] が「現在の」カメラ中心を返すために
+      // 必要（2026-09-11 実機検証で、地図を動かしても初期中心のヘクスしか選ばれない
+      // ことを確認して追加）。
+      trackCameraPosition: true,
       onMapCreated: (controller) {
         _controller = controller;
         widget.onMapControllerReady?.call(MapCameraReader(controller));
