@@ -2,6 +2,7 @@ package jp.rokusoudo.terra_town
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import jp.rokusoudo.terra_town.location.LocationApiHandler
@@ -57,10 +58,22 @@ class MainActivity : FlutterActivity() {
     private fun handleDebugLocationServiceIntent(intent: Intent?) {
         if (!BuildConfig.DEBUG || intent == null) return
         if (intent.getBooleanExtra("terra_town.debug.startLocationService", false)) {
-            LocationTrackingService.start(this)
+            // LocationTrackingService.start() は権限が無ければ startForegroundService() を
+            // 呼ばずに false を返す（2026-09-11 実機検証・PR #128「問題1」の修正）。
+            // このデバッグフックには UI が無いため、ここでは logcat に残すだけに留める。
+            // T059（権限要求UI）実装時は、この戻り値を見て権限リクエストダイアログに
+            // 繋げる想定。
+            val started = LocationTrackingService.start(this)
+            if (!started) {
+                Log.w(TAG, "位置情報の権限が無いため LocationTrackingService を起動しませんでした")
+            }
         }
         if (intent.getBooleanExtra("terra_town.debug.stopLocationService", false)) {
             LocationTrackingService.stop(this)
         }
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
     }
 }

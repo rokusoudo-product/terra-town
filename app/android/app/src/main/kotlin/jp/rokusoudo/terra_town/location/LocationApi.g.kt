@@ -248,28 +248,18 @@ enum class TrackingStartOutcome(val raw: Int) {
    * フォアグラウンド位置権限が無いため、`startForegroundService()` 自体を
    * **呼ばずに**起動を拒否した。
    *
-   * **なぜこの区別が安全性に直結するか**: `LocationTrackingService.onStartCommand`
-   * は権限が無い場合 `startForeground()` を呼ばずに `stopSelf()` する実装だが、
-   * `Context#startForegroundService()` を一度でも呼ぶと、システムは一定時間内の
-   * `startForeground()` 呼び出しを義務づける。権限が無くサービス内部で
-   * `startForeground()` を呼べない場合、`ForegroundServiceDidNotStartInTimeException`
-   * でアプリのプロセスごと強制終了される
+   * **なぜこの区別が安全性に直結するか**: 権限が無い場合に
+   * `Context#startForegroundService()` を呼んでしまうと、システムは一定時間内の
+   * `Service.startForeground()` 呼び出しを義務づけるため、権限チェックを
+   * サービス内部だけに任せると `ForegroundServiceDidNotStartInTimeException` で
+   * アプリのプロセスごと強制終了されうる
    * （2026-09-11 実機検証・Pixel 7a・PR #128 のレビューコメントで確認済み）。
    *
-   * **⚠️ 要確認（本 Issue のスコープ外・PR本文に記載）**: この修正を含む
-   * コミット（`17dead3`）は `feature/issue-123-kotlin-location-fgs` ブランチに
-   * 存在するが、**PR #128 がマージされた main には含まれていない**
-   * （2026-09-11 に本 Issue の実装時に発覚。PR #128 は `mergedAt` より後の
-   * タイムスタンプでこのブランチに追加コミットが積まれており、再マージされていない）。
-   * そのため、本 Pigeon ハンドラ（`LocationApiHandler.kt`）は
-   * `LocationTrackingService.Companion.start()` を直接呼ばず、
-   * `LocationTrackingService.hasForegroundLocationPermission()` を**呼び出し側で
-   * 先に確認してから** `start()` を呼ぶことで、Pigeon 経由の起動要求に限っては
-   * このクラッシュを回避している。ただし既存のデバッグ用 adb Intent
-   * （`MainActivity.handleDebugLocationServiceIntent`）はこの権限確認を経由しない
-   * ため、**main 上では権限拒否状態で adb Intent 経由の起動を行うと今も
-   * クラッシュする**。秘書セッションの実機確認手順は Pigeon 経由（本APIの
-   * `startTracking`）を使うこと（PR本文参照）。
+   * この修正（`LocationTrackingService.Companion.start()` 側で権限を確認し、
+   * 権限が無ければ `startForegroundService()` 自体を呼ばず `Boolean` の戻り値で
+   * 呼び出し側に通知する）は **PR #130（2026-09-11 マージ）で main に反映済み**。
+   * 本 Pigeon ハンドラ（`LocationApiHandler.kt`）は `Companion.start()` の戻り値を
+   * そのままこの結果に変換するだけで、自前の権限チェックは行わない。
    */
   PERMISSION_DENIED(1);
 
