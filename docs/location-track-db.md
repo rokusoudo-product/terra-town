@@ -192,12 +192,34 @@ ON location_point (session_id, id);
   採用。10m寄りだと市街地のGPS/Wi-Fi測位ノイズで誤発火しやすく、20m寄りだとヘクス解像度
   （約50m）に対して記録が粗くなりすぎるための折衷。**T015（1時間の実歩行計測）で確定する
   までの暫定値**。
+  - **判定はアプリ側で行う（2026-09-11 実機検証で判明）**: `setMinUpdateDistanceMeters` は
+    OS に対する省電力のヒントであり、しきい値未満の fix が配送されないことは保証されない。
+    実機（Pixel 7a）では直前の記録から **0.86m・46秒後の fix が通常経路で配送された**。
+    そのため `handleLocationFix` で直前の記録地点からの距離を計算し、しきい値未満なら
+    記録せず `位置破棄（移動距離不足）` をログに出す（`discardedByDistanceCount`）。
+    修正後、静止中の約5分間で記録は1件のみになり、0.5〜0.8m の fix が破棄されることを確認した。
+  - 時間上限による強制記録（`forcedByTimeCap=true`）はこの距離判定を通さない。
+    **ただし精度ゲートは通る**ため、屋内などで強制 fix の精度が悪い場合は記録されない。
 - **時間上限**: 既定 **5分**（暫定）。距離条件を満たさなくても強制的に1回だけ現在地を
   取得して記録する。
+- **優先度（`priority`）: 既定 `PRIORITY_HIGH_ACCURACY`（2026-09-11・実機検証を受けた代表決定・
+  案A。旧: `PRIORITY_BALANCED_POWER_ACCURACY`）**。
+  当初は NFR-1「常時高精度GPSを使わない」に基づき `PRIORITY_BALANCED_POWER_ACCURACY` を
+  既定にしていたが、実機（Pixel 7a）で位置が1件も記録されない不具合が発生し、原因は
+  この優先度と精度ゲート（下記）が**構造的に両立しない**組み合わせだったことが判明した
+  （詳細は本ドキュメント末尾の「2026-09-11 実機検証と修正」節・PR #128 コメント参照）。
+  代表決定により `PRIORITY_HIGH_ACCURACY` に変更する。このサービスはアプリから明示的に
+  起動されたときだけ動作し常駐しないため（`START_NOT_STICKY`）、NFR-1 の**意図**
+  （使っていないときに電池を消費し続けない）自体は保たれる、というのが変更の理由。
+  **`plan.md` §7 の文言（「常時高精度GPSを使わない」）は本 PR では変更しない**。改定案は
+  PR 本文に記載し、代表承認後に別 PR で反映する。
 - **精度ゲート**: `accuracy_meters` が距離しきい値の2倍（既定30m）を超える fix は破棄する。
-  `PRIORITY_BALANCED_POWER_ACCURACY`（NFR-1「常時高精度GPSを使わない」に基づく既定）は
-  Wi-Fi/セル測位由来の粗い fix を返すことがあり、これが距離しきい値に対して「見かけ上の
-  移動」を作らないようにするため。
+  この値自体は優先度変更後も据え置いている。`PRIORITY_HIGH_ACCURACY` であれば屋外で通常
+  5〜15m程度の精度になることが期待され30mゲートと両立するはずだが、**これは一般的傾向からの
+  推測であり実測していない**。実際の分布は T015（1時間の実歩行計測）で確認し、必要なら
+  しきい値・優先度の組み合わせを再調整する。破棄した fix は精度の値と累計破棄件数を
+  `Log.d`（タグ `LocationTrackingService`、「位置破棄（精度不足）」）に必ず出すようにした
+  （2026-09-11 修正・以前は無言で破棄しており記録0件の原因調査を難しくしていた）。
 - **変更方法**: `LocationSamplingPolicy.currentPolicy` を差し替える。設定UI（T059以降）が
   できた場合はそこから値を読み込んで上書きする実装を追加すればよい。
 
@@ -248,12 +270,42 @@ adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
 **`ACCESS_COARSE_LOCATION` のみを許可した場合の注意**: 大まかな位置（Wi-Fi/セル測位相当）
 は精度が数十〜100m規模になりやすく、`LocationSamplingPolicy.maxAcceptedAccuracyMeters`
 （既定30m）を超えて全fixが破棄され、記録が0件のままになることがある。これはバグではなく
-精度ゲート（§6）の意図した動作。記録が増えない場合はまずこれを疑うこと。
+精度ゲート（§6）の意図した動作。記録が増えない場合はまずこれを疑うこと（破棄した fix は
+`adb logcat` に精度と累計破棄件数付きで出るようになっている。§6参照）。
 
-**権限を許可せずに起動した場合**、`adb logcat` に
-`ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION が無いため起動を中止します` という警告が出て
-即座に停止する（`dumpsys activity services` にサービスが見えない）ことを確認できる
-＝「権限なしで起動しない」ことの確認手順。
+**権限を許可せずに起動した場合（重要・プロセスが生存したまま拒否されることを必ず確認する）**:
+
+2026-09-11 の実機検証で、権限が無い状態でサービスを起動すると
+`ForegroundServiceDidNotStartInTimeException` により**アプリのプロセスごと強制終了される**
+不具合が見つかった（`LocationTrackingService.Companion.start()` が権限を確認せずに
+`startForegroundService()` を呼んでしまい、サービス側は `startForeground()` を呼ばずに
+`stopSelf()` していたため）。修正後は `Companion.start()` 自身が権限を確認し、
+無ければ `startForegroundService()` を呼ばない（戻り値 `false`）。サービス内
+（`onStartCommand`）の確認は二重防御として残っているが、その経路でも
+`startForeground()` を先に呼んでから停止するためクラッシュしない。
+
+```bash
+adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACCESS_FINE_LOCATION
+adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACCESS_COARSE_LOCATION
+adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
+  --ez terra_town.debug.startLocationService true
+
+# 修正の確認: プロセスが生存していること（PID が返ること）
+adb shell pidof jp.rokusoudo.terra_town
+
+# logcat に警告が出て即座に停止すること（サービスは起動しない）
+adb logcat -d | grep LocationTrackingService
+adb shell dumpsys activity services jp.rokusoudo.terra_town
+```
+
+- `adb shell pidof jp.rokusoudo.terra_town` が**値を返す**（＝プロセスが落ちていない）こと。
+  何も返らない場合はクラッシュしており、修正前の状態に戻っている疑いがある。
+- `adb logcat` に
+  `ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION が無いため startForegroundService() を呼ばずに起動を中止します`
+  （`Companion.start()` 側・主経路）または
+  `ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION が無いため起動を中止します（二重防御経路）`
+  （`onStartCommand` 側・二重防御経路。通常はここまで来ない）という警告が出ること。
+- `dumpsys activity services` にサービスが見えない（起動していない）こと。
 
 ### 8.3 記録データの取り出し
 
@@ -302,3 +354,64 @@ fused location provider（`com.google.android.gms:play-services-location`）は
 Google Play services に依存する。Play services が入っていない端末（一部の中国市場向け端末等）
 では `FusedLocationProviderClient` が位置を返さず、記録が0件になる。MVP はこの制約を許容する
 （`plan.md` に別途明記が無い場合、端末要件として Play services 搭載を前提とする）。
+
+## 11. 2026-09-11 実機検証と修正の記録（PR #128・Pixel 7a）
+
+PR #128 のマージ前レビューとして実機検証を行い、3件の問題が見つかった。いずれも本ドキュメントが
+対象とする実装（`LocationTrackingService.kt`・`LocationSamplingPolicy.kt`）への修正で対応済み。
+
+### 問題1（重大・修正済み）: 権限が無いとアプリがクラッシュする
+
+**症状**: 位置権限を取り消した状態でサービスを起動すると、
+`ForegroundServiceDidNotStartInTimeException` でアプリのプロセスごと強制終了された。
+
+**原因**: `Context.startForegroundService()` で起動したサービスは一定時間内に
+`Service.startForeground()` を呼ぶことを Android から義務づけられている。修正前の実装は
+`LocationTrackingService.onStartCommand` 側でのみ権限を確認し、無ければ `startForeground()` を
+一度も呼ばずに `stopSelf()` していたため、この義務に違反してシステムに強制終了された。
+
+**修正**: 権限確認を呼び出し側（`LocationTrackingService.Companion.start`）に移し、権限が
+無ければ `startForegroundService()` 自体を呼ばないようにした（戻り値は `Boolean`。
+`false` なら起動をリクエストしなかったことを呼び出し側が判別できる）。
+`onStartCommand` 側の確認は二重防御として残しているが、その経路でも
+`startForeground()`（Android 14+ で `SecurityException` が起きても握りつぶす）を
+先に呼んでから `stopSelf()` するよう変更し、クラッシュしない形にした。
+確認手順は §8.2 に追記した。
+
+### 問題2（重大・修正済み）: 精度ゲートと測位優先度の矛盾で記録が0件になる
+
+**症状**: 権限ありでサービスは起動・foreground化したが、`location_track.sqlite` が
+作られず記録が1件も行われなかった。
+
+**原因**: 既定の優先度 `PRIORITY_BALANCED_POWER_ACCURACY` は Android の公式ドキュメント上
+「ブロック単位（約100m）」の精度とされ、GPSを使わずWi-Fi/基地局測位に留まることが多い。
+一方で精度ゲート（`maxAcceptedAccuracyMeters`）は既定30mであり、**優先度が返す精度と
+ゲートが受け付ける精度がそもそも両立しない**設計になっていた。実機の `dumpsys location`
+でも fused=100.0m・network=56.3m・gps(屋内)=156.9m と、全プロバイダが30mを超えていた。
+
+**修正（2026-09-11・代表決定・案A）**: `LocationSamplingPolicy.DEFAULT_PRIORITY` を
+`PRIORITY_HIGH_ACCURACY` に変更した。サービスはアプリから明示的に起動されたときだけ動作し
+常駐しない（`START_NOT_STICKY`）ため、NFR-1「常時高精度GPSを使わない」の**意図**（未使用時に
+電池を消費し続けない）は維持できる、という判断による。精度ゲート（30m）自体は変更していない。
+`PRIORITY_HIGH_ACCURACY` なら屋外で通常5〜15m程度の精度になり両立すると見込むが、**これは
+推測であり実測していない**。実測はT015（1時間の実歩行）で行い、必要ならしきい値・優先度の
+組み合わせを見直す。それでも電池消費が許容できなければ、歩行検出による優先度切り替え（案B）に
+進む段階的な進め方とする。詳細・§6参照。
+
+**`plan.md` §7 改定案（本 PR では未反映。PR #128 本文に記載・代表承認後に別PRで反映予定）**:
+
+- 「常時高精度GPSを使わない」の意図＝電池保護は維持する
+- プレイ中（サービス稼働中）に限り `PRIORITY_HIGH_ACCURACY` を使う。サービスは常駐せず、
+  アプリから起動したときだけ動く
+- `BALANCED_POWER`（約100m）はヘクス約50mに対して粗すぎて使えないことが実機で判明した経緯
+  （2026-09-11・fusedでhAcc=100m、30mゲートで全破棄）を記録する
+- 電池消費はT015で実測し、足りなければ歩行検出による切り替え（案B）に進む
+
+### 問題3（軽微・修正済み）: 精度で破棄したfixがログに残らない
+
+**症状**: 問題2の診断時、精度ゲートで破棄されたfixがログに一切出ず、原因調査が難航した。
+
+**修正**: `LocationTrackingService.handleLocationFix` で、精度不足により破棄する際に
+`Log.d`（タグ `LocationTrackingService`）で破棄した fix の精度・累計破棄件数
+（`discardedByAccuracyCount`。サービスインスタンス内でのみ保持・永続化しない）を出力するようにした。
+T015（1時間の実歩行計測）で「精度不足で何件捨てられたか」を確認する材料になる。
