@@ -85,6 +85,19 @@ class LocationTrackingService : Service() {
             // 権限が付与されていない状態でサービスが起動しないことを保証する（受け入れ基準）。
             // startForeground() を一度も呼ばずに即座に停止するため、
             // ForegroundServiceDidNotStartInTimeException の対象にもならない。
+            //
+            // 【Issue #124 時点の既知の問題・スコープ外】この経路（既に
+            // startForegroundService() を呼んだ後にここで stopSelf() する）は、
+            // 呼び出し元が Context.startForegroundService() を先に呼んでいる場合、
+            // 実機では ForegroundServiceDidNotStartInTimeException でプロセスごと
+            // 強制終了することが確認されている（2026-09-11・Pixel 7a・PR #128
+            // レビューコメント）。修正コミット（17dead3）は
+            // feature/issue-123-kotlin-location-fgs ブランチに存在するが main の
+            // PR #128 マージには含まれていない（要確認・Issue #124 PR本文に記録）。
+            // 本 Issue（#124）はこのファイルの挙動を変更しない方針のため、
+            // Pigeon 経由の起動（LocationApiHandler.kt）は呼び出し側
+            // （Companion.start() を呼ぶ前）で hasForegroundLocationPermission() を
+            // 確認し、このクラッシュ経路に入らないようにしている。
             Log.w(TAG, "ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION が無いため起動を中止します")
             stopSelf()
             return START_NOT_STICKY
@@ -96,6 +109,12 @@ class LocationTrackingService : Service() {
             buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
+
+        // 【Issue #124・追加】Pigeon の状態問い合わせ（LocationApiHandler.getTrackingStatus）
+        // が「現在稼働中か・現在の session_id」を答えられるようにするための記帳のみ。
+        // 起動シーケンス・権限判定・位置取得のロジックは一切変更していない
+        // （startForeground() が成功した直後に設定するだけの追加行）。
+        runningSessionId = sessionId
 
         startLocationUpdates()
         handler.removeCallbacks(timeCapRunnable)
@@ -113,6 +132,8 @@ class LocationTrackingService : Service() {
         handler.removeCallbacks(timeCapRunnable)
         fusedLocationClient.removeLocationUpdates(locationCallback)
         dbHelper.closeQuietly()
+        // Issue #124・追加: 稼働中フラグの記帳を解除する（runningSessionId のdoc参照）。
+        runningSessionId = null
         super.onDestroy()
     }
 
@@ -225,6 +246,18 @@ class LocationTrackingService : Service() {
         private const val TAG = "LocationTrackingService"
         private const val NOTIFICATION_CHANNEL_ID = "location_tracking"
         private const val NOTIFICATION_ID = 1001
+
+        /**
+         * 【Issue #124・追加】現在 foreground 状態で稼働中のセッションID。未稼働なら null。
+         *
+         * `Pigeon`（`LocationApiHandler.kt`・`getTrackingStatus`）が「稼働中か・現在の
+         * session_id」を答えるための記帳専用フィールド。[onStartCommand] が
+         * `startForeground()` 成功直後に設定し、[onDestroy] で null に戻す。
+         * **既存の起動シーケンス・権限判定・位置取得ロジックには一切影響しない**
+         * （読み取り専用の記帳。スコープの厳守: PR #128 本体の挙動は変えない）。
+         */
+        @Volatile
+        var runningSessionId: String? = null
 
         /**
          * フォアグラウンド位置権限（`ACCESS_FINE_LOCATION` または `ACCESS_COARSE_LOCATION`）が

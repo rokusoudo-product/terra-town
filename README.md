@@ -42,9 +42,9 @@ flowchart TB
             loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装"]
         end
         fg["Kotlin foreground service<br/>fused location・距離ベース記録・elapsedRealtime<br/>✅ 実装済み（Issue #123）"]
-        pigeon["Pigeon channel (NativePositionProvider)<br/>モック/速度検出・歩数・Health Connect<br/>（未実装・予定）"]
+        pigeon["Pigeon channel (LocationTrackingHostApi)<br/>起動/停止/状態問い合わせのみ<br/>✅ 実装済み（Issue #124）<br/>モック/速度検出・歩数・Health Connectは別途未実装"]
         gamedb[("ゲーム状態 SQLite（Drift管理）<br/>disclosed_hex（開示時点の地形分類スナップショット）等")]
-        trackdb[("位置記録DB（Kotlin所有・別ファイル）<br/>location_track.sqlite。Dartは読み取り専用（未実装・Issue #124）")]
+        trackdb[("位置記録DB（Kotlin所有・別ファイル）<br/>location_track.sqlite。Dartは NativePositionProvider が読み取り専用で開く<br/>✅ 実装済み（Issue #124）")]
         pack[("地域パック（読取専用・別接続）<br/>tiles.mbtiles＋cell_terrain/hex_terrain（境界事前計算済）＋district＋poi")]
     end
 
@@ -52,8 +52,9 @@ flowchart TB
 
     user -->|GPS移動| fg
     fg --> trackdb
-    trackdb -.読取専用（未実装）.-> pigeon
-    pigeon -.-> loc
+    trackdb -->|読取専用（実装済み）| loc
+    loc -->|起動/停止/状態問い合わせ| pigeon
+    pigeon --> fg
     ui <--> core
     loc -->|core の抽象を実装| core
     core <--> gamedb
@@ -62,9 +63,9 @@ flowchart TB
     ci ==>|同梱（生成物はコミットしない）| pack
 
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
-    classDef planned stroke-dasharray: 5 5,fill:#f5f5f5,stroke:#9e9e9e;
     class core pure
-    class pigeon planned
 ```
+
+> **位置データ自体は Pigeon を経由しない**（`docs/architecture.md`「図の注記」参照）。Kotlin/Dart が同じディレクトリ（`app_flutter/`）を見て `location_track.sqlite` を Dart 側が直接読み取り専用オープンする。Pigeon は位置記録サービスの起動・停止・状態問い合わせという制御面のみを扱う（64bit整数の丸め問題・効率の観点から意図的な設計。Issue #124）。
 
 > 依存方向: `core/`（純粋ロジック）は `location/`（GPS・地図SDK・SQLite）を import しない一方向依存（[GPS_ARCHITECTURE 準拠](docs/architecture.md)）。拡張フェーズの地域パック配布（CDN）は MVP の構成要素ではない — 詳細は [docs/architecture.md](docs/architecture.md)。

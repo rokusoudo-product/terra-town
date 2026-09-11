@@ -20,6 +20,17 @@ supersedes: null
 > `NativePositionProvider`）が読む前提の契約書**であり、実装（
 > `app/android/app/src/main/kotlin/jp/rokusoudo/terra_town/location/LocationTrackDatabase.kt`）
 > と同じ内容を保つこと。スキーマを変更した場合は同じPRで本ドキュメントも更新する。
+>
+> **2026-09-11 追記（Issue #124・実装済み）**: Dart 側の読み取り実装は
+> `packages/location/lib/src/db/location_track_connection.dart`（本ドキュメント §3 の
+> `OpenMode.readOnly` パターン・スキーマバージョン確認）・
+> `packages/location/lib/src/position/native_position_provider.dart`
+> （`PositionProvider` 実装・ポーリング方式・§5 のセッション境界を
+> `packages/core` の `GeoPosition.trackingSessionId` へ伝搬）に実装済み。
+> `possible_mock_location` は `GeoPosition.spoofSuspected` へそのまま写す
+> （判定ロジック自体は Issue #126）。位置記録サービスの起動・停止・状態問い合わせは
+> 本ファイルの経路ではなく Pigeon（`pigeons/location_api.dart`）を使う
+> （位置データ自体は Pigeon を経由しない。理由は同ファイルのdocコメント参照）。
 
 ## 1. なぜゲーム状態DB（Drift）と別ファイルにするのか
 
