@@ -47,5 +47,11 @@ abstract interface class HexLocator {
   /// パック範囲外の位置に対する挙動は実装依存（`RegionPack.terrainOf` 側で
   /// 範囲外を `null` として扱う設計と対応させ、[DisclosureService] 側では
   /// 「[HexId] は返るが `RegionPack.terrainOf` が `null`」を範囲外として扱う）。
+  ///
+  /// 【Issue #108 追記】本番実装は `packages/location` の `RecordedHexLocator`。
+  /// 緯度経度→H3変換そのものは記録時点（Kotlin 側 `H3HexIndexer`）で既に確定して
+  /// おり、[GeoPosition.hexId] に格納済みの値をそのまま返すだけになった（以前の
+  /// `H3HexLocator`〔Dart側 `h3_flutter`〕は撤去済み）。この変更後も本抽象・
+  /// クラスdocの設計判断（`core` に変換ロジックを持ち込まない）自体は変わらない。
   HexId locate(GeoPosition position);
 }

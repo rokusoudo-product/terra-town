@@ -17,7 +17,7 @@ flowchart TB
         subgraph flutter["Flutter アプリ (Dart)"]
             ui["UI 層<br/>地図・建設・図鑑・HUD<br/>(MapLibre GL / Material 3)"]
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画集計<br/>抽象を定義: PositionProvider / HexLocator / RegionPack"]
-            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator は h3_flutter・当面Dart側）"]
+            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator＝RecordedHexLocator。Kotlin側で確定済みのhex_idを読むだけ）"]
         end
         subgraph native["Kotlin ネイティブ"]
             fg["foreground service<br/>fused location・距離ベース記録（暫定15m＋5分上限・T015で確定）・elapsedRealtime<br/>✅ 実装済み（Issue #123・T046〜T048）"]
@@ -68,7 +68,7 @@ flowchart TB
 - **fog of war は feature-state 方式（plan.md §8）**: 全ヘクスを起動時に1回だけ地図ソースへ追加し、開示は MapLibre の `feature-state` トグルで表現する。**地図側の feature-state は描画のための派生状態であり、開示状態の正ではない**（正は `disclosed_hex`）。`setStyle`（スタイル再読み込み）を呼ぶと feature-state は消えるため、その都度 `disclosed_hex` から再構築する。
 - **ヘクス境界の事前計算（Issue #105）**: フォグ表示に使うヘクスの六角形境界（GeoJSON）は実行時に計算せず、パック生成時に `hex_terrain.boundary_geojson` として算出・格納済みのものを読み込む。
 - **`maplibre_gl` は暫定的に git 依存**（上流の修正コミット固定。Android ビルドのブロッカー対応・plan.md §14 R1 追記）。Issue #92 で pub.dev 版 `^0.27.1` 以降が出次第、元の代表決定（Issue #55）に復帰する。
-- **`HexLocator`（緯度経度 → H3 インデックス変換）は当面 `packages/location` 側（Dart・`h3_flutter`）で実装**し、`packages/core` がその抽象を定義する。将来 Kotlin ネイティブ側へ寄せる予定（Issue #107・#108）。
+- **緯度経度 → H3 インデックス変換は Kotlin 側（`app/android/`・`H3HexIndexer`・`com.uber:h3` 4.5.0）で行う**（Issue #108・2026-09-11）。位置記録 foreground service が記録時点で `hex_id` を確定し `location_point` に保存、Pigeon 経由で Dart へ渡す。`packages/core` が定義する `HexLocator` 抽象の本番実装（`packages/location` の `RecordedHexLocator`）は `GeoPosition.hexId`（Kotlin側で確定済みの値）を返すだけで、変換ロジック自体は持たない。以前の暫定実装（Dart側・`h3_flutter`。Issue #107・#115）は撤去済み。
 - **位置記録 foreground service は実装済み（Issue #123・2026-09-11・T046〜T048）**: fused location provider・距離ベースサンプリング（暫定値・T015で確定）・単調時計 `elapsedRealtime` で記録し、Kotlin 側所有の専用DB（`location_track.sqlite`）へ直接書き込む。**Drift 管理下のゲーム状態DB（`disclosed_hex` 等）には書き込まない**（スキーマの二重管理を避けるため。理由・スキーマ・受け渡し方法の詳細は `docs/location-track-db.md`）。
 - **Pigeon platform channel・`NativePositionProvider` は実装済み（Issue #124・2026-09-11・T049・T050、Issue #131 で位置データの経路を変更）**。**`location_track.sqlite` を開くのは Kotlin だけ**であり、`NativePositionProvider`（`packages/location`）は Pigeon の host API（`pigeons/location_api.dart`・`LocationTrackingHostApi.getLocationPoints`）で Kotlin から位置データを受け取る（上図の `loc -> pigeon -> fg -> trackdb`）。Pigeon は起動・停止・状態問い合わせという制御面もあわせて運ぶ。⚠️ 当初（Issue #124）は Dart が `package:sqlite3` でこのファイルを読み取り専用で直接開いていたが、**同じアプリプロセス内で2つの SQLite（Kotlin 側は Android 標準、Dart 側は同梱版）が同じ WAL ファイルを扱うとロックの協調が成り立たず**（[sqlite.org「How To Corrupt An SQLite Database File」§2.2.1](https://www.sqlite.org/howtocorrupt.html)）、新しい位置が Dart に届かない不具合が実機で再現したため撤回した（Issue #131・2026-09-11 代表決定）。**同じ SQLite ファイルを Kotlin と Dart の両方から開いてはならない**（今後ファイルを追加する場合も同じ）。Pigeon の `StandardMessageCodec` はバイナリ形式で Kotlin の `Long` ⇔ Dart の `int`（64bit）をそのまま運ぶため、`elapsed_realtime_nanos` の 2^53 丸め（`docs/terrain.md` §4.4 は JSON 経路の話）は起きない。`GeoPosition`（`packages/core`）には本 Issue でプラットフォーム中立な `spoofSuspected`（既定 false）・`trackingSessionId`（既定 null）を追加し、`location_track.sqlite` の `possible_mock_location`・`session_id` 列をそのまま写す（判定ロジック自体は Issue #126）。
 - **図中の点線ノード（モック検出・歩数突合・Health Connect・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T099・T101・T102・T105）。実装が完了するまで実線には変更しない。

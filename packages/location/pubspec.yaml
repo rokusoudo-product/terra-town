@@ -58,25 +58,13 @@ dependencies:
   # ゲーム状態DB・地域パックDB それぞれのファイルパス解決に使用する。
   path_provider: ^2.1.6
 
-  # 緯度経度→ヘクスID変換（Issue #101 `HexLocator` 抽象の実装・Issue #115）。
-  #
-  # 【暫定実装であることの明記・Issue #107（2026-09-10 代表決定）】
-  # 当面は Dart 側（本パッケージ）で h3_flutter を使って実装する。
-  # 位置記録基盤（tasks.md T046〜T049・Issue #10）に着手する時点で、
-  # 同じ変換ロジックを Kotlin 側（案B）へ寄せる予定（追跡: Issue #108・`future`）。
-  # それまでの先行実装であり、恒久的な実装場所の決定ではない。
-  #
-  # `h3_dart` ではなく `h3_flutter` を使う理由: `h3_dart` は `h3_ffi` に直接依存する
-  # 素の Dart パッケージで Flutter プラグインの形（Android/iOS へのネイティブライブラリ
-  # 同梱・アセット登録）を取らないため、Flutter アプリからそのまま使うには
-  # `h3_flutter`（`h3_ffi`/`h3_web`/`h3_common` を Flutter プラグインとして束ねたもの）
-  # を使うのが正しい（Issue #115 本文で明示）。
-  #
-  # バージョン: `docs/terrain.md` §4.2 の代表決定（2026-09-08・Issue #38）により、
-  # H3 v4 世代の API（`geoToCell`/`cellToGeo` 等）を使うこと。`h3_flutter` 0.7.x
-  # （`h3_common`/`h3_ffi` 0.7.x）がこの世代の API を提供することを確認済み
-  # （`h3_common` の `H3.geoToCell(GeoCoord, int) -> H3Index`。`H3Index` は `BigInt`）。
-  h3_flutter: ^0.7.0
+  # 【Issue #108・2026-09-11】緯度経度→ヘクスID変換（`HexLocator` 抽象の実装）は
+  # Kotlin 側（`app/android/app/src/main/kotlin/jp/rokusoudo/terra_town/location/
+  # H3HexIndexer.kt`）へ移行済み。以前ここにあった `h3_flutter: ^0.7.0`（Issue #115の
+  # 暫定実装・Issue #107「位置記録基盤に着手するまでの暫定」）は撤去した。
+  # 本番実装（`RecordedHexLocator`・`src/position/recorded_hex_locator.dart`）は
+  # `GeoPosition.hexId`（Pigeon 経由で Kotlin から受け取り済みの値）を返すだけであり、
+  # H3 のネイティブ依存を Dart 側に持たない。
 
 dev_dependencies:
   flutter_test:

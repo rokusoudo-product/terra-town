@@ -79,6 +79,47 @@ void main() {
       );
     });
 
+    // Issue #108: hexId を省略しても既存の生成箇所（本ファイルの他のテストも含む）が
+    // 壊れないことを保証する（spoofSuspected・trackingSessionId と同じ方針）。
+    test('hexId を省略すると既定値（null）になる', () {
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 9),
+      );
+
+      expect(position.hexId, isNull);
+    });
+
+    test('hexId を明示的に指定できる（2^53超の値でも精度を落とさない）', () {
+      const measuredMaxHexId = 626833456793083903;
+      final position = GeoPosition(
+        latitude: 35.0,
+        longitude: 135.0,
+        timestamp: DateTime.utc(2026, 9, 9),
+        hexId: const HexId(measuredMaxHexId),
+      );
+
+      expect(position.hexId, const HexId(measuredMaxHexId));
+    });
+
+    test('hexId が異なれば等価にならない', () {
+      final at = DateTime.utc(2026, 9, 9);
+      final base = GeoPosition(latitude: 35.0, longitude: 135.0, timestamp: at);
+
+      expect(
+        base,
+        isNot(
+          GeoPosition(
+            latitude: 35.0,
+            longitude: 135.0,
+            timestamp: at,
+            hexId: const HexId(1),
+          ),
+        ),
+      );
+    });
+
     test('緯度が範囲外（-90.0〜90.0 の外）だと assert で弾く', () {
       expect(
         () => GeoPosition(

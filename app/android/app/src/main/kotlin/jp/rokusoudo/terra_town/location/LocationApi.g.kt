@@ -421,7 +421,31 @@ data class LocationPointMessage (
   /** `location_point.accuracy_meters`。値が無い fix は null。 */
   val accuracyMeters: Double? = null,
   /** `location_point.possible_mock_location`（0/1）を bool にしたもの。 */
-  val possibleMockLocation: Boolean
+  val possibleMockLocation: Boolean,
+  /**
+   * `location_point.hex_id`（Issue #108）。緯度経度から Kotlin 側（[H3HexIndexer]
+   * 相当・`app/android/app/src/main/kotlin/jp/rokusoudo/terra_town/location/`）が
+   * 記録時点で計算した H3 インデックス（解像度11・`docs/terrain.md` §4.2）。
+   *
+   * ## non-null にした理由（判断に迷った点・PR本文にも記載）
+   * DB列自体（`location_point.hex_id`）は NULL 許容である（Issue #108・
+   * `docs/location-track-db.md` §4「移行手順」。SQLite は既定値なしの列を
+   * `ALTER TABLE` で `NOT NULL` として追加できないため）。しかし
+   * (1) v1→v2 マイグレーションが既存行を全件バックフィルする、
+   * (2) 新規行は [LocationTrackingService.recordPoint] が必ず値を計算して渡す、
+   * という2点により、schema_version 2 に到達した時点で「値が無い行」は実運用上
+   * 存在しない。Dart 側の消費者（[GeoPosition.hexId]・[HexLocator] 実装）にまで
+   * 「null かもしれない」という不確実性を伝播させると、あらゆる呼び出し箇所で
+   * null チェックが必要になり、`plan.md` §2「Dart は読むだけ」という単純さが
+   * 損なわれる。そのため本フィールドは **non-null** とし、万一 Kotlin 側の
+   * `location_point.hex_id` が NULL の行に遭遇した場合（マイグレーション漏れ等の
+   * 実装バグ）は、Kotlin 側（`LocationTrackDatabaseHelper.selectPointsAfter`）が
+   * Dart に渡す前に [IllegalStateException] を投げて気づけるようにしている
+   * （握りつぶして `0` 等の意味のある値に見えるダミー値を渡すことは、
+   * 「開示が静かに壊れる」という本プロジェクトが繰り返し避けてきた失敗様式に
+   * なるため採らない）。
+   */
+  val hexId: Long
 )
  {
   companion object {
@@ -433,7 +457,8 @@ data class LocationPointMessage (
       val longitude = pigeonVar_list[4] as Double
       val accuracyMeters = pigeonVar_list[5] as Double?
       val possibleMockLocation = pigeonVar_list[6] as Boolean
-      return LocationPointMessage(id, sessionId, elapsedRealtimeNanos, latitude, longitude, accuracyMeters, possibleMockLocation)
+      val hexId = pigeonVar_list[7] as Long
+      return LocationPointMessage(id, sessionId, elapsedRealtimeNanos, latitude, longitude, accuracyMeters, possibleMockLocation, hexId)
     }
   }
   fun toList(): List<Any?> {
@@ -445,6 +470,7 @@ data class LocationPointMessage (
       longitude,
       accuracyMeters,
       possibleMockLocation,
+      hexId,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -455,7 +481,7 @@ data class LocationPointMessage (
       return true
     }
     val other = other as LocationPointMessage
-    return LocationApiPigeonUtils.deepEquals(this.id, other.id) && LocationApiPigeonUtils.deepEquals(this.sessionId, other.sessionId) && LocationApiPigeonUtils.deepEquals(this.elapsedRealtimeNanos, other.elapsedRealtimeNanos) && LocationApiPigeonUtils.deepEquals(this.latitude, other.latitude) && LocationApiPigeonUtils.deepEquals(this.longitude, other.longitude) && LocationApiPigeonUtils.deepEquals(this.accuracyMeters, other.accuracyMeters) && LocationApiPigeonUtils.deepEquals(this.possibleMockLocation, other.possibleMockLocation)
+    return LocationApiPigeonUtils.deepEquals(this.id, other.id) && LocationApiPigeonUtils.deepEquals(this.sessionId, other.sessionId) && LocationApiPigeonUtils.deepEquals(this.elapsedRealtimeNanos, other.elapsedRealtimeNanos) && LocationApiPigeonUtils.deepEquals(this.latitude, other.latitude) && LocationApiPigeonUtils.deepEquals(this.longitude, other.longitude) && LocationApiPigeonUtils.deepEquals(this.accuracyMeters, other.accuracyMeters) && LocationApiPigeonUtils.deepEquals(this.possibleMockLocation, other.possibleMockLocation) && LocationApiPigeonUtils.deepEquals(this.hexId, other.hexId)
   }
 
   override fun hashCode(): Int {
@@ -467,10 +493,11 @@ data class LocationPointMessage (
     result = 31 * result + LocationApiPigeonUtils.deepHash(this.longitude)
     result = 31 * result + LocationApiPigeonUtils.deepHash(this.accuracyMeters)
     result = 31 * result + LocationApiPigeonUtils.deepHash(this.possibleMockLocation)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.hexId)
     return result
   }
   override fun toString(): String {
-    return "LocationPointMessage(id=$id, sessionId=$sessionId, elapsedRealtimeNanos=$elapsedRealtimeNanos, latitude=$latitude, longitude=$longitude, accuracyMeters=$accuracyMeters, possibleMockLocation=$possibleMockLocation)"
+    return "LocationPointMessage(id=$id, sessionId=$sessionId, elapsedRealtimeNanos=$elapsedRealtimeNanos, latitude=$latitude, longitude=$longitude, accuracyMeters=$accuracyMeters, possibleMockLocation=$possibleMockLocation, hexId=$hexId)"
   }
 }
 private open class LocationApiPigeonCodec : StandardMessageCodec() {
