@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Issue #123 (T046)。位置記録 foreground service の常駐通知文言。
+         DESIGN.md には本サービスの通知固有トークン定義がまだない（PR本文で要確認として報告）。
+         暫定として、罰しないトーン（DESIGN.md §「偽装検出時の通知」と同じ方針）に合わせ、
+         中立的な文言にしている。 -->
+    <string name="location_tracking_notification_channel_name">現在地の記録</string>
+    <string name="location_tracking_notification_title">terra_town が現在地を記録しています</string>
+    <string name="location_tracking_notification_text">街の開拓のために移動を記録中です</string>
+</resources>

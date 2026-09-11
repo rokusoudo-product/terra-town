@@ -4,6 +4,7 @@
 > **MVP の外部通信はゼロ**（対象1エリアの地域パックは**アプリに同梱**・`plan.md` §3.3。通信ゼロ・規約リスクゼロ・プライバシー完全）。**歩行位置はサーバに送信しない。**
 > 都道府県/市域単位に広げる**拡張フェーズ**（下記）で初めて地域パックの静的ホスティングからの初回DLが発生するが、これは MVP の構成要素ではない。
 > 変更を伴う実装をしたら、コードと同じコミットで本図と README を更新する。
+> 位置記録DB（`location_track.sqlite`）のスキーマ・受け渡し方法の詳細は [docs/location-track-db.md](location-track-db.md)（Issue #123・#124）。
 
 ## MVP 構成（端末内完結・外部通信ゼロ）
 
@@ -18,20 +19,24 @@ flowchart TB
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画集計<br/>抽象を定義: PositionProvider / HexLocator / RegionPack"]
             loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator は h3_flutter・当面Dart側）"]
         end
-        subgraph native["Kotlin ネイティブ platform channel（未実装・予定）"]
-            fg["foreground service<br/>fused location・距離ベース記録・elapsedRealtime<br/>(未実装・T046-T050／Pigeon 契約含む)"]
+        subgraph native["Kotlin ネイティブ"]
+            fg["foreground service<br/>fused location・距離ベース記録（暫定15m＋5分上限・T015で確定）・elapsedRealtime<br/>✅ 実装済み（Issue #123・T046〜T048）"]
+            pigeon["Pigeon platform channel<br/>NativePositionProvider<br/>(未実装・Issue #124・T049〜T050)"]
             anti["モック検出・速度/テレポート判定・歩数センサー突合<br/>(未実装・T099・T101)"]
             health["Health Connect（オプトイン）<br/>(未実装・T102)"]
         end
-        subgraph store["端末内ストレージ（SQLite / Drift・接続を分離）"]
-            gamedb[("ゲーム状態DB<br/>disclosed_hex（開示済みヘクス・開示時点の地形分類スナップショット terrainType）<br/>inventory・building・district_progress・collection 等")]
+        subgraph store["端末内ストレージ（SQLite・接続を分離）"]
+            gamedb[("ゲーム状態DB（Drift管理）<br/>disclosed_hex（開示済みヘクス・開示時点の地形分類スナップショット terrainType）<br/>inventory・building・district_progress・collection 等")]
+            trackdb[("位置記録DB（Kotlin所有・別ファイル・Drift管理下ではない）<br/>location_track.sqlite: location_point（session_id・elapsedRealtimeNanos・緯度経度・accuracy・possible_mock_location 等）<br/>Dart は読み取り専用で開く予定（Issue #124・docs/location-track-db.md）")]
             pack[("地域パック DB（読取専用・別接続）<br/>tiles.mbtiles（表示専用ベクタタイル）<br/>region_pack.sqlite: cell_terrain / hex_terrain（境界 boundary_geojson は生成時に事前計算済） / district / hex_district / poi / pack_meta")]
         end
         exp["エクスポート/インポート<br/>端末内ファイル・共有シート（サーバに送らない）<br/>(未実装・T105)"]
     end
 
-    user -.GPS移動（未実装）.-> fg
-    fg -.-> gamedb
+    user -->|GPS移動| fg
+    fg --> trackdb
+    trackdb -.読取専用（未実装）.-> pigeon
+    pigeon -.-> loc
     anti -.-> core
     health -.オプトイン（未実装）.-> core
     loc -->|core の抽象を実装| core
@@ -54,7 +59,7 @@ flowchart TB
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
     classDef planned stroke-dasharray: 5 5,fill:#f5f5f5,stroke:#9e9e9e;
     class core pure
-    class native,fg,anti,health,exp planned
+    class pigeon,anti,health,exp planned
 ```
 
 **図の注記（実装済みの主要設計決定）**:
@@ -64,7 +69,8 @@ flowchart TB
 - **ヘクス境界の事前計算（Issue #105）**: フォグ表示に使うヘクスの六角形境界（GeoJSON）は実行時に計算せず、パック生成時に `hex_terrain.boundary_geojson` として算出・格納済みのものを読み込む。
 - **`maplibre_gl` は暫定的に git 依存**（上流の修正コミット固定。Android ビルドのブロッカー対応・plan.md §14 R1 追記）。Issue #92 で pub.dev 版 `^0.27.1` 以降が出次第、元の代表決定（Issue #55）に復帰する。
 - **`HexLocator`（緯度経度 → H3 インデックス変換）は当面 `packages/location` 側（Dart・`h3_flutter`）で実装**し、`packages/core` がその抽象を定義する。将来 Kotlin ネイティブ側へ寄せる予定（Issue #107・#108）。
-- **図中の点線ノード（Kotlin ネイティブ層一式・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T046〜T050・T099・T101・T102・T105）。実装が完了するまで実線には変更しない。
+- **位置記録 foreground service は実装済み（Issue #123・2026-09-11・T046〜T048）**: fused location provider・距離ベースサンプリング（暫定値・T015で確定）・単調時計 `elapsedRealtime` で記録し、Kotlin 側所有の専用DB（`location_track.sqlite`）へ直接書き込む。**Drift 管理下のゲーム状態DB（`disclosed_hex` 等）には書き込まない**（スキーマの二重管理を避けるため。理由・スキーマ・受け渡し方法の詳細は `docs/location-track-db.md`）。
+- **図中の点線ノード（Pigeon platform channel・モック検出・歩数突合・Health Connect・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T049〜T050・T099・T101・T102・T105）。実装が完了するまで実線には変更しない。
 
 ## 依存方向（GPS_ARCHITECTURE 準拠）
 

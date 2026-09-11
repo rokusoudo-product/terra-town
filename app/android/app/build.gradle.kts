@@ -14,6 +14,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        // Issue #123: MainActivity のデバッグ専用フック（実機検証用。T059で削除予定）が
+        // BuildConfig.DEBUG を参照するため有効化する（AGP 8+ の既定は false）。
+        buildConfig = true
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "jp.rokusoudo.terra_town"
@@ -42,4 +48,15 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Issue #123 (T046): 位置記録 foreground service の fused location provider。
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // Issue #123 (T046): Android 14 (API 34) の foregroundServiceType="location" 要件を
+    // 満たすため ServiceCompat.startForeground(..., FOREGROUND_SERVICE_TYPE_LOCATION) を使う。
+    // このオーバーロードは Flutter embedding が推移的に持ち込む androidx.core より新しいバージョンを
+    // 要求するため明示的に依存を足す。
+    implementation("androidx.core:core-ktx:1.13.1")
 }
