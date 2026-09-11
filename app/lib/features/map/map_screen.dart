@@ -398,15 +398,28 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     final coordinator = _coordinator!;
     final disclosedHexRepository = _disclosedHexRepository!;
     final known = _known!;
-    final positionProvider = _positionProvider!;
 
     return Stack(
       children: [
         mapView,
         // 画面上部: レイヤー追加エラー（あれば）＋ 位置記録デバッグパネル
         // （Issue #124・T049・T050）を縦に並べる。位置記録パネルは fog レイヤーの
-        // 準備完了を待つ必要が無いため常に表示する。composition root と同じ
-        // NativePositionProvider インスタンスを共有する（重複ポーリングを避ける）。
+        // 準備完了を待つ必要が無いため常に表示する。
+        //
+        // ⚠️ composition root の NativePositionProvider（_positionProvider）は
+        // 本パネルに**共有してはならない**（advisor指摘・2026-09-11）。
+        // positionUpdates は broadcast Stream で `onListen`（履歴の全件再生・
+        // native_position_provider.dart クラスdoc「履歴の扱い」参照）は
+        // 0→1件目の購読者にのみ発火し、broadcast Stream は過去のイベントを
+        // 新しい購読者に再送しない。本パネルは fog レイヤーの準備を待たず
+        // build() の初回で即座に購読を始めるため、共有すると本パネルが
+        // 最初の購読者になってしまい、`onListen` の履歴再生が
+        // 「復元後に購読開始」する DisclosureCoordinator（_onFogLayerReady 参照）
+        // に届かなくなる（`_lastSeenId` が既に最新まで進んだ状態で
+        // coordinator が購読することになり、購読前に記録された位置の開示判定が
+        // 一切行われない）。そのため本パネルは自前の NativePositionProvider
+        // インスタンスを持たせる（重複ポーリングは発生するが、デバッグ専用の
+        // 読み取りのみのポーリングであり実害はない）。
         Positioned(
           left: 0,
           right: 0,
@@ -443,7 +456,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
                     ),
                   ),
                 ),
-              LocationTrackingDebugPanel(positionProvider: positionProvider),
+              const LocationTrackingDebugPanel(),
             ],
           ),
         ),

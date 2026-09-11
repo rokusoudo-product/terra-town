@@ -34,6 +34,18 @@ import 'package:terra_town_location/terra_town_location.dart' show hexIdToFeatur
 /// 既知のヘクスへ実機の移動で再度到達した際、[DisclosureService.recordPosition] が
 /// 「新規開示」と誤認しうる（`DisclosedHexRepository.save` は `insertOrIgnore` の
 /// ため実際の上書きは起きないが、無駄な処理・[known] への遅延登録は避けるべき）。
+///
+/// ## [positionUpdates] の最初の購読者は本クラスでなければならない（advisor 指摘）
+/// `NativePositionProvider.positionUpdates` は broadcast `StreamController` であり、
+/// `onListen`（購読開始時点の履歴の全件再生。`native_position_provider.dart`
+/// クラスdoc「履歴の扱い」参照）は 0→1件目の購読者にのみ発火し、broadcast
+/// Stream は過去に流したイベントを後から購読した相手に再送しない。そのため、
+/// もし [start] より先に**別の購読者**（例: デバッグパネルが独自に
+/// `positionUpdates` を購読する等）が現れると、履歴の再生はその購読者だけに
+/// 届き、本クラスは「購読を開始した以降に新しく届いた行」しか処理できなくなる
+/// （＝アプリを開く前に歩いた分の開示が一切行われない）。呼び出し側
+/// （`map_screen.dart`）は同じ `NativePositionProvider` インスタンスを
+/// デバッグパネルと共有してはならない。
 class DisclosureCoordinator {
   DisclosureCoordinator({
     required this.service,
