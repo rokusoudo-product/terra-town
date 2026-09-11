@@ -489,9 +489,14 @@ schema_version 1 のまま運用していた既存インストールへ上書き
    - `sqlite3 location_track.sqlite "SELECT value FROM location_track_meta WHERE key='schema_version';"` が `2` になっている。
    - `sqlite3 location_track.sqlite "SELECT COUNT(*) FROM location_point WHERE hex_id IS NULL;"` が `0`
      （既存行が全件バックフィルされている）。
-   - 移行前に記録されていた行の緯度経度から手計算（または `H3HexIndexerTest` と同じ
-     フィクスチャ生成スクリプトで単発計算）した `hex_id` と、実際に入っている値が
-     一致する。
+   - 移行前に記録されていた行の緯度経度から次のコマンドで単発計算した `hex_id` と、
+     実際に入っている値が一致する（`generate_hex_locator_fixture.py` は固定の37点
+     フィクスチャしか出力しないため、任意の緯度経度を単発計算するにはこちらを使う）:
+     ```bash
+     cd tools/pack-builder
+     ./.venv/bin/python -c "import h3; print(h3.str_to_int(h3.latlng_to_cell(LAT, LON, 11)))"
+     ```
+     （`LAT`/`LON` を実際の値に置き換える）
 
 **② hexId のパネル表示とDBの値の一致確認**（int64がPigeonで丸められていないかの
 実測。§8.4 のデバッグパネル確認と同じ流れに追加する）:
@@ -505,7 +510,31 @@ schema_version 1 のまま運用していた既存インストールへ上書き
    int64が丸められていないことの実測確認になる。`native_position_provider_test.dart`
    の合成値でのテストと合わせて、実測と単体テストの両方でカバーする）。
 
-**本 Issue（#123）のスコープはここまでの手順の用意であり、実施は代表が行う。**
+**③ h3-javaネイティブが実機で読み込めるかの確認（Issue #108・重要）**:
+
+実装中、`com.uber:h3:4.5.0` のネイティブ（`libh3-java.so`）をAPKに正しく同梱するには
+AGPの標準の `jniLibs` パッケージング（`build.gradle.kts` の `extractH3NativeLibs`
+タスク）が必要であることが判明し、修正済み（`unzip -l app-debug.apk` で
+`lib/arm64-v8a/libh3-java.so` 等が含まれることを確認済み）。加えて、Android実行時は
+`H3Core.newSystemInstance()`（`System.loadLibrary("h3-java")` 経由）を使うよう
+`H3HexIndexer` を実装している（`H3Core.newInstance()` はクラスパスリソース経由の
+読み込みで、AGPの通常パッケージングでは同梱されない別の仕組みのため）。
+
+**この一連の対応（APKへの同梱＋`newSystemInstance`の使用）が実機で実際に
+`H3Core` の初期化に成功するかどうかは、本Issueの実装セッションでは検証できていない
+（エミュレータはandroid-x86_64ネイティブが無いため使えず、実機も持たない）。
+以下を確認すること**:
+
+1. サービスを起動し、精度・距離ゲートを満たす位置で記録が発生することを確認する
+   （§8.2〜§8.4の手順）。
+2. `adb logcat` で `H3HexIndexer`/`IllegalStateException`（`H3Core の初期化に
+   失敗しました`）のクラッシュが出ていないことを確認する。
+3. 上記①・②の手順で `hex_id` が実際に埋まっていることを確認する（`hex_id` が
+   NULLのまま、またはアプリがクラッシュする場合は、`H3HexIndexer` のクラスdoc
+   「実行環境によって H3Core の初期化方法を分けている」の節を参照し、カスタム
+   ローダー〔`nativeLibraryDir` から直接 `System.load` する等〕への切り替えを検討する）。
+
+**本 Issue（#123・#108）のスコープはここまでの手順の用意であり、実施は代表が行う。**
 
 ## 9. Google Play 関連の申告事項（PR本文にも記載）
 

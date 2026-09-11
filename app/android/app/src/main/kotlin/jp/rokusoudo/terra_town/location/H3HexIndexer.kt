@@ -1,7 +1,7 @@
 package jp.rokusoudo.terra_town.location
 
 import com.uber.h3core.H3Core
-import java.io.IOException
+import java.util.Locale
 
 /**
  * 緯度経度 → H3 インデックス変換を行う Kotlin 側の実装（Issue #108）。
@@ -49,7 +49,48 @@ import java.io.IOException
  * フレームワーク API を呼ぶコードは単体テストで実行できない。[H3HexIndexer] を
  * 純粋な Kotlin + h3-java だけに保つことで、`H3HexIndexerTest`
  * （`app/android/app/src/test/kotlin/`）がエミュレータ・実機なしに JVM 上でそのまま
- * 実行できる。
+ * 実行できる。ただし [System.getProperty] で実行環境（JVM/Android）を見分ける必要は
+ * ある（次項）。
+ *
+ * ## ⚠️ 実行環境によって H3Core の初期化方法を分けている（重要・実装中に発覚した問題）
+ * h3-java には初期化方法が2つある:
+ * - [H3Core.newInstance]（`H3CoreLoader.loadNatives()`）: ネイティブを**クラスパス
+ *   リソース**（例: `/android-arm64/libh3-java.so`）として `getResourceAsStream` で
+ *   読み出し、一時ファイルに書き出してから `System.load(絶対パス)` する方式。
+ * - [H3Core.newSystemInstance]（`H3CoreLoader.loadSystemNatives()`）: OS標準の
+ *   ライブラリ検索パスから `System.loadLibrary("h3-java")` で読み込む方式（＝
+ *   「システムに既にインストール済みのネイティブを使う」用途のAPI）。
+ *
+ * 当初は Android でも [H3Core.newInstance] を使い、AGP の `jniLibs.srcDir`
+ * （`build.gradle.kts` の `extractH3NativeLibs` タスク）で `.so` を APK に同梱すれば
+ * 動くと想定していたが、これは誤りだった。**`jniLibs.srcDir` で同梱した `.so` は
+ * `lib/<ABI>/`（Android標準の共有ライブラリ検索パス）に配置されるだけであり、
+ * `getResourceAsStream("/android-arm64/libh3-java.so")` が探す「クラスパス上の
+ * リソースパス」とは全く別物**（前者はAndroidの `PackageManager` が
+ * `nativeLibraryDir` に展開する実ファイル、後者はAPK内のリソースエントリ）。
+ * 実際、`unzip -l app-debug.apk` で確認すると `lib/arm64-v8a/libh3-java.so` は
+ * 存在するが `android-arm64/libh3-java.so`（先頭スラッシュを除いたリソースパス）は
+ * 存在しない（AGPが `.so` 拡張子のファイルを通常の Java リソースマージから常に
+ * 除外し、`jniLibs` 側のパイプラインだけに回すため）。したがって Android で
+ * [H3Core.newInstance] を呼ぶと必ず失敗する。
+ *
+ * **正しい組み合わせ**: `jniLibs.srcDir` で `.so` を `lib/<ABI>/` に同梱すれば、
+ * Android が実行時に `ApplicationInfo.nativeLibraryDir` へ自動展開し、
+ * `System.loadLibrary("h3-java")`（＝ [H3Core.newSystemInstance]）が標準の
+ * JNI 検索パスでそれを見つけて読み込める。そのため本オブジェクトは、
+ * 実行環境が Android の場合は [H3Core.newSystemInstance]、そうでない場合
+ * （本リポジトリの JVM 単体テスト＝WSL・linux-x64）は従来どおり
+ * [H3Core.newInstance]（クラスパスリソース経由。jar内の `linux-x64/libh3-java.so`
+ * がそのまま使える）を呼ぶよう分岐する。Android かどうかの判定は
+ * `H3CoreLoader.detectOs` と同じ方法（`System.getProperty("java.vendor")` に
+ * "android" を含むか）を用いる。
+ *
+ * **⚠️ 実機未検証（PR本文にも明記）**: この分岐ロジック自体は h3-java の公開APIの
+ * 意図（`newSystemInstance` のJavadoc「システムに既にインストール済みのネイティブを
+ * 使う」）とAndroidの標準的なネイティブライブラリ展開の仕組みから導いた設計だが、
+ * 実機で `System.loadLibrary("h3-java")` が実際に成功することは未確認。秘書セッションが
+ * 実機で確認し、失敗する場合はカスタムローダー（`getResourceAsStream` の代わりに
+ * `nativeLibraryDir` から直接 `System.load` する等）への切り替えを検討すること。
  */
 object H3HexIndexer {
     /**
@@ -58,22 +99,34 @@ object H3HexIndexer {
      */
     const val RESOLUTION: Int = 11
 
+    /**
+     * 実行環境が Android かどうか。`H3CoreLoader.detectOs`（h3-java内部実装）と
+     * 同じ判定方法（`java.vendor` に "android" を含むか）を使う。
+     */
+    private val isAndroidRuntime: Boolean =
+        System.getProperty("java.vendor")?.lowercase(Locale.ENGLISH)?.contains("android") == true
+
     private val h3: H3Core by lazy {
         try {
-            H3Core.newInstance()
-        } catch (e: IOException) {
+            // クラスdoc「実行環境によって H3Core の初期化方法を分けている」参照。
+            if (isAndroidRuntime) H3Core.newSystemInstance() else H3Core.newInstance()
+        } catch (e: Throwable) {
             // 判断に迷った点（PR本文にも記載）: ネイティブライブラリのロード失敗を
             // 呼び出し元（LocationTrackingService.recordPoint）で握りつぶして
             // 位置の記録自体をスキップする案もあったが、それは「開示が静かに壊れる」
             // という本プロジェクトが繰り返し避けてきた失敗様式（Issue #50・#58等）と
             // 同種になる。fail-loud（例外を投げてクラッシュさせる）を選んだ。
+            // Throwable で受けているのは、newInstance() が投げる IOException（checked）と
+            // newSystemInstance() が投げる UnsatisfiedLinkError（Error のサブクラス。
+            // unchecked）の両方を同じ経路で包み直すため。
             // 実機（arm64/arm）での動作確認は本Issueのスコープ外（秘書セッションが
             // 実機確認を行う。PR本文「実機確認は未実施」参照）。
             throw IllegalStateException(
-                "H3Core の初期化に失敗しました（H3Core.newInstance()）。" +
-                    "既知の原因: com.uber:h3:4.5.0 の jar には android-x86_64 ネイティブ " +
-                    "（libh3-java.so）が同梱されていないため、x86_64 エミュレータでは " +
-                    "常に失敗します（android-arm64/android-arm の実機では発生しない想定）。",
+                "H3Core の初期化に失敗しました（isAndroidRuntime=$isAndroidRuntime）。" +
+                    "Android実機の場合は build.gradle.kts の extractH3NativeLibs タスクで " +
+                    "libh3-java.so が正しくAPKに同梱されているか確認してください。" +
+                    "x86_64エミュレータの場合はcom.uber:h3:4.5.0にandroid-x86_64ネイティブが" +
+                    "同梱されていないため常に失敗します（既知の制約）。",
                 e,
             )
         }
