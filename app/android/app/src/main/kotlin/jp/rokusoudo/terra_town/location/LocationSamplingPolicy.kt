@@ -48,19 +48,47 @@ data class LocationSamplingPolicy(
     val minUpdateIntervalMillis: Long = DEFAULT_MIN_UPDATE_INTERVAL_MILLIS,
 
     /**
-     * fused location provider の優先度。NFR-1「常時高精度GPSを使わない」に基づき、
-     * 既定は [Priority.PRIORITY_BALANCED_POWER_ACCURACY]（GPS単独より低電力・精度は粗くなりうる）。
-     * T015 で [Priority.PRIORITY_HIGH_ACCURACY] との比較実測を行うこと。
+     * fused location provider の優先度。
+     *
+     * ## 【2026-09-11 実機検証で判明した設計の矛盾・代表決定（案A）による変更】
+     * 当初は NFR-1「常時高精度GPSを使わない」に基づき既定を
+     * [Priority.PRIORITY_BALANCED_POWER_ACCURACY] にしていたが、実機（Pixel 7a）で
+     * **記録が1件も行われない**不具合が見つかった（PR #128 コメント「問題2」）。
+     *
+     * 原因は優先度と精度ゲート（[maxAcceptedAccuracyMeters]、既定30m）の**両立不可能な組み合わせ**:
+     * - Android 公式ドキュメントは `PRIORITY_BALANCED_POWER_ACCURACY` の精度を
+     *   「ブロック単位（約100m）」としており、GPS を使わず Wi-Fi/基地局測位に留まることが多い。
+     * - 実機の `dumpsys location` でも fused=100.0m・network=56.3m・gps(屋内)=156.9m と、
+     *   **全プロバイダが精度ゲート（30m）を超えていた**。
+     * - `docs/terrain.md` のヘクス解像度が約50mであるため、約100mの精度では開示判定にすら使えない。
+     *
+     * **代表決定（2026-09-11・案A）**: [Priority.PRIORITY_HIGH_ACCURACY] に変更する。
+     * 理由: このサービスは常駐サービスではなく、**アプリから明示的に起動したとき
+     * （`LocationTrackingService.Companion.start`）だけ動作し、`START_NOT_STICKY` で
+     * システムによる自動再起動もしない**。したがって「常時」高精度GPSを使うわけではなく、
+     * plan.md §7 の**意図**（アプリを使っていないときに電池を消費し続けない）は守られる、
+     * というのが代表の判断である。**この PR では `plan.md` §7 の文言自体は変更しない**
+     * （改定案は PR 本文に記載し、代表承認を得てから別 PR で反映する。plan.md はゲート②承認済み）。
+     *
+     * [distanceThresholdMeters]（15m）・[maxAcceptedAccuracyMeters]（30m）は据え置く。
+     * `PRIORITY_HIGH_ACCURACY` なら屋外で通常 5〜15m 程度の精度になることが期待され、
+     * 30mゲートとも両立するはず**だが、これはドキュメント・一般的傾向からの推測であり、
+     * 実測していない**。実際の値は T015（1時間の実歩行）で確認し、必要ならしきい値・優先度の
+     * 組み合わせを見直す。それでも電池消費が許容できない場合は、歩行検出による
+     * 優先度切り替え（案B）に進む段階的な進め方とする（PR #128 本文参照）。
      */
     val priority: Int = DEFAULT_PRIORITY,
 
     /**
      * この精度（半径メートル）より粗い fix は記録しない。
      *
-     * [DEFAULT_PRIORITY] が低電力優先のため、Wi-Fi/セル基地局測位由来の粗い fix
-     * （accuracy が数十〜100m規模になることがある）が混じりうる。これを
-     * [distanceThresholdMeters] に照らすと「精度誤差だけで移動したと誤判定される」おそれがあるため、
-     * 精度が粗すぎる fix はそもそも記録しない。既定値は距離しきい値の2倍（暫定・机上の値）。
+     * 既定値は距離しきい値の2倍（暫定・机上の値）。[DEFAULT_PRIORITY] を
+     * `PRIORITY_HIGH_ACCURACY` に変更した後も、この30mというゲート自体は変えていない
+     * （2026-09-11 代表決定・上記 [priority] のdoc参照）。高精度GPSであれば屋外で
+     * 通常このしきい値内に収まると見込むが、**これは推測であり T015 の実測で確定する**。
+     * 屋内・トンネル等では依然として超えることがあり、その場合は意図通り破棄される
+     * （破棄時はログに精度と累計破棄件数を出す。`LocationTrackingService.handleLocationFix`
+     * 参照・PR #128 コメント「問題3」）。
      */
     val maxAcceptedAccuracyMeters: Float = distanceThresholdMeters * 2f,
 ) {
@@ -69,7 +97,10 @@ data class LocationSamplingPolicy(
         const val DEFAULT_TIME_CAP_MILLIS: Long = 5 * 60 * 1000L // 5分
         const val DEFAULT_INTERVAL_MILLIS: Long = 15 * 1000L // 15秒
         const val DEFAULT_MIN_UPDATE_INTERVAL_MILLIS: Long = 5 * 1000L // 5秒
-        val DEFAULT_PRIORITY: Int = Priority.PRIORITY_BALANCED_POWER_ACCURACY
+
+        // 2026-09-11 代表決定（案A）: PRIORITY_BALANCED_POWER_ACCURACY → PRIORITY_HIGH_ACCURACY。
+        // 理由・矛盾の詳細は [priority] のdocコメント参照。
+        val DEFAULT_PRIORITY: Int = Priority.PRIORITY_HIGH_ACCURACY
 
         /**
          * 現在有効な方針。[LocationTrackingService] はこの値だけを参照する。
