@@ -11,26 +11,30 @@ related:
   - https://github.com/rokusoudo-product/terra-town/issues/123
   - https://github.com/rokusoudo-product/terra-town/issues/124
   - https://github.com/rokusoudo-product/terra-town/issues/10
+  - https://github.com/rokusoudo-product/terra-town/issues/131
 supersedes: null
 ---
 
 # 位置記録DB（`location_track.sqlite`）— スキーマと受け渡し方法
 
-> Issue #123（T046〜T048）で実装。**このドキュメントは Issue #124（Dart 側の読み取り実装・
-> `NativePositionProvider`）が読む前提の契約書**であり、実装（
+> Issue #123（T046〜T048）で実装。**このドキュメントは Issue #124・#131（Dart 側への
+> 読み取り実装）が読む前提の契約書**であり、実装（
 > `app/android/app/src/main/kotlin/jp/rokusoudo/terra_town/location/LocationTrackDatabase.kt`）
 > と同じ内容を保つこと。スキーマを変更した場合は同じPRで本ドキュメントも更新する。
 >
-> **2026-09-11 追記（Issue #124・実装済み）**: Dart 側の読み取り実装は
-> `packages/location/lib/src/db/location_track_connection.dart`（本ドキュメント §3 の
-> `OpenMode.readOnly` パターン・スキーマバージョン確認）・
-> `packages/location/lib/src/position/native_position_provider.dart`
-> （`PositionProvider` 実装・ポーリング方式・§5 のセッション境界を
-> `packages/core` の `GeoPosition.trackingSessionId` へ伝搬）に実装済み。
+> **2026-09-11 追記・訂正（Issue #131）**: 当初（Issue #124）は Dart 側が
+> `package:sqlite3` でこのファイルを直接読み取り専用オープンする設計だったが、実機検証
+> （PR #129・Pixel 7a）で、同一プロセス内に Kotlin（`android.database.sqlite`）と
+> Dart（`package:sqlite3`）という**2つの別々の SQLite** が同じ WAL ファイルを扱う構成に
+> なっており、これが SQLite 公式の警告する構成（§3参照）に該当し、Kotlin が記録した
+> 新しい行が Dart 側に最大2分以上届かない不具合を起こすことが判明した。**この方針は
+> 撤回し、`location_track.sqlite` を開くのは Kotlin だけにした。** Dart 側
+> （`packages/location/lib/src/position/native_position_provider.dart`）は Pigeon の
+> host API（`pigeons/location_api.dart`・`LocationTrackingHostApi.getLocationPoints`）
+> 経由で行を受け取る（旧実装 `location_track_connection.dart` は削除済み）。
 > `possible_mock_location` は `GeoPosition.spoofSuspected` へそのまま写す
-> （判定ロジック自体は Issue #126）。位置記録サービスの起動・停止・状態問い合わせは
-> 本ファイルの経路ではなく Pigeon（`pigeons/location_api.dart`）を使う
-> （位置データ自体は Pigeon を経由しない。理由は同ファイルのdocコメント参照）。
+> （判定ロジック自体は Issue #126）。位置記録サービスの起動・停止・状態問い合わせに加え、
+> 位置データそのものも Pigeon（`pigeons/location_api.dart`）経由で渡す。
 
 ## 1. なぜゲーム状態DB（Drift）と別ファイルにするのか
 
@@ -41,10 +45,10 @@ Dart 定義と Kotlin の DDL）に分裂し、Drift 側のマイグレーショ
 ずれたときに**例外を出さずに静かに壊れる**（Issue #123 本文・2026-09-11 代表決定②）。
 
 そのため、位置記録は完全に別ファイル `location_track.sqlite` に置く。**このファイルの
-スキーマの所有者は Kotlin 側のみ**。Dart 側（Issue #124）はこのファイルを
-読み取り専用として開くだけで、書き込みは一切行わない。
+スキーマの所有者は Kotlin 側のみ**。**Dart 側はこのファイルを一切開かない**
+（Issue #131・§3参照。Pigeon の host API 経由で行を受け取る）。
 
-## 2. ファイルの場所（Kotlin ⇔ Dart の受け渡し方法）
+## 2. ファイルの場所
 
 **保存先ディレクトリ**: `context.getDir("flutter", Context.MODE_PRIVATE)`
 （実体は `/data/user/<userId>/jp.rokusoudo.terra_town/app_flutter/`）。
@@ -52,19 +56,9 @@ Dart 定義と Kotlin の DDL）に分裂し、Drift 側のマイグレーショ
 これは Flutter エンジン自身の `io.flutter.util.PathUtils.getDataDirectory(Context)` の
 実装と**全く同じディレクトリ**である（`getDir("flutter", MODE_PRIVATE)` を呼んでおり、
 `context.getDir` はディレクトリが無ければ作成する。バイトコード〔`javap`〕で実装を確認済み・
-2026-09-11）。`path_provider` の Dart API では `getApplicationDocumentsDirectory()` が
-これに対応する。ゲーム状態DB（`game_state.sqlite`・`game_database.dart`）も同じ
-`getApplicationDocumentsDirectory()` を使っており、**このファイルと同じディレクトリに
-既に置かれている**。
-
-つまり、**Issue #124 は新しいプラットフォームチャンネルを介さず**、既存の
-`path_provider` の呼び出し（`getApplicationDocumentsDirectory()`）だけで
-このファイルを見つけられる:
-
-```dart
-final directory = await getApplicationDocumentsDirectory();
-final file = File(p.join(directory.path, 'location_track.sqlite'));
-```
+2026-09-11）。ゲーム状態DB（`game_state.sqlite`・`game_database.dart`）も
+`path_provider` の `getApplicationDocumentsDirectory()`（Dart API）で同じディレクトリを
+指しており、**このファイルと同じディレクトリに既に置かれている**。
 
 **ファイル名**: `location_track.sqlite`（`game_state.sqlite` と同じディレクトリ内の別ファイル。
 衝突しない）。
@@ -74,48 +68,94 @@ Kotlin 側の実装は `LocationTrackSchema.resolveDatabaseFile(context)`
 （`Context#getDatabasePath` は名前が `/` から始まる場合、そのディレクトリをそのまま使う、
 という Android フレームワークの既定動作を利用）。
 
-## 3. Dart 側で開く方法（Issue #124 向け・推奨）
+**2026-09-11 追記（Issue #131）**: 以前はこの節が「Dart 側は
+`getApplicationDocumentsDirectory()` を呼ぶだけでこのファイルを見つけて直接開ける」と
+案内していたが、**この経路（Dart が直接ファイルを開く）は§3の理由により廃止した**。
+現在、このディレクトリ・ファイルパスに触れるのは Kotlin 側の実装のみである。Dart 側
+（`NativePositionProvider`）はファイルパスを一切知らず、Pigeon の host API
+（`pigeons/location_api.dart`）を呼ぶだけになった。
 
-`packages/location/lib/src/db/region_pack_connection.dart`（地域パックDB・Issue #83）と
-**全く同じパターン**を踏襲することを推奨する:
+## 3. なぜ Kotlin だけがこのファイルを開くのか（Issue #131・重要な一般ルール）
 
-```dart
-final rawDatabase = sqlite3.sqlite3.open(
-  locationTrackFilePath,
-  mode: sqlite3.OpenMode.readOnly,
-);
-```
+> ⚠️ **一般ルール**: **同じ SQLite ファイルを Kotlin と Dart の両方から開いてはならない。**
+> これは `location_track.sqlite` に限らず、今後 Drift 管理下のゲーム状態DB
+> （`game_state.sqlite`）や新しい DB ファイルを追加する場合にも適用される。
 
-`OpenMode.readOnly` により、書き込み系SQL文は Dart 側のコーディング規約ではなく
-**SQLite 自身が `SQLITE_READONLY` でエラーにする**（構造的に書き込みを防ぐ）。
+### 3.1 当初の設計（Issue #124・撤回済み）とその破綻
 
-### WAL（Write-Ahead Logging）に関する注意（重要）
+当初は `packages/location/lib/src/db/region_pack_connection.dart`（地域パックDB・
+Issue #83）と同じパターンで、Dart 側が `package:sqlite3` を使い
+`sqlite3.sqlite3.open(path, mode: OpenMode.readOnly)` でこのファイルを直接
+読み取り専用オープンしていた（`OpenMode.readOnly` により書き込み系SQL文は
+`SQLITE_READONLY` でエラーになる、という構造的な安全策自体は妥当だった）。
 
-Kotlin 側は `enableWriteAheadLogging()` で WAL を有効にしている（書き込み側と読み取り側が
-同時にアクセスできるようにするため）。WAL 使用時は本体ファイルに加えて
-`location_track.sqlite-wal` / `location_track.sqlite-shm` のサイドカーファイルが生成され、
-**直近の書き込みは本体ファイルではなくこれらのサイドカーにしか無いことがある**。
+しかし **2026-09-11 の実機検証（PR #129・Pixel 7a）で、Kotlin が記録した新しい行が
+Dart 側に最大2分以上（ポーリング24回分）届かないことが決定的に再現した**
+（時系列の証拠は
+[PR #129 の検証コメント](https://github.com/rokusoudo-product/terra-town/pull/129#issuecomment-5629791422)）。
 
-- Dart 側で `sqlite3.open(path, mode: OpenMode.readOnly)` する場合、同じディレクトリに
-  `-wal`/`-shm` があれば SQLite が自動的に読みに行く（同一プロセス内・同一UIDなので
-  読み取り専用でも正しく動作する）。**`-wal`/`-shm` を消したり分離したりしないこと。**
-  接続を開く際にコピーする場合は3ファイルまとめてコピーする。読み取り専用で開く場合も
-  `-shm`（共有メモリインデックス）ファイルへの書き込み権限が必要になる点に注意
-  （同一アプリ内・同一ディレクトリなので通常は問題にならない）。
-- Dart の `sqlite3` パッケージ（`package:sqlite3`）は Android プラットフォームの SQLite とは
-  **別のSQLiteビルド**（バンドルされたネイティブライブラリ）を使うが、WAL フォーマットは
-  SQLite間で相互互換であるため、Kotlin（プラットフォームのSQLite）が書いた WAL を
-  Dart 側の別ビルドから問題なく読める。上記の「`-wal`/`-shm` を分離しない」というルールは
-  この互換性を活かすための運用ルールである。
-- サービスの `onDestroy()` は `LocationTrackDatabaseHelper#close()` を呼ぶ。**WALデータベースは
-  最後の接続が閉じられた時点で SQLite 自身が自動的にチェックポイントし `-wal`/`-shm` を
-  解消する**ため、明示的な `PRAGMA wal_checkpoint` を実行しなくても同じ効果が得られる
-  （あえて実行しない理由: `wal_checkpoint` は結果を1行返すPRAGMAであり、Android の
-  `SQLiteDatabase#execSQL` は行を返すSQL文を受け付けずOSバージョンによっては例外を投げる。
-  代表がサービスを止めてデータを取り出そうとした瞬間にクラッシュする事故を避けるため、
-  単純な `close()` に留めている）。**サービス停止後**であれば本体ファイル単体でも
-  直近データを含む（代表が `adb pull` で1ファイルだけ取り出す場合は、先にサービスを
-  止めることを推奨。§8.3参照）。
+**原因**: 同じアプリプロセスの中で、**2つの別々の SQLite** が同じ WAL ファイルを
+扱っていた。
+
+- Kotlin: Android 標準の SQLite（`android.database.sqlite`）
+- Dart: `package:sqlite3` + `sqlite3_flutter_libs` が同梱する SQLite
+
+これは SQLite 公式
+[How To Corrupt An SQLite Database File §2.2.1「Multiple copies of SQLite linked
+into the same application」](https://www.sqlite.org/howtocorrupt.html) が明示的に
+警告している構成である。POSIX のファイルロックはプロセス単位のため、同じプロセス内の
+別々の SQLite 実装同士は互いのロックを認識できず、WAL の共有メモリ（`-shm`）の協調が
+成り立たない。実機の症状（開く順序によっては届く・届かない、届くまで最大2分かかる、
+画面を開き直す＝新しい接続を開くとその時点までの行は見える）はこれと整合する
+（内部のメカニズムまでは追跡していない）。
+
+**やってはいけない直し方**（どちらも問題を残す。Issue #131 で明示的に不採用とした）:
+
+- **開く順序の調整**（Kotlin を先に開かせる）: 実機で「Kotlin が先に開けば届いた」
+  ことは確認したが、これは安全な構成になったわけではなく、問題が表に出なかっただけ。
+- **ポーリングごとに Dart の接続を開き直す**: 開くたびに `-shm` の初期化判定が走り、
+  Kotlin 側の WAL インデックスを壊しうる。現状より悪化する。
+
+### 3.2 修正後の設計（現在の実装）
+
+**`location_track.sqlite` を開くのは Kotlin（`LocationTrackDatabaseHelper`）だけ**にした。
+書き込み側（`LocationTrackingService`）と読み取り側（`LocationApiHandler`・Pigeon
+ハンドラ）は、`LocationTrackDatabaseHelper.getInstance(context)` が返す**プロセス内で
+共有された同一インスタンス**を使う（別々の `SQLiteOpenHelper` インスタンスを作らない。
+理由は同クラスのdoc参照）。Dart 側（`NativePositionProvider`）はこのファイルのパスさえ
+知らず、Pigeon の host API（`LocationTrackingHostApi.getLocationPoints`・`@async`）を
+呼んで行を受け取る（`pigeons/location_api.dart` 参照）。
+
+### WAL（Write-Ahead Logging）に関する注意
+
+Kotlin 側は `enableWriteAheadLogging()` で WAL を有効にしている（同一プロセス内の
+書き込み側接続と読み取り側接続——今は両方とも Android 標準 SQLite の、同じ
+`LocationTrackDatabaseHelper` インスタンスが管理する接続——が同時にアクセスできる
+ようにするため）。WAL 使用時は本体ファイルに加えて `location_track.sqlite-wal` /
+`location_track.sqlite-shm` のサイドカーファイルが生成され、**直近の書き込みは本体
+ファイルではなくこれらのサイドカーにしか無いことがある**。
+
+- **`-wal`/`-shm` を消したり分離したりしないこと。** 端末から取り出す場合は
+  常に3ファイルまとめてコピーすること（§8.3参照。以前の版は「サービス停止後なら
+  本体ファイル単体で取り出せる」としていたが、後述のとおり誤りだったため訂正した）。
+- ~~Dart の `sqlite3` パッケージ（`package:sqlite3`）は Android プラットフォームの
+  SQLite とは別のSQLiteビルドを使うが、WAL フォーマットは SQLite間で相互互換である
+  ため、Kotlin が書いた WAL を Dart 側の別ビルドから問題なく読める。~~
+  **この記述は「ファイル形式の互換性」としては正しいが、「同一プロセスでの同時利用」
+  については誤りだった（Issue #131・§3.1 参照）。ファイル形式が互換であることと、
+  同じプロセス内で2つの独立した SQLite 実装が同じ WAL ファイルに同時アクセスして
+  安全であることは別の問題であり、後者は SQLite 公式が明示的に警告している。**
+- **`LocationTrackDatabaseHelper` は明示的に `close()` しない**（Issue #131・
+  2026-09-11 決定）。以前はサービスの `onDestroy()` が `close()` を呼び、「WALデータベースは
+  最後の接続が閉じられた時点で自動的にチェックポイントされる」ことを期待していた。
+  しかしヘルパーを書き込み側・読み取り側で共有する現在の設計では、サービス停止時に
+  閉じると Pigeon ハンドラ側の読み取りが壊れる（次回読み取り時に接続を作り直す必要が
+  生じ、それ自体が §3.1「ポーリングごとに接続を開き直す」と同種の問題を Kotlin 側で
+  再現してしまう）。そのため**アプリのプロセスが生存している間、接続は開いたままにする**
+  （`LocationTrackDatabaseHelper.getInstance` のドキュメント参照）。WAL は SQLite が
+  既定で約1000ページごとに自動チェックポイントするため `-wal` が無制限に肥大化する
+  ことはないが、**「サービス停止＝チェックポイント済み」という前提はもう成り立たない**。
+  取り出しは常に3ファイル（本体・`-wal`・`-shm`）をまとめて行うこと（§8.3参照）。
 
 ## 4. スキーマ（DDL・実装からそのまま転記）
 
@@ -273,10 +313,16 @@ adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
 # 起動確認（"location" の foregroundServiceType が付いたサービスが見えるはず）
 adb shell dumpsys activity services jp.rokusoudo.terra_town
 
-# 停止（close()によりWALが自動的にチェックポイントされる。§3参照）
+# 停止
 adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
   --ez terra_town.debug.stopLocationService true
 ```
+
+**2026-09-11 訂正（Issue #131）**: 以前は上記コメントに「`close()` により WAL が自動的に
+チェックポイントされる」と書いていたが、`LocationTrackDatabaseHelper` はサービス停止時に
+`close()` しなくなった（§3.2参照。読み取り側〔Pigeon ハンドラ〕と共有しているため）。
+記録データを取り出す際は §8.3 のとおり常に3ファイル（本体・`-wal`・`-shm`）をまとめて
+取り出すこと。
 
 **`ACCESS_COARSE_LOCATION` のみを許可した場合の注意**: 大まかな位置（Wi-Fi/セル測位相当）
 は精度が数十〜100m規模になりやすく、`LocationSamplingPolicy.maxAcceptedAccuracyMeters`
@@ -320,19 +366,61 @@ adb shell dumpsys activity services jp.rokusoudo.terra_town
 
 ### 8.3 記録データの取り出し
 
-サービスを停止した後（§8.2）に取り出すと `-wal`/`-shm` を気にせず1ファイルで完結する:
+**2026-09-11 訂正（Issue #131）**: 以前は「サービスを停止した後に取り出すと `-wal`/`-shm`
+を気にせず1ファイルで完結する」としていたが、`LocationTrackDatabaseHelper` を
+サービス（書き込み）と Pigeon ハンドラ（読み取り）で共有し、サービス停止時にも
+`close()` しなくなった（§3.2参照）ため、**この前提はもう成り立たない**。
+サービスを止めても止めなくても、**常に3ファイル（本体・`-wal`・`-shm`）をまとめて
+取り出すこと**:
 
 ```bash
 adb shell run-as jp.rokusoudo.terra_town \
   cat app_flutter/location_track.sqlite > location_track.sqlite
+adb shell run-as jp.rokusoudo.terra_town \
+  cat app_flutter/location_track.sqlite-wal > location_track.sqlite-wal
+adb shell run-as jp.rokusoudo.terra_town \
+  cat app_flutter/location_track.sqlite-shm > location_track.sqlite-shm
 sqlite3 location_track.sqlite "SELECT COUNT(*), MIN(id), MAX(id) FROM location_point;"
 sqlite3 location_track.sqlite "SELECT * FROM location_point ORDER BY id DESC LIMIT 20;"
 ```
 
-サービスを止めずに取り出したい場合は `-wal`/`-shm` も一緒に `run-as cat` すること
-（3ファイルとも同じ `app_flutter/` 配下にある）。
+`-wal`/`-shm` が存在しない（まだ一度もチェックポイントをまたいでいない、または
+記録が無い）場合、上記2つの `run-as cat` はエラーになるが無視してよい
+（本体ファイルだけで完結する。SQLite が起動時に自動でチェックポイント済みと判断する）。
 
-### 8.4 T015（1時間の実歩行・電池と測位品質の計測）手順案
+### 8.4 実機確認手順（Issue #131・回帰確認）
+
+⚠️ **この不具合は単体テストでは構造的に検出できない**（`native_position_provider_test.dart`
+はフェイクの [LocationPointsApi] を使っており、Kotlin/Dart 双方の実際の SQLite 実装が
+同一プロセスで同じファイルを扱う状況そのものを再現できない）。回帰確認は実機のみで行う
+（代表・秘書セッションが実施）。
+
+**両方の順序**で確認すること（Issue #131 の再現手順・PR #129 検証コメントと同じ2パターン）。
+いずれも、Kotlin が記録した新しい行が**ポーリング2回以内**（既定 `pollInterval` は5秒なので
+概ね10秒以内）にデバッグパネルの「受信した位置」欄に増えることを確認する。
+
+**① サービス停止中に画面を開く→起動**（旧不具合の主な再現条件）:
+
+1. サービスが停止していることを確認する（§8.2「起動確認」で見えないこと）。
+2. アプリの画面を開く（デバッグパネルの `NativePositionProvider` が購読を始める）。
+3. デバッグパネルの「起動」（または §8.2 の adb コマンド）でサービスを起動する。
+4. 位置権限があり、屋外など精度ゲート（§6）を満たす環境であれば、しばらくして
+   `location_point` に新しい行が記録される（`adb logcat` の「位置記録」ログ、または
+   §8.3 の手順で確認できる）。
+5. **その新しい行が、デバッグパネルの「受信した位置」欄にポーリング2回以内
+   （約10秒以内）に反映されることを確認する。**
+
+**② サービス稼働中に画面を開き直す**:
+
+1. サービスを稼働させたまま、アプリの画面を一度閉じて開き直す（新しい
+   `NativePositionProvider` の購読が始まる）。
+2. 稼働中のサービスが次の行を記録するのを待つ。
+3. **①と同じく、ポーリング2回以内にデバッグパネルへ反映されることを確認する。**
+
+いずれの順序でも②と同等の速さで届けば、Issue #131 の不具合（開く順序に依存して
+最大2分以上届かないことがある）は解消している。
+
+### 8.5 T015（1時間の実歩行・電池と測位品質の計測）手順案
 
 1. 上記手順でサービスを起動する（屋外・都市部マルチパスを含むルートを歩く）。
 2. 端末の「設定 → バッテリー → アプリごとの使用量」で terra_town の1時間あたりの
