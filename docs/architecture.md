@@ -1,10 +1,11 @@
 # terra-town 環境構成図（MVP / ゲート②）
 
 > spec-kit plan 工程の環境構成図。MVP は **端末内完結（ステートフルなバックエンドなし）**。
-> 外部との通信は「地域パックの初回ダウンロード（静的ファイル・任意）」のみで、**歩行位置はサーバに送信しない**。
+> **MVP の外部通信はゼロ**（対象1エリアの地域パックは**アプリに同梱**・`plan.md` §3.3。通信ゼロ・規約リスクゼロ・プライバシー完全）。**歩行位置はサーバに送信しない。**
+> 都道府県/市域単位に広げる**拡張フェーズ**（下記）で初めて地域パックの静的ホスティングからの初回DLが発生するが、これは MVP の構成要素ではない。
 > 変更を伴う実装をしたら、コードと同じコミットで本図と README を更新する。
 
-## MVP 構成（端末内完結）
+## MVP 構成（端末内完結・外部通信ゼロ）
 
 ```mermaid
 flowchart TB
@@ -14,50 +15,56 @@ flowchart TB
         direction TB
         subgraph flutter["Flutter アプリ (Dart)"]
             ui["UI 層<br/>地図・建設・図鑑・HUD<br/>(MapLibre GL / Material 3)"]
-            core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画集計<br/>抽象: PositionProvider / TileId / TerrainType"]
-            loc["packages/location<br/>GPS変換・地図SDK連携<br/>(core の抽象を実装)"]
+            core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画集計<br/>抽象を定義: PositionProvider / HexLocator / RegionPack"]
+            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator は h3_flutter・当面Dart側）"]
         end
-        subgraph native["Kotlin ネイティブ (platform channel / Pigeon)"]
-            fg["foreground service<br/>fused location・距離ベース記録<br/>elapsedRealtime"]
-            anti["モック検出 / 速度・テレポート判定 / 歩数センサー"]
-            health["Health Connect（オプトイン）"]
+        subgraph native["Kotlin ネイティブ platform channel（未実装・予定）"]
+            fg["foreground service<br/>fused location・距離ベース記録・elapsedRealtime<br/>(未実装・T046-T050／Pigeon 契約含む)"]
+            anti["モック検出・速度/テレポート判定・歩数センサー突合<br/>(未実装・T099・T101)"]
+            health["Health Connect（オプトイン）<br/>(未実装・T102)"]
         end
-        subgraph store["端末内ストレージ"]
-            gamedb[("ゲーム状態 SQLite<br/>開示ヘクス(bitmap)・資材・建物・区画・図鑑")]
-            pack[("地域パック（読取専用）<br/>MBTiles ＋ mesh_terrain ＋ 行政区域 ＋ POI")]
+        subgraph store["端末内ストレージ（SQLite / Drift・接続を分離）"]
+            gamedb[("ゲーム状態DB<br/>disclosed_hex（開示済みヘクス・開示時点の地形分類スナップショット terrainType）<br/>inventory・building・district_progress・collection 等")]
+            pack[("地域パック DB（読取専用・別接続）<br/>tiles.mbtiles（表示専用ベクタタイル）<br/>region_pack.sqlite: cell_terrain / hex_terrain（境界 boundary_geojson は生成時に事前計算済） / district / hex_district / poi / pack_meta")]
         end
-        exp["エクスポート/インポート<br/>（機種変更対策・端末内/共有シート）"]
+        exp["エクスポート/インポート<br/>端末内ファイル・共有シート（サーバに送らない）<br/>(未実装・T105)"]
     end
 
-    subgraph static["🌐 静的ホスティング（BEではない・初回DLのみ）"]
-        cdn["地域パック配布<br/>GitHub Releases / Cloudflare R2 等<br/>※地域選択のみ漏れる・歩行位置は送らない"]
-    end
-
-    subgraph ci["🛠 CI / ビルド時のみ（実行時サーバではない）"]
-        planetiler["Planetiler / osmium<br/>OSM日本抽出→ベクタタイル＋ヘクス地形属性 事前計算"]
-        osm["OpenStreetMap (ODbL)<br/>国土数値情報 N03（行政区域）"]
-    end
-
-    user -->|GPS移動| fg
-    fg --> gamedb
-    anti --> core
-    health -.オプトイン.-> core
-    loc <--> core
+    user -.GPS移動（未実装）.-> fg
+    fg -.-> gamedb
+    anti -.-> core
+    health -.オプトイン（未実装）.-> core
+    loc -->|core の抽象を実装| core
     ui <--> core
-    loc -->|表示専用タイル| pack
-    core -->|地形属性/区画/POI 参照| pack
+    loc -->|表示専用タイル読込| pack
+    core -->|地形属性は新規開示時のみ／区画・POIは常時 参照| pack
     core <--> gamedb
-    gamedb <--> exp
-    cdn -.初回のみDL.-> pack
+    gamedb -.-> exp
+
+    subgraph packbuild["🛠 パック生成パイプライン（手動実行・実行時サーバではない）"]
+        planetiler["tools/pack-builder/<br/>Python ＋ Planetiler（Java）<br/>OSM日本抽出 → ベクタタイル／ヘクス地形属性／区画／POI を事前計算"]
+        osm["OpenStreetMap (ODbL)<br/>国土数値情報 N03（行政区域）"]
+        ghaction["pack-build.yml<br/>（workflow_dispatch のみ・自動起動しない）"]
+    end
+
     osm --> planetiler
-    planetiler ==>|ビルド成果物| cdn
-    planetiler ==>|同梱| pack
+    ghaction -.手動起動.-> planetiler
+    planetiler ==>|生成 → アプリに同梱<br/>（生成物はコミットしない）| pack
 
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
-    classDef nobe fill:#fff3e0,stroke:#ef6c00;
+    classDef planned stroke-dasharray: 5 5,fill:#f5f5f5,stroke:#9e9e9e;
     class core pure
-    class static,cdn nobe
+    class native,fg,anti,health,exp planned
 ```
+
+**図の注記（実装済みの主要設計決定）**:
+
+- **開示時点スナップショット方式（Issue #96）**: 開示済みヘクスの地形分類の正は `disclosed_hex.terrainType`（開示した瞬間の値をスナップショットとして保存）であり、**地域パックを再度引き直すことはない**。地域パック（`hex_terrain`）を参照するのは「新規開示の瞬間」だけである。**区画（`district`）・名所 POI はスナップショットの対象外**で、常に現行の地域パックから解決する（区画は現在の区画定義に対する制覇率として意味を持つため。POI は `collection` テーブルが発見記録を別途担保するため）。
+- **fog of war は feature-state 方式（plan.md §8）**: 全ヘクスを起動時に1回だけ地図ソースへ追加し、開示は MapLibre の `feature-state` トグルで表現する。**地図側の feature-state は描画のための派生状態であり、開示状態の正ではない**（正は `disclosed_hex`）。`setStyle`（スタイル再読み込み）を呼ぶと feature-state は消えるため、その都度 `disclosed_hex` から再構築する。
+- **ヘクス境界の事前計算（Issue #105）**: フォグ表示に使うヘクスの六角形境界（GeoJSON）は実行時に計算せず、パック生成時に `hex_terrain.boundary_geojson` として算出・格納済みのものを読み込む。
+- **`maplibre_gl` は暫定的に git 依存**（上流の修正コミット固定。Android ビルドのブロッカー対応・plan.md §14 R1 追記）。Issue #92 で pub.dev 版 `^0.27.1` 以降が出次第、元の代表決定（Issue #55）に復帰する。
+- **`HexLocator`（緯度経度 → H3 インデックス変換）は当面 `packages/location` 側（Dart・`h3_flutter`）で実装**し、`packages/core` がその抽象を定義する。将来 Kotlin ネイティブ側へ寄せる予定（Issue #107・#108）。
+- **図中の点線ノード（Kotlin ネイティブ層一式・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T046〜T050・T099・T101・T102・T105）。実装が完了するまで実線には変更しない。
 
 ## 依存方向（GPS_ARCHITECTURE 準拠）
 
@@ -73,7 +80,29 @@ flowchart LR
 ```
 
 - `core/` は `location/`（GPS・地図SDK）を **import しない**。依存は `location/ → core/` の一方向。
-- pubspec 依存で物理強制し、CI で import 方向を静的チェックする。
+- `core/`（`packages/core`）は Flutter・地図SDK・SQLite にも依存しない（`packages/core/pubspec.yaml` に drift/sqlite 系の依存なし）。SQLite への接続（ゲーム状態DB・地域パックDBの2接続）はすべて `packages/location/lib/src/db/` が担い、`core` はそれを介さず事前に渡された値・抽象（`PositionProvider` / `HexLocator` / `RegionPack`）のみを扱う。
+- pubspec 依存で物理強制し、CI で import 方向を静的チェックする（`tools/check_import_direction.sh`）。
+
+## 拡張フェーズ（多地域対応・MVP には含まれない）
+
+> 対象1エリアのバーティカルスライス（本ページ冒頭の MVP 構成）を完成させたあと、都道府県/市域単位の複数パックへ広げる段階で導入する（`plan.md` §3.3）。**MVP の構成図（上記）にはこの節の要素は一切登場しない**。
+
+```mermaid
+flowchart TB
+    device2["📱 ユーザー端末<br/>（構成は MVP 構成図と同じ）"]
+
+    subgraph static["🌐 静的ホスティング（BEではない・初回DLのみ）"]
+        cdn["地域パック配布<br/>GitHub Releases / Cloudflare R2 等<br/>※地域選択のみ漏れる・歩行位置は送らない"]
+    end
+
+    cdn -.初回のみDL.-> device2
+
+    classDef nobe fill:#fff3e0,stroke:#ef6c00;
+    class static,cdn nobe
+```
+
+- 拡張フェーズに移行して初めて、地域パックの初回ダウンロード（静的ファイル・任意）が発生する。**それでも歩行位置はサーバに送信しない**（静的ファイル配信は BE ではない・§「BEなし」の定義は plan.md §3.1）。
+- ステートフルなバックエンドを持たない点は MVP と変わらない。ソーシャル機能導入（下記「将来」節・Issue #16）とは独立した軸であり、混同しない。
 
 ## 将来（#16 ソーシャル導入時に初めて BE）
 
