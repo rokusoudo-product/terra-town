@@ -17,9 +17,12 @@
 ///   - src/economy/    Resource・Inventory（T026〜T027・実装済み）
 ///   - src/disclosure/ HexLocator 抽象・DisclosureService（開示判定ロジック）
 ///                     （T054・実装済み。Issue #101）
+///   - src/antispoof/  SpeedFilter（移動平均平滑化後の速度による偽装対策判定）
+///                     （T100・実装済み。Issue #125）
 library;
 
 export 'src/terra_town_core_base.dart';
+export 'src/antispoof/speed_filter.dart';
 export 'src/disclosure/disclosure_service.dart';
 export 'src/disclosure/hex_locator.dart';
 export 'src/economy/inventory.dart';
