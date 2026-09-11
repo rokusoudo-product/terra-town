@@ -1,114 +1,106 @@
 import 'package:flutter/material.dart';
+import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import '../../design/spacing.dart';
+import '../disclosure/disclosure_restore.dart';
+import '../region_pack_asset.dart';
 
-/// fog of war の描画・トグルを代表が実機で確認するためのデバッグ専用パネル
-/// （Issue #100 の受け入れ基準「代表が実機で確認するための手順」に対応）。
+/// fog of war の描画・トグル・復元を代表が実機で確認するためのデバッグ専用パネル
+/// （Issue #100・Issue #102・Issue #137）。
 ///
 /// 【製品UIを汚さない】`app/lib/features/map/map_screen.dart` から
 /// `kDebugMode`（`package:flutter/foundation.dart`）配下でのみ組み込まれるため、
 /// release ビルドには一切現れない（`flutter build apk --debug` でのみ見える）。
 ///
-/// 【「1マス開示」「すべて開示」「霧に戻す」は合成データ】ここで開示するヘクスは
-/// 実際の地域パックのヘクスではない（`fog_debug_hex_grid.dart` 冒頭コメント参照）。
-/// あくまで「feature-state のトグルで実際に霧が晴れて見えるか」の確認が目的であり、
-/// 開示判定ロジック（T054）・永続化（T060）とは無関係の使い捨て操作である
-/// （このパネルの操作は `disclosed_hex` に一切書き込まない）。
+/// ## 2026-09-11（Issue #137）で「1マス開示」「すべて開示」を削除した理由
+/// 地図の fog ソースが実データ（`region_pack.sqlite` の実ヘクス。Issue #137で
+/// release ビルドを含む全ビルドへ配線した）に置き換わったため、旧来の合成ヘクス
+/// （`fog_debug_hex_grid.dart`・feature id 0〜60 の連番）はもはや同じソース上の
+/// 実在の feature id とは一致せず、これらのボタンで `setFeatureState` を呼んでも
+/// 画面上に対応するポリゴンが存在しないため何も見えず、確認手段として機能しない。
+/// 実ヘクスを対象にした「開示」の確認は、`disclosure_debug_panel.dart`
+/// （「地図の中心のヘクスを開示」・本番と同じ経路を通る）に一本化した。
 ///
-/// 【「本番相当…で計測」は実データ（Issue #105 で変更）】この計測ボタンだけは、
-/// 同梱地域パック（`region_pack.sqlite`）を実際に読み込み、
-/// `buildFogHexFeatureCollectionFromRegionPack`（`terra_town_location`）で
-/// 実ヘクス（本番パックなら13,106件）の GeoJSON FeatureCollection を組み立てて
-/// 計測する。表示中のデモ用fog（上記の合成データ）とは独立した一時ソースを
-/// 追加・計測・削除するため、デモの霧の見た目には影響しない。
+/// 「霧に戻す」（[FogOfWarController.resetAllForDebug]）と、新設した
+/// 「DBから復元」（[restoreDisclosedHexes]）は残す・追加する。理由:
+/// `FogOfWarController.resetAllForDebug`（内部で `removeFeatureState` を呼ぶ）は
+/// まさに `setStyle` が霧の状態を失わせるのと同じ種類の状態喪失を模しており、
+/// 「霧に戻す→DBから復元」の操作で、Issue #102 が要求する「`setStyle` 後の復元」を
+/// 実機で（`setStyle` を実際に呼ばなくても）確認できる唯一の手段になる。
 class FogOfWarDebugPanel extends StatefulWidget {
   const FogOfWarDebugPanel({
     super.key,
     required this.controller,
+    required this.repository,
+    required this.known,
     this.resolveRegionPackPath = defaultResolveRegionPackPath,
   });
 
   final FogOfWarController controller;
 
+  /// 「DBから復元」ボタンが読み込む、開示済みヘクスの永続化層
+  /// （`disclosed_hex` テーブル・Issue #102）。composition root
+  /// （`map_screen.dart`）と同じインスタンスを渡すこと。
+  final Repository<DisclosedHex, HexId> repository;
+
+  /// composition root と共有する開示済みヘクスの高速判定用インデックス。
+  /// 「DBから復元」はこれにも反映する（`restoreDisclosedHexes` 参照）。
+  final DisclosedHexSet known;
+
   /// 「本番相当…で計測」ボタンが読み込む同梱地域パック（`region_pack.sqlite`）の
-  /// ローカルファイルパスを解決する関数。テストでの差し替え用フック（既定は
-  /// 実アセットから解決する [defaultResolveRegionPackPath]）。
+  /// ローカルファイルパスを解決する関数。テストでの差し替え用フック。
   final Future<String> Function() resolveRegionPackPath;
-
-  /// デモ用の合成ヘクス数。[fog_debug_hex_grid.buildSyntheticFogHexFeatureCollection]
-  /// の既定 `firstFeatureId=0` と対応する連番 `0..demoHexCount-1` を使う。
-  static const demoHexCount = 61;
-
-  /// `app/pubspec.yaml` の `flutter.assets`（`assets/pack/`）で宣言済みの
-  /// 同梱地域パックのアセットキー（`map_screen.dart` の `mbtilesAssetKey` と対）。
-  static const regionPackAssetKey = 'assets/pack/region_pack.sqlite';
-
-  /// 実アセットから解決する既定実装。
-  ///
-  /// [resolveBundledMbtilesPath] は名前に反して「Flutter アセットバンドルの
-  /// 読み取り専用ファイルを、書き込み可能な実ファイルパスへ一度だけコピーする」
-  /// という汎用処理である（`mbtiles_asset.dart` の docstring 参照。MBTiles 専用の
-  /// ロジックはその後段の `mbtiles://` URL 組み立てのほうにあり、コピー処理自体は
-  /// ファイル形式に依存しない）。[RegionPackConnection.open] も `sqlite3` の
-  /// 読み取り専用オープンに実ファイルシステム上のパスを要求するため
-  /// （アセットバンドルは読み取り専用の仮想ファイルシステム）、`map_screen.dart` の
-  /// `mbtilesAssetKey` 解決と同じ関数をそのまま再利用する。
-  static Future<String> defaultResolveRegionPackPath() =>
-      resolveBundledMbtilesPath(
-        assetKey: regionPackAssetKey,
-        fileName: 'region_pack.sqlite',
-      );
 
   @override
   State<FogOfWarDebugPanel> createState() => _FogOfWarDebugPanelState();
 }
 
 class _FogOfWarDebugPanelState extends State<FogOfWarDebugPanel> {
-  int _nextToReveal = 0;
   bool _benchmarkRunning = false;
   String? _benchmarkResult;
 
-  bool get _allRevealed => _nextToReveal >= FogOfWarDebugPanel.demoHexCount;
-
-  Future<void> _revealNext() async {
-    if (_allRevealed) return;
-    await widget.controller.revealHex(_nextToReveal);
-    if (!mounted) return;
-    setState(() => _nextToReveal++);
-  }
-
-  Future<void> _revealAll() async {
-    for (var id = _nextToReveal; id < FogOfWarDebugPanel.demoHexCount; id++) {
-      await widget.controller.revealHex(id);
-    }
-    if (!mounted) return;
-    setState(() => _nextToReveal = FogOfWarDebugPanel.demoHexCount);
-  }
+  bool _restoring = false;
+  String? _restoreResult;
 
   Future<void> _resetFog() async {
     await widget.controller.resetAllForDebug();
     if (!mounted) return;
-    setState(() => _nextToReveal = 0);
+    setState(() => _restoreResult = null);
+  }
+
+  /// 「DBから復元」（Issue #102）: `disclosed_hex` に保存済みの開示ヘクスを
+  /// [restoreDisclosedHexes] で読み込み、[widget.known] へ反映しつつ地図の霧を
+  /// 解除する。composition root が起動時に行う復元と全く同じ関数を呼ぶ
+  /// （`disclosure_restore.dart` クラスdoc参照）。
+  Future<void> _restoreFromDatabase() async {
+    setState(() {
+      _restoring = true;
+      _restoreResult = null;
+    });
+    try {
+      final stats = await restoreDisclosedHexes(
+        repository: widget.repository,
+        known: widget.known,
+        reveal: widget.controller.revealHex,
+      );
+      if (!mounted) return;
+      setState(
+        () => _restoreResult = '復元しました: ${stats.hexCount}件 / ${stats.elapsedMs}ms',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _restoreResult = '復元に失敗しました: $e');
+    } finally {
+      if (mounted) setState(() => _restoring = false);
+    }
   }
 
   /// 受け入れ基準「本番パックのヘクス数（13,106）でのソース構築コストを計測する
-  /// 手順」に対応する。**2026-09-10・Issue #105 で実データに変更**: 同梱地域パック
-  /// （`region_pack.sqlite`）を実際に読み込み、格納済みのヘクス境界
-  /// （`hex_terrain.boundary_geojson`）から実ヘクスの GeoJSON FeatureCollection を
-  /// 組み立てて計測する（以前は合成グリッドで代用していた）。表示中のデモ用fogとは
-  /// 独立した一時ソースを追加・計測・削除する（デモの霧の見た目には影響しない）。
-  ///
-  /// 【research.md §6.4「2026-09-09 追加計測」との比較について】同節の「⑤合計」は
-  /// ①geometry生成 + ②addGeoJsonSource + ③addLayer + ④ソース追加後2000msの
-  /// 観測窓中のmaxFrame（フレームジャンク計測）の4項目の和である。本メソッドは
-  /// ①〜③のみを計測し、④（フレーム統計）は計測しない（本デバッグパネルは
-  /// 簡易なStopwatch計測に留め、専用のフレーム統計ハーネスは持たないため）。
-  /// そのため、ここで表示する「合計」は research.md の「合計約1.5秒」より
-  /// 小さく出る可能性がある。厳密な比較をする場合はこの差を考慮すること。
-  /// **①は Issue #105 で「procedural生成」から「SQLite読込+GeoJSON組立」に
-  /// 変わったため、Issue #100時点の①とは計測対象が異なる**（ディスクI/Oを含む
-  /// ぶん、こちらのほうが実態に近い数値になる）。
+  /// 手順」に対応する。同梱地域パック（`region_pack.sqlite`）を実際に読み込み、
+  /// 格納済みのヘクス境界（`hex_terrain.boundary_geojson`）から実ヘクスの GeoJSON
+  /// FeatureCollection を組み立てて計測する。表示中の本番fogとは独立した
+  /// 一時ソースを追加・計測・削除する（表示中の霧の見た目には影響しない）。
   Future<void> _runProductionScaleBenchmark() async {
     setState(() {
       _benchmarkRunning = true;
@@ -184,27 +176,18 @@ class _FogOfWarDebugPanelState extends State<FogOfWarDebugPanel> {
                 'フォグ デバッグパネル（デバッグビルドのみ表示）',
                 style: textTheme.labelMedium,
               ),
-              Text(
-                '開示済み: $_nextToReveal / ${FogOfWarDebugPanel.demoHexCount}'
-                '（合成データ。実際のヘクスではありません）',
-                style: textTheme.bodySmall,
-              ),
               const SizedBox(height: AppSpacing.xs),
               Wrap(
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.xs,
                 children: [
-                  FilledButton(
-                    onPressed: _allRevealed ? null : _revealNext,
-                    child: const Text('1マス開示'),
-                  ),
-                  OutlinedButton(
-                    onPressed: _allRevealed ? null : _revealAll,
-                    child: const Text('すべて開示'),
-                  ),
                   OutlinedButton(
                     onPressed: _resetFog,
-                    child: const Text('霧に戻す'),
+                    child: const Text('霧に戻す（setStyle相当の状態喪失を再現）'),
+                  ),
+                  OutlinedButton(
+                    onPressed: _restoring ? null : _restoreFromDatabase,
+                    child: Text(_restoring ? '復元中…' : 'DBから復元'),
                   ),
                   OutlinedButton(
                     onPressed: _benchmarkRunning
@@ -214,6 +197,10 @@ class _FogOfWarDebugPanelState extends State<FogOfWarDebugPanel> {
                   ),
                 ],
               ),
+              if (_restoreResult != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(_restoreResult!, style: textTheme.bodySmall),
+              ],
               if (_benchmarkResult != null) ...[
                 const SizedBox(height: AppSpacing.xs),
                 Text(_benchmarkResult!, style: textTheme.bodySmall),
