@@ -42,19 +42,18 @@ flowchart TB
             loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装"]
         end
         fg["Kotlin foreground service<br/>fused location・距離ベース記録・elapsedRealtime<br/>✅ 実装済み（Issue #123）"]
-        pigeon["Pigeon channel (LocationTrackingHostApi)<br/>起動/停止/状態問い合わせのみ<br/>✅ 実装済み（Issue #124）<br/>モック/速度検出・歩数・Health Connectは別途未実装"]
+        pigeon["Pigeon channel (LocationTrackingHostApi)<br/>起動/停止/状態問い合わせ＋位置データの取得<br/>✅ 実装済み（Issue #124・#131）<br/>モック/速度検出・歩数・Health Connectは別途未実装"]
         gamedb[("ゲーム状態 SQLite（Drift管理）<br/>disclosed_hex（開示時点の地形分類スナップショット）等")]
-        trackdb[("位置記録DB（Kotlin所有・別ファイル）<br/>location_track.sqlite。Dartは NativePositionProvider が読み取り専用で開く<br/>✅ 実装済み（Issue #124）")]
+        trackdb[("位置記録DB（Kotlin所有・別ファイル）<br/>location_track.sqlite。開くのは Kotlin だけ（Dart は開かない）<br/>✅ 実装済み（Issue #123・#131）")]
         pack[("地域パック（読取専用・別接続）<br/>tiles.mbtiles＋cell_terrain/hex_terrain（境界事前計算済）＋district＋poi")]
     end
 
     ci["🛠 パック生成（手動実行の CI）<br/>tools/pack-builder/（Planetiler＋Python）"]
 
     user -->|GPS移動| fg
-    fg --> trackdb
-    trackdb -->|読取専用（実装済み）| loc
-    loc -->|起動/停止/状態問い合わせ| pigeon
-    pigeon --> fg
+    fg <-->|書き込み・読み取り（Kotlin のみ）| trackdb
+    loc -->|起動/停止/状態問い合わせ・位置データ取得| pigeon
+    pigeon <--> fg
     ui <--> core
     loc -->|core の抽象を実装| core
     core <--> gamedb
@@ -66,6 +65,6 @@ flowchart TB
     class core pure
 ```
 
-> **位置データ自体は Pigeon を経由しない**（`docs/architecture.md`「図の注記」参照）。Kotlin/Dart が同じディレクトリ（`app_flutter/`）を見て `location_track.sqlite` を Dart 側が直接読み取り専用オープンする。Pigeon は位置記録サービスの起動・停止・状態問い合わせという制御面のみを扱う（64bit整数の丸め問題・効率の観点から意図的な設計。Issue #124）。
+> **`location_track.sqlite` を開くのは Kotlin だけ**（`docs/architecture.md`「図の注記」・`docs/location-track-db.md` 参照）。Dart（`NativePositionProvider`）は Pigeon の host API 経由で Kotlin から位置データを受け取る。当初（Issue #124）は Dart がこのファイルを直接読み取り専用で開いていたが、同じプロセス内で2つの SQLite（Android 標準／Dart 同梱版）が同じ WAL ファイルを扱う構成となり、新しい位置が Dart に届かない不具合が実機で再現したため変更した（Issue #131）。**同じ SQLite ファイルを Kotlin と Dart の両方から開いてはならない。**
 
 > 依存方向: `core/`（純粋ロジック）は `location/`（GPS・地図SDK・SQLite）を import しない一方向依存（[GPS_ARCHITECTURE 準拠](docs/architecture.md)）。拡張フェーズの地域パック配布（CDN）は MVP の構成要素ではない — 詳細は [docs/architecture.md](docs/architecture.md)。

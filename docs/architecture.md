@@ -21,23 +21,22 @@ flowchart TB
         end
         subgraph native["Kotlin ネイティブ"]
             fg["foreground service<br/>fused location・距離ベース記録（暫定15m＋5分上限・T015で確定）・elapsedRealtime<br/>✅ 実装済み（Issue #123・T046〜T048）"]
-            pigeon["Pigeon platform channel<br/>LocationTrackingHostApi: 起動/停止/状態問い合わせのみ<br/>（位置データ自体は運ばない。§下記注記参照）<br/>✅ 実装済み（Issue #124・T049）"]
+            pigeon["Pigeon platform channel<br/>LocationTrackingHostApi: 起動/停止/状態問い合わせ＋位置データの取得（getLocationPoints）<br/>（§下記注記参照）<br/>✅ 実装済み（Issue #124・T049・Issue #131）"]
             anti["モック検出・速度/テレポート判定・歩数センサー突合<br/>(未実装・T099・T101)"]
             health["Health Connect（オプトイン）<br/>(未実装・T102)"]
         end
         subgraph store["端末内ストレージ（SQLite・接続を分離）"]
             gamedb[("ゲーム状態DB（Drift管理）<br/>disclosed_hex（開示済みヘクス・開示時点の地形分類スナップショット terrainType）<br/>inventory・building・district_progress・collection 等")]
-            trackdb[("位置記録DB（Kotlin所有・別ファイル・Drift管理下ではない）<br/>location_track.sqlite: location_point（session_id・elapsedRealtimeNanos・緯度経度・accuracy・possible_mock_location 等）<br/>Dart は NativePositionProvider が読み取り専用で開く<br/>✅ 実装済み（Issue #124・T050・docs/location-track-db.md）")]
+            trackdb[("位置記録DB（Kotlin所有・別ファイル・Drift管理下ではない）<br/>location_track.sqlite: location_point（session_id・elapsedRealtimeNanos・緯度経度・accuracy・possible_mock_location 等）<br/>開くのは Kotlin だけ（Dart は開かない・Issue #131）<br/>✅ 実装済み（Issue #123・docs/location-track-db.md）")]
             pack[("地域パック DB（読取専用・別接続）<br/>tiles.mbtiles（表示専用ベクタタイル）<br/>region_pack.sqlite: cell_terrain / hex_terrain（境界 boundary_geojson は生成時に事前計算済） / district / hex_district / poi / pack_meta")]
         end
         exp["エクスポート/インポート<br/>端末内ファイル・共有シート（サーバに送らない）<br/>(未実装・T105)"]
     end
 
     user -->|GPS移動| fg
-    fg --> trackdb
-    trackdb -->|読取専用（NativePositionProvider・実装済み）| loc
-    loc -->|起動/停止/状態問い合わせ（Pigeon・実装済み）| pigeon
-    pigeon --> fg
+    fg <-->|書き込み・読み取り（Kotlin のみ）| trackdb
+    loc -->|起動/停止/状態問い合わせ・位置データ取得（Pigeon・実装済み）| pigeon
+    pigeon <--> fg
     anti -.-> core
     health -.オプトイン（未実装）.-> core
     loc -->|core の抽象を実装| core
@@ -71,7 +70,7 @@ flowchart TB
 - **`maplibre_gl` は暫定的に git 依存**（上流の修正コミット固定。Android ビルドのブロッカー対応・plan.md §14 R1 追記）。Issue #92 で pub.dev 版 `^0.27.1` 以降が出次第、元の代表決定（Issue #55）に復帰する。
 - **`HexLocator`（緯度経度 → H3 インデックス変換）は当面 `packages/location` 側（Dart・`h3_flutter`）で実装**し、`packages/core` がその抽象を定義する。将来 Kotlin ネイティブ側へ寄せる予定（Issue #107・#108）。
 - **位置記録 foreground service は実装済み（Issue #123・2026-09-11・T046〜T048）**: fused location provider・距離ベースサンプリング（暫定値・T015で確定）・単調時計 `elapsedRealtime` で記録し、Kotlin 側所有の専用DB（`location_track.sqlite`）へ直接書き込む。**Drift 管理下のゲーム状態DB（`disclosed_hex` 等）には書き込まない**（スキーマの二重管理を避けるため。理由・スキーマ・受け渡し方法の詳細は `docs/location-track-db.md`）。
-- **Pigeon platform channel・`NativePositionProvider` は実装済み（Issue #124・2026-09-11・T049・T050）**。⚠️ **位置データ（緯度経度・時刻・精度）は Pigeon を経由しない**。`docs/location-track-db.md` §2・§3 が確立した「Kotlin/Dart 双方が同じ `app_flutter/` ディレクトリを見る」経路により、`NativePositionProvider`（`packages/location`）が `location_track.sqlite` を読み取り専用（`OpenMode.readOnly`）で直接開く（上図の `trackdb -> loc`）。Pigeon（`pigeons/location_api.dart`・`LocationTrackingHostApi`）が運ぶのは**位置記録サービスの起動・停止・状態問い合わせという制御面のみ**（上図の `loc -> pigeon -> fg`）。理由: (1) 位置データを1件ずつ運ぶより効率的、(2) `elapsed_realtime_nanos`（64bit整数）を Pigeon/JSON 経由で渡す際の 2^53 丸め問題（`docs/terrain.md` §4.4）をそもそも経路から排除できる、(3) Kotlin foreground service 本体（PR #128）を変更せずに済む。`GeoPosition`（`packages/core`）には本 Issue でプラットフォーム中立な `spoofSuspected`（既定 false）・`trackingSessionId`（既定 null）を追加し、`location_track.sqlite` の `possible_mock_location`・`session_id` 列をそのまま写す（判定ロジック自体は Issue #126）。
+- **Pigeon platform channel・`NativePositionProvider` は実装済み（Issue #124・2026-09-11・T049・T050、Issue #131 で位置データの経路を変更）**。**`location_track.sqlite` を開くのは Kotlin だけ**であり、`NativePositionProvider`（`packages/location`）は Pigeon の host API（`pigeons/location_api.dart`・`LocationTrackingHostApi.getLocationPoints`）で Kotlin から位置データを受け取る（上図の `loc -> pigeon -> fg -> trackdb`）。Pigeon は起動・停止・状態問い合わせという制御面もあわせて運ぶ。⚠️ 当初（Issue #124）は Dart が `package:sqlite3` でこのファイルを読み取り専用で直接開いていたが、**同じアプリプロセス内で2つの SQLite（Kotlin 側は Android 標準、Dart 側は同梱版）が同じ WAL ファイルを扱うとロックの協調が成り立たず**（[sqlite.org「How To Corrupt An SQLite Database File」§2.2.1](https://www.sqlite.org/howtocorrupt.html)）、新しい位置が Dart に届かない不具合が実機で再現したため撤回した（Issue #131・2026-09-11 代表決定）。**同じ SQLite ファイルを Kotlin と Dart の両方から開いてはならない**（今後ファイルを追加する場合も同じ）。Pigeon の `StandardMessageCodec` はバイナリ形式で Kotlin の `Long` ⇔ Dart の `int`（64bit）をそのまま運ぶため、`elapsed_realtime_nanos` の 2^53 丸め（`docs/terrain.md` §4.4 は JSON 経路の話）は起きない。`GeoPosition`（`packages/core`）には本 Issue でプラットフォーム中立な `spoofSuspected`（既定 false）・`trackingSessionId`（既定 null）を追加し、`location_track.sqlite` の `possible_mock_location`・`session_id` 列をそのまま写す（判定ロジック自体は Issue #126）。
 - **図中の点線ノード（モック検出・歩数突合・Health Connect・エクスポート/インポート）は未実装**である（`specs/001-mvp/tasks.md` T099・T101・T102・T105）。実装が完了するまで実線には変更しない。
 
 ## 依存方向（GPS_ARCHITECTURE 準拠）
