@@ -12,6 +12,13 @@
          foreground service 自体は起動する（通知が表示されないだけ）。実行時のリクエストは
          T059（権限リクエストUI）のスコープ。 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Issue #126 (T101)。歩数センサー（TYPE_STEP_COUNTER）による歩数突合に使う。
+         API 29 (Android 10) 以降の実行時許可。無い場合は歩数センサーを使わず
+         step_count は null のまま（罰しない側に倒す設計・LocationTrackingService
+         のドキュメント参照）。API 29 未満はこの権限自体が存在せず常に利用可能。
+         Google Play のデータセーフティ申告への影響は docs/location-track-db.md §9
+         を参照。 -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
 
     <application
         android:label="terra_town"

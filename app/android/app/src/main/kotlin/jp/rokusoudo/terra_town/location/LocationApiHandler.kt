@@ -80,6 +80,9 @@ class LocationApiHandler(private val context: Context) : LocationTrackingHostApi
                         // Issue #108: LocationPointRow.hexId は non-null（selectPointsAfter が
                         // NULL の行に遭遇した場合は既にそこで例外を投げている）。
                         hexId = row.hexId,
+                        // Issue #126: stepCount は nullable のまま素通しする
+                        // （hexId とは対照的。「不明」は握りつぶさず null のまま渡す）。
+                        stepCount = row.stepCount,
                     )
                 }
         }

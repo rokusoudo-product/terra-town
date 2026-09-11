@@ -8,6 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.os.Build
 import android.os.Handler
@@ -52,6 +56,14 @@ import jp.rokusoudo.terra_town.R
  *   呼ばずに `stopSelf()` すると `ForegroundServiceDidNotStartInTimeException` で
  *   **プロセスごと強制終了される**。そのため権限の有無に関わらず必ず `startForeground()`
  *   （二重防御経路では例外を許容した上で）を先に呼んでから停止する。
+ * - **歩数センサー突合（Issue #126・T101）**: `startForeground()` 成功後に
+ *   `TYPE_STEP_COUNTER` を登録する（[registerStepSensorIfNeeded]）。
+ *   **`ACTIVITY_RECOGNITION` 権限（API 29+）が無い・センサー自体が無い場合は
+ *   登録せず、`recordPoint` は `step_count` に `null` を書く**（罰しない側に倒す。
+ *   Issue #126 本文「⚠️ 歩数センサーについて」・`RewardPolicy` クラスdoc参照）。
+ *   **`ACTIVITY_RECOGNITION` の確認は [Companion.start] の位置権限ゲートには
+ *   含めない**（位置権限が理由でサービス自体が起動しないことと、歩数センサーの
+ *   可否は無関係。歩数センサーが使えない場合でも位置記録自体は継続する）。
  */
 class LocationTrackingService : Service() {
 
@@ -75,6 +87,29 @@ class LocationTrackingService : Service() {
     // サービスのインスタンスごとに保持するため、セッション（= サービス起動）をまたがない。
     private var lastRecordedLocation: Location? = null
     private var discardedByDistanceCount = 0
+
+    // 【Issue #126・T101】歩数センサー（TYPE_STEP_COUNTER）関連の状態。
+    // registerStepSensorIfNeeded・onDestroy のドキュメント参照。
+    private var sensorManager: SensorManager? = null
+    private var stepSensorListener: SensorEventListener? = null
+
+    // onStartCommand は複数回呼ばれうる（例: 既に稼働中に再度起動要求が来た場合）。
+    // 二重登録を避けるためのガード。
+    private var isStepListenerRegistered = false
+
+    /**
+     * 歩数センサーから得た、記録時点までの累積歩数の最新値。
+     *
+     * 最初のセンサーイベントを受け取るまでは null（＝「不明」。`recordPoint` が
+     * そのまま `step_count` へ渡す。`GeoPosition.cumulativeStepCount` のドキュメント
+     * 「既定値は null」と同じ「不明」の扱い）。センサーイベントは
+     * [locationCallback] とは別スレッド（センサー用スレッド。既定は呼び出し元の
+     * Looper＝メインスレッド上で配送される。[registerListener] にハンドラを
+     * 渡していないため既定のメインスレッド配送になる）から更新されうるため
+     * `@Volatile` にしてある。
+     */
+    @Volatile
+    private var latestStepCount: Long? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -153,6 +188,11 @@ class LocationTrackingService : Service() {
         // （startForeground() が成功した直後に設定するだけの追加行）。
         runningSessionId = sessionId
 
+        // 【Issue #126・T101】startForeground() 成功後に歩数センサーを登録する。
+        // 権限・センサー無しの場合は何もせず latestStepCount が null のまま
+        // （罰しない側に倒す。registerStepSensorIfNeeded のドキュメント参照）。
+        registerStepSensorIfNeeded()
+
         startLocationUpdates()
         handler.removeCallbacks(timeCapRunnable)
         handler.postDelayed(timeCapRunnable, policy.timeCapMillis)
@@ -168,6 +208,11 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(timeCapRunnable)
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        // 【Issue #126・T101】歩数センサーの登録解除。sensorManager が null
+        // （そもそも登録していない）の場合は何もしない。
+        stepSensorListener?.let { listener -> sensorManager?.unregisterListener(listener) }
+        stepSensorListener = null
+        isStepListenerRegistered = false
         // Issue #131: dbHelper は Pigeon の読み取りハンドラ（LocationApiHandler）と
         // プロセス内で共有している（LocationTrackDatabaseHelper.getInstance）ため、
         // サービス停止時に close() しない。閉じてしまうと、次に Pigeon 側が読み取ろうと
@@ -287,7 +332,80 @@ class LocationTrackingService : Service() {
             accuracyMeters = if (location.hasAccuracy()) location.accuracy else null,
             possibleMockLocation = possibleMock,
             hexId = hexId,
+            // Issue #126（T101）: 歩数センサーの登録が無い・イベント未取得の場合は
+            // null のまま渡す（罰しない側に倒す。latestStepCount のドキュメント参照）。
+            stepCount = latestStepCount,
         )
+    }
+
+    /**
+     * 歩数センサー（[Sensor.TYPE_STEP_COUNTER]）を登録する（Issue #126・T101）。
+     * `startForeground()` 成功後に [onStartCommand] から呼ばれる。
+     *
+     * ## 登録しない条件（すべて「罰しない」側に倒す。Issue #126 本文参照）
+     * - [isStepListenerRegistered] が既に true（`onStartCommand` は再起動要求で
+     *   複数回呼ばれうるため、二重登録を防ぐ）。
+     * - [SensorManager] が取得できない。
+     * - [hasActivityRecognitionPermission] が false（API 29+ で権限が無い。
+     *   API 29 未満は権限自体が存在しないため常に true）。
+     * - `TYPE_STEP_COUNTER` センサーが端末に無い。
+     *
+     * いずれの場合も [latestStepCount] は null のままになり、[recordPoint] は
+     * `step_count` に null を書く（`GeoPosition.cumulativeStepCount` 側の
+     * 「不明」の扱いと一致する）。
+     *
+     * ## `maxReportLatencyUs=0` について
+     * `registerListener` の第4引数（`maxReportLatencyUs`）に `0` を渡し、
+     * バッチ配送（複数イベントをまとめて遅延配送する OS の省電力機構）を
+     * 最小化するよう**ヒント**する。ただし OS が実際にバッチ配送を行うかは
+     * 保証されない（`RewardPolicy` クラスdoc「歩数突合の設計」参照。歩数突合の
+     * ウィンドウ判定はバッチ配送があっても罰しないよう設計してある）。
+     */
+    private fun registerStepSensorIfNeeded() {
+        if (isStepListenerRegistered) return
+
+        val manager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        if (manager == null) {
+            Log.w(TAG, "SensorManager が取得できないため歩数センサーを利用しません")
+            return
+        }
+        if (!hasActivityRecognitionPermission(this)) {
+            Log.d(
+                TAG,
+                "ACTIVITY_RECOGNITION 権限が無いため歩数センサーを利用しません" +
+                    "（罰しない側に倒す設計: 記録はstep_count=nullのまま継続）",
+            )
+            return
+        }
+        val sensor = manager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        if (sensor == null) {
+            Log.d(TAG, "歩数センサー（TYPE_STEP_COUNTER）が端末に無いため利用しません")
+            return
+        }
+
+        val listener =
+            object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    // TYPE_STEP_COUNTER の values[0] は「センサー最後の再起動以降の
+                    // 累積歩数」（Android公式ドキュメント）。GeoPosition.cumulativeStepCount
+                    // のドキュメントが言う「その時点までの累積歩数」に対応する。
+                    latestStepCount = event.values[0].toLong()
+                }
+
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+                    // 歩数センサーの精度変化は無視する（歩数の値自体は連続して使う）。
+                }
+            }
+
+        val registered =
+            manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL, 0)
+        if (registered) {
+            sensorManager = manager
+            stepSensorListener = listener
+            isStepListenerRegistered = true
+        } else {
+            Log.w(TAG, "歩数センサーの registerListener に失敗しました")
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -353,6 +471,26 @@ class LocationTrackingService : Service() {
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
                     PackageManager.PERMISSION_GRANTED
             return fine || coarse
+        }
+
+        /**
+         * 歩数センサー（`TYPE_STEP_COUNTER`）の利用に必要な権限が揃っているか
+         * （Issue #126・T101）。
+         *
+         * `ACTIVITY_RECOGNITION` は API 29（Android 10）で新設された実行時権限であり、
+         * それ未満の端末ではそもそもこの権限の概念が無く常に許可されているものとして
+         * 扱ってよい（Android公式ドキュメント）。**この関数は [Companion.start] の
+         * 位置権限ゲートには含めない**（歩数センサーが使えないことは位置記録サービス
+         * 自体の起動を妨げない。[registerStepSensorIfNeeded] のドキュメント参照）。
+         */
+        fun hasActivityRecognitionPermission(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                return true
+            }
+            return ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACTIVITY_RECOGNITION,
+            ) == PackageManager.PERMISSION_GRANTED
         }
 
         /**
