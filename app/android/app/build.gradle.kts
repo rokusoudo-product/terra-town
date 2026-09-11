@@ -66,4 +66,26 @@ dependencies {
     // Flutter embedding は coroutines を推移的に持ち込まないため明示的に依存を足す。
     // -android アーティファクトは -core を含み、Dispatchers.Main（Android の Looper 実装）を提供する。
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Issue #108: 緯度経度 → H3 インデックス変換を Kotlin 側（本 jar）に寄せる。
+    // Maven Central 2026-08-14 リリース。jar に android-arm64/android-arm/linux-x64 等の
+    // ネイティブ（libh3-java.so）を同梱しているが、**android-x86_64 は同梱されていない**
+    // （2026-09-11 時点でjar内容を実測確認済み）。x86_64 エミュレータでは
+    // `H3HexIndexer` の初期化（H3Core.newInstance()）が失敗する制約がある
+    // （`H3HexIndexer` のドキュメント参照）。
+    implementation("com.uber:h3:4.5.0")
+
+    // Issue #108: このリポジトリ初めての Kotlin 単体テスト。JVM 単体テスト
+    // （`app:testDebugUnitTest`）用。
+    testImplementation("junit:junit:4.13.2")
+
+    // Issue #108: v1→v2 スキーマ移行のテスト（`LocationTrackMigrationV1ToV2Test`）で、
+    // Android の SQLiteOpenHelper ライフサイクル全体を動かす Robolectric は導入コストが
+    // 重い・不安定になりやすいと判断し不採用（判断は PR 本文参照）。代わりに移行SQL自体
+    // （ALTER TABLE・UPDATE・本番と同じ文字列定数）を xerial の sqlite-jdbc（JVM から
+    // 直接使える純粋な SQLite 実装）に対して実行し検証する。**テスト対象は移行SQL文
+    // そのものであり、Android の `SQLiteDatabase`/`SQLiteOpenHelper` の実装や
+    // `onUpgrade` の呼び出しタイミングそのものはテスト対象外**（実機での検証は
+    // 秘書セッションが上書きインストールで行う。PR本文参照）。
+    testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
 }

@@ -77,6 +77,9 @@ class LocationApiHandler(private val context: Context) : LocationTrackingHostApi
                         longitude = row.longitude,
                         accuracyMeters = row.accuracyMeters?.toDouble(),
                         possibleMockLocation = row.possibleMockLocation,
+                        // Issue #108: LocationPointRow.hexId は non-null（selectPointsAfter が
+                        // NULL の行に遭遇した場合は既にそこで例外を投げている）。
+                        hexId = row.hexId,
                     )
                 }
         }

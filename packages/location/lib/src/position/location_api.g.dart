@@ -305,6 +305,7 @@ class LocationPointMessage {
     required this.longitude,
     this.accuracyMeters,
     required this.possibleMockLocation,
+    required this.hexId,
   });
 
   /// `location_point.id`（`INTEGER PRIMARY KEY AUTOINCREMENT`）。挿入順に単調増加し、
@@ -331,6 +332,29 @@ class LocationPointMessage {
   /// `location_point.possible_mock_location`（0/1）を bool にしたもの。
   bool possibleMockLocation;
 
+  /// `location_point.hex_id`（Issue #108）。緯度経度から Kotlin 側（[H3HexIndexer]
+  /// 相当・`app/android/app/src/main/kotlin/jp/rokusoudo/terra_town/location/`）が
+  /// 記録時点で計算した H3 インデックス（解像度11・`docs/terrain.md` §4.2）。
+  ///
+  /// ## non-null にした理由（判断に迷った点・PR本文にも記載）
+  /// DB列自体（`location_point.hex_id`）は NULL 許容である（Issue #108・
+  /// `docs/location-track-db.md` §4「移行手順」。SQLite は既定値なしの列を
+  /// `ALTER TABLE` で `NOT NULL` として追加できないため）。しかし
+  /// (1) v1→v2 マイグレーションが既存行を全件バックフィルする、
+  /// (2) 新規行は [LocationTrackingService.recordPoint] が必ず値を計算して渡す、
+  /// という2点により、schema_version 2 に到達した時点で「値が無い行」は実運用上
+  /// 存在しない。Dart 側の消費者（[GeoPosition.hexId]・[HexLocator] 実装）にまで
+  /// 「null かもしれない」という不確実性を伝播させると、あらゆる呼び出し箇所で
+  /// null チェックが必要になり、`plan.md` §2「Dart は読むだけ」という単純さが
+  /// 損なわれる。そのため本フィールドは **non-null** とし、万一 Kotlin 側の
+  /// `location_point.hex_id` が NULL の行に遭遇した場合（マイグレーション漏れ等の
+  /// 実装バグ）は、Kotlin 側（`LocationTrackDatabaseHelper.selectPointsAfter`）が
+  /// Dart に渡す前に [IllegalStateException] を投げて気づけるようにしている
+  /// （握りつぶして `0` 等の意味のある値に見えるダミー値を渡すことは、
+  /// 「開示が静かに壊れる」という本プロジェクトが繰り返し避けてきた失敗様式に
+  /// なるため採らない）。
+  int hexId;
+
   List<Object?> _toList() {
     return <Object?>[
       id,
@@ -340,6 +364,7 @@ class LocationPointMessage {
       longitude,
       accuracyMeters,
       possibleMockLocation,
+      hexId,
     ];
   }
 
@@ -356,6 +381,7 @@ class LocationPointMessage {
       longitude: result[4]! as double,
       accuracyMeters: result[5] as double?,
       possibleMockLocation: result[6]! as bool,
+      hexId: result[7]! as int,
     );
   }
 
@@ -368,7 +394,7 @@ class LocationPointMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(id, other.id) && _deepEquals(sessionId, other.sessionId) && _deepEquals(elapsedRealtimeNanos, other.elapsedRealtimeNanos) && _deepEquals(latitude, other.latitude) && _deepEquals(longitude, other.longitude) && _deepEquals(accuracyMeters, other.accuracyMeters) && _deepEquals(possibleMockLocation, other.possibleMockLocation);
+    return _deepEquals(id, other.id) && _deepEquals(sessionId, other.sessionId) && _deepEquals(elapsedRealtimeNanos, other.elapsedRealtimeNanos) && _deepEquals(latitude, other.latitude) && _deepEquals(longitude, other.longitude) && _deepEquals(accuracyMeters, other.accuracyMeters) && _deepEquals(possibleMockLocation, other.possibleMockLocation) && _deepEquals(hexId, other.hexId);
   }
 
   @override
@@ -377,7 +403,7 @@ class LocationPointMessage {
 
   @override
   String toString() {
-    return 'LocationPointMessage(id: $id, sessionId: $sessionId, elapsedRealtimeNanos: $elapsedRealtimeNanos, latitude: $latitude, longitude: $longitude, accuracyMeters: $accuracyMeters, possibleMockLocation: $possibleMockLocation)';
+    return 'LocationPointMessage(id: $id, sessionId: $sessionId, elapsedRealtimeNanos: $elapsedRealtimeNanos, latitude: $latitude, longitude: $longitude, accuracyMeters: $accuracyMeters, possibleMockLocation: $possibleMockLocation, hexId: $hexId)';
   }
 }
 

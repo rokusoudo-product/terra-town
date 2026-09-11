@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Dart 側 `H3HexLocator`（`packages/location`・Issue #115）の検証用フィクスチャを生成する。
+"""Kotlin 側 `H3HexIndexer`（`app/android/`・Issue #108）の検証用フィクスチャを生成する。
 
 ## 背景
 
 `docs/terrain.md` §4 は「H3 は決定論的アルゴリズムであり、同一の実装世代（v4世代）
 であれば言語が異なっても同じ緯度経度・同じ解像度から同じインデックス値が得られる」
-としているが、これは仕様上の主張であって、本プロジェクトで Dart 側（`h3_flutter`）と
-実際に突き合わせた実測ではなかった（Issue #115・Issue #107 2026-09-10 代表決定）。
+としているが、これは仕様上の主張であって、本プロジェクトで実際に突き合わせた実測では
+なかった（Issue #115・Issue #107 2026-09-10 代表決定）。
 
 本スクリプトは、生成側と同じ `h3-py`（`requirements.txt` で固定した 4.5.0）を使って
-(緯度, 経度) -> hex_id の対応表を出力する。これを正として、Dart 側テスト
-（`packages/location/test/position/hex_locator_h3_test.dart`）が `h3_flutter` の
-出力と1点ずつ突き合わせる。
+(緯度, 経度) -> hex_id の対応表を出力する。これを正として、Kotlin 側テスト
+（`app/android/app/src/test/kotlin/jp/rokusoudo/terra_town/location/H3HexIndexerTest.kt`）
+が `com.uber:h3:4.5.0`（h3-java）の出力と1点ずつ突き合わせる。
+
+【Issue #108・2026-09-11 追記】以前（Issue #115）は本フィクスチャは
+`packages/location/test/position/fixtures/h3_py_reference.json` に置き、Dart側
+`h3_locator_h3_test.dart`（`h3_flutter`）と突き合わせていた。緯度経度→H3の変換が
+Kotlin側（`H3HexIndexer`）に移行したことに伴い、出力先を
+`app/android/app/src/test/resources/h3_py_reference.json`（Kotlin の JVM 単体テストの
+クラスパスリソース）に変更した。旧Dart側テスト・フィクスチャは撤去済み。
 
 ## 座標セットの選び方
 
@@ -31,13 +38,18 @@ H3 index は JSON の安全整数の上限（2^53-1 ≒ 9.007×10^15）を超え
 （`specs/001-mvp/research.md` §8.4・実測最大値 626,833,456,793,083,903）。
 本スクリプトの出力を何らかの JSON デコーダが数値としてそのまま読むと精度が
 壊れる可能性があるため、`hex_id` は10進の**文字列**として出力する
-（Dart 側テストは `BigInt.parse` で読む）。
+（Kotlin 側テストは手書きの最小パーサで文字列のまま読み `Long.parseLong` する。
+`org.json` は Android フレームワーク側にしかなく JVM 単体テストでは動かないため、
+小さな依存を追加するより手書きの読み取りを選んだ。詳細は
+`H3HexIndexerTest.kt`・PR #108 本文参照）。
 
 ## 再現手順
 
     cd tools/pack-builder
     ./.venv/bin/python generate_hex_locator_fixture.py \
-        --out ../../packages/location/test/position/fixtures/h3_py_reference.json
+        --out ../../app/android/app/src/test/resources/h3_py_reference.json
+
+`--out` を省略した場合もこのパスが既定値として使われる。
 
 出力ファイルは十分に小さい（点数は本スクリプトの `N_BBOX_POINTS` + `EXTRA_GLOBAL_POINTS`
 の合計のみ。1点あたり数十バイト）。
@@ -91,12 +103,15 @@ def generate_points() -> list[tuple[float, float]]:
     return points
 
 
+DEFAULT_OUT = "../../app/android/app/src/test/resources/h3_py_reference.json"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--out",
-        required=True,
-        help="出力先JSONパス（例: ../../packages/location/test/position/fixtures/h3_py_reference.json）",
+        default=DEFAULT_OUT,
+        help=f"出力先JSONパス（既定: {DEFAULT_OUT}）",
     )
     args = parser.parse_args()
 

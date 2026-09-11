@@ -271,6 +271,10 @@ class LocationTrackingService : Service() {
                 @Suppress("DEPRECATION")
                 location.isFromMockProvider
             }
+        // Issue #108: 精度・距離のゲートを通過して実際に記録される点だけ、この時点で
+        // H3インデックスを確定する（plan.md §2「Dart は読むだけ」に対応するため）。
+        // 記録対象の判定ロジック（handleLocationFix の精度・距離ゲート）自体は変更しない。
+        val hexId = H3HexIndexer.locate(location.latitude, location.longitude)
         dbHelper.insertPoint(
             sessionId = sessionId,
             // T048: 単調時計。Location 自身が持つ fix 時刻のelapsedRealtimeナノ秒版を使う
@@ -282,6 +286,7 @@ class LocationTrackingService : Service() {
             longitude = location.longitude,
             accuracyMeters = if (location.hasAccuracy()) location.accuracy else null,
             possibleMockLocation = possibleMock,
+            hexId = hexId,
         )
     }
 
