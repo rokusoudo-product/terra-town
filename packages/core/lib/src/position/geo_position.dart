@@ -1,4 +1,5 @@
 import '../geo/distance.dart';
+import '../geo/hex_id.dart';
 
 /// 位置情報の1点分の観測値（GPS等での計測結果）。
 ///
@@ -8,6 +9,10 @@ import '../geo/distance.dart';
 /// 一切公開せず、緯度経度・時刻・精度といった**計算済みの値だけ**を保持する。
 /// 緯度経度から [HexId]／[TileId] への変換ロジックそのものは `core` に置かず、
 /// `location/` の責務のままとする（hex_id.dart・tile_id.dart のドキュメント参照）。
+///
+/// [hexId] は例外で、**変換済みの結果**（[HexId] という値オブジェクト自体）を
+/// 保持するだけであり、変換ロジック（H3等）を `core` に持ち込むわけではない
+/// （[hexId] のドキュメント参照・Issue #108）。
 class GeoPosition {
   /// 緯度〔度〕。範囲: -90.0〜90.0。
   final double latitude;
@@ -87,6 +92,31 @@ class GeoPosition {
   /// ユーティリティとして用意した）。
   final String? trackingSessionId;
 
+  /// この観測が属するヘクスの [HexId]（Issue #108・記録時点で Kotlin 側
+  /// （`H3HexIndexer`）が確定済みの値）。
+  ///
+  /// ## なぜ `core` に置いても GPS_ARCHITECTURE に反しないか
+  /// [HexId] 自体は既に `core`（`hex_id.dart`）で「変換の結果だけを保持する
+  /// 値オブジェクト」として定義されている。本フィールドは、その値オブジェクトを
+  /// [GeoPosition] という別の値オブジェクトが**保持するだけ**であり、緯度経度から
+  /// [HexId] を導く計算ロジック（H3等）は一切 `core` に持ち込まない
+  /// （計算は `location/` 側 `RecordedHexLocator` が呼び出す前に、記録側の
+  /// Kotlin（`H3HexIndexer`）が既に終えている。plan.md §2「Dart は読むだけ」）。
+  ///
+  /// ## `HexLocator.locate` との関係
+  /// `packages/core/lib/src/disclosure/hex_locator.dart` の [HexLocator] 抽象は
+  /// 引き続き残す（`location/` 側の実装を差し替え可能にする窓口として）。Issue #108
+  /// 以降の本番実装（`RecordedHexLocator`）は、この [hexId] フィールドをそのまま
+  /// 返すだけになる（`hexId` が `null` の場合は [StateError] を投げる。
+  /// `RecordedHexLocator` のドキュメント参照）。
+  ///
+  /// ## 既定値は null
+  /// 理由は [spoofSuspected]・[trackingSessionId] と同じ: 既存の `GeoPosition`
+  /// 生成箇所（テスト・`FakePositionProvider` 等）はこのフィールドを設定する
+  /// 責務を知らないため、既定を non-null にすると既存コードを壊す。値を設定するのは
+  /// [NativePositionProvider]（`packages/location`）のみ。
+  final HexId? hexId;
+
   const GeoPosition({
     required this.latitude,
     required this.longitude,
@@ -94,6 +124,7 @@ class GeoPosition {
     this.accuracy,
     this.spoofSuspected = false,
     this.trackingSessionId,
+    this.hexId,
   })  : assert(
           latitude >= -90.0 && latitude <= 90.0,
           '緯度は -90.0〜90.0 の範囲でなければならない',
@@ -111,7 +142,8 @@ class GeoPosition {
       other.timestamp == timestamp &&
       other.accuracy == accuracy &&
       other.spoofSuspected == spoofSuspected &&
-      other.trackingSessionId == trackingSessionId;
+      other.trackingSessionId == trackingSessionId &&
+      other.hexId == hexId;
 
   @override
   int get hashCode => Object.hash(
@@ -121,10 +153,11 @@ class GeoPosition {
         accuracy,
         spoofSuspected,
         trackingSessionId,
+        hexId,
       );
 
   @override
   String toString() => 'GeoPosition(lat: $latitude, lon: $longitude, at: $timestamp, '
       'accuracy: $accuracy, spoofSuspected: $spoofSuspected, '
-      'trackingSessionId: $trackingSessionId)';
+      'trackingSessionId: $trackingSessionId, hexId: $hexId)';
 }

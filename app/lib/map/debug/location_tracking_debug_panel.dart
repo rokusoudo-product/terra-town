@@ -164,7 +164,11 @@ class _LocationTrackingDebugPanelState extends State<LocationTrackingDebugPanel>
                         '(${position.latitude.toStringAsFixed(6)}, '
                         '${position.longitude.toStringAsFixed(6)}) '
                         'session=${position.trackingSessionId} '
-                        'spoofSuspected=${position.spoofSuspected}',
+                        'spoofSuspected=${position.spoofSuspected} '
+                        // Issue #108: DBの hex_id と Dart が受け取った値が一致するか
+                        // （int64がPigeonで丸められていないか）を実機で突き合わせるための
+                        // 観測点。hexId.value を表示する（HexId(null) の場合は"null"）。
+                        'hexId=${position.hexId?.value}',
                         style: textTheme.bodySmall,
                       );
                     },

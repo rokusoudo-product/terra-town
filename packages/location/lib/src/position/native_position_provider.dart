@@ -95,6 +95,9 @@ class _PigeonLocationPointsApi implements LocationPointsApi {
 /// - [GeoPosition.trackingSessionId]: `sessionId` をそのまま渡す。
 /// - [GeoPosition.spoofSuspected]: `possibleMockLocation` を bool に変換するだけ。
 ///   判定ロジック自体は実装しない（Issue #126）。
+/// - [GeoPosition.hexId]（Issue #108）: `LocationPointMessage.hexId`（Kotlin側
+///   `H3HexIndexer` が記録時点で確定した H3 インデックス）を [HexId] でラップするだけ。
+///   本クラスは変換ロジックを一切持たない（`RecordedHexLocator` のドキュメント参照）。
 ///
 /// ## 64bit整数について
 /// `elapsedRealtimeNanos` は実機で `2634654803000000` 程度の値になることを確認済み
@@ -199,6 +202,10 @@ class NativePositionProvider implements PositionProvider {
       accuracy: accuracyMeters == null ? null : Distance.meters(accuracyMeters),
       spoofSuspected: row.possibleMockLocation,
       trackingSessionId: row.sessionId,
+      // Issue #108: row.hexId は Pigeon の LocationPointMessage.hexId（non-null）を
+      // そのまま HexId でラップするだけ。Kotlin 側（H3HexIndexer）が記録時点で
+      // 既に確定済みの値であり、ここでは変換を一切行わない。
+      hexId: HexId(row.hexId),
     );
   }
 

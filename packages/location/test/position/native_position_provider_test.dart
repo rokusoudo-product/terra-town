@@ -71,6 +71,10 @@ LocationPointMessage _row({
   required double longitude,
   double? accuracyMeters,
   bool possibleMockLocation = false,
+  // Issue #108: LocationPointMessage.hexId は non-null になったため、既存のテストを
+  // 壊さないよう既定値を用意する（値そのものに意味はない。hexId の変換を検証する
+  // テストは個別に明示的な値を渡す）。
+  int hexId = 1,
 }) {
   return LocationPointMessage(
     id: id,
@@ -80,6 +84,7 @@ LocationPointMessage _row({
     longitude: longitude,
     accuracyMeters: accuracyMeters,
     possibleMockLocation: possibleMockLocation,
+    hexId: hexId,
   );
 }
 
@@ -133,6 +138,27 @@ void main() {
     expect(position.accuracy, const Distance.meters(23.94));
     expect(position.trackingSessionId, 'session-a');
     expect(position.spoofSuspected, isFalse);
+  });
+
+  test('hexId（Kotlin側で確定済みのH3インデックス）がそのままHexIdに写る（Issue #108）', () async {
+    // research.md §8.4 の実測最大値（2^53超）。丸めが起きないことを兼ねて確認する。
+    const measuredMaxHexId = 626833456793083903;
+    fakeApi.addRow(
+      _row(
+        id: 1,
+        sessionId: 'session-a',
+        elapsedRealtimeNanos: 1000,
+        latitude: 35.777175,
+        longitude: 139.407368,
+        hexId: measuredMaxHexId,
+      ),
+    );
+
+    final provider = makeProvider();
+    addTearDown(provider.close);
+
+    final position = await provider.positionUpdates.first;
+    expect(position.hexId, const HexId(measuredMaxHexId));
   });
 
   test('possibleMockLocation=true の行は spoofSuspected=true になる', () async {
@@ -301,34 +327,45 @@ void main() {
       expect(reconstructedNanos, nanos - (nanos % 1000));
     });
 
-    test('Pigeon のメッセージコーデックで往復させても64bit値が変わらない（Issue #131）', () {
-      // NativePositionProvider を経由せず、Pigeon が実際に使うコーデック
-      // （LocationTrackingHostApi.pigeonChannelCodec・StandardMessageCodec 拡張）に
-      // 直接メッセージを通し、バイナリ表現の往復でも値が変わらないことを確認する。
-      // これにより「StandardMessageCodec は Kotlin の Long と Dart の int を
-      // そのまま運ぶ」という pigeons/location_api.dart の説明を実装で裏付ける。
-      const nanos = 3400000000000000000;
-      final message = LocationPointMessage(
-        id: 42,
-        sessionId: 'session-codec',
-        elapsedRealtimeNanos: nanos,
-        latitude: 35.6812,
-        longitude: 139.7671,
-        accuracyMeters: 12.5,
-        possibleMockLocation: true,
-      );
+    test(
+      'Pigeon のメッセージコーデックで往復させても64bit値が変わらない'
+      '（elapsedRealtimeNanos: Issue #131・hexId: Issue #108）',
+      () {
+        // NativePositionProvider を経由せず、Pigeon が実際に使うコーデック
+        // （LocationTrackingHostApi.pigeonChannelCodec・StandardMessageCodec 拡張）に
+        // 直接メッセージを通し、バイナリ表現の往復でも値が変わらないことを確認する。
+        // これにより「StandardMessageCodec は Kotlin の Long と Dart の int を
+        // そのまま運ぶ」という pigeons/location_api.dart の説明を実装で裏付ける。
+        const nanos = 3400000000000000000;
+        // Issue #108 本文の実測最大値（research.md §8.4）。2^53超のフィクスチャ中でも
+        // 最大級の値で、hex_id が丸められずに Dart 側へ渡ることを実測で確認する
+        // （Issue #108 受け入れ基準「hex_id が丸められずに Dart 側へ渡ることが実測で
+        // 確認されている」に対応する具体的なテスト）。
+        const measuredMaxHexId = 626833456793083903;
+        final message = LocationPointMessage(
+          id: 42,
+          sessionId: 'session-codec',
+          elapsedRealtimeNanos: nanos,
+          latitude: 35.6812,
+          longitude: 139.7671,
+          accuracyMeters: 12.5,
+          possibleMockLocation: true,
+          hexId: measuredMaxHexId,
+        );
 
-      final codec = LocationTrackingHostApi.pigeonChannelCodec;
-      final encoded = codec.encodeMessage(message);
-      final decoded = codec.decodeMessage(encoded) as LocationPointMessage;
+        final codec = LocationTrackingHostApi.pigeonChannelCodec;
+        final encoded = codec.encodeMessage(message);
+        final decoded = codec.decodeMessage(encoded) as LocationPointMessage;
 
-      expect(decoded.id, message.id);
-      expect(decoded.sessionId, message.sessionId);
-      expect(decoded.elapsedRealtimeNanos, nanos);
-      expect(decoded.latitude, message.latitude);
-      expect(decoded.longitude, message.longitude);
-      expect(decoded.accuracyMeters, message.accuracyMeters);
-      expect(decoded.possibleMockLocation, message.possibleMockLocation);
-    });
+        expect(decoded.id, message.id);
+        expect(decoded.sessionId, message.sessionId);
+        expect(decoded.elapsedRealtimeNanos, nanos);
+        expect(decoded.latitude, message.latitude);
+        expect(decoded.longitude, message.longitude);
+        expect(decoded.accuracyMeters, message.accuracyMeters);
+        expect(decoded.possibleMockLocation, message.possibleMockLocation);
+        expect(decoded.hexId, measuredMaxHexId);
+      },
+    );
   });
 }
