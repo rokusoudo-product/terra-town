@@ -1,41 +1,70 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart' as p;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
-/// `LocationTrackDatabase.kt`（`docs/location-track-db.md` §4）と同じスキーマの
-/// `location_track.sqlite` を組み立てる（`location_track_connection_test.dart` と
-/// 同じ方針）。
-sqlite3.Database _createSchema(String path) {
-  final db = sqlite3.sqlite3.open(path);
-  db.execute('''
-    CREATE TABLE location_track_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-    )
-  ''');
-  db.execute("INSERT INTO location_track_meta (key, value) VALUES ('schema_version', '1')");
-  db.execute('''
-    CREATE TABLE location_point (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        elapsed_realtime_nanos INTEGER NOT NULL,
-        wall_clock_unix_millis INTEGER NOT NULL,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        accuracy_meters REAL,
-        possible_mock_location INTEGER NOT NULL DEFAULT 0,
-        inserted_at_unix_millis INTEGER NOT NULL
-    )
-  ''');
-  return db;
+/// [LocationPointsApi] のフェイク実装（Issue #131）。
+///
+/// 以前（Issue #124）は `location_track.sqlite` を模した一時ファイルを `package:sqlite3`
+/// で組み立ててテストしていたが、Issue #131 で Dart 側はこのファイルを一切開かなくなった
+/// （`NativePositionProvider` のクラスdoc参照）ため、Pigeon の host API 呼び出しを
+/// フェイクに差し替える形にテストを書き換えた。
+class _FakeLocationPointsApi implements LocationPointsApi {
+  final List<LocationPointMessage> _rows = [];
+
+  /// [getLocationPoints] が呼ばれた回数（重複防止・ページングのテストで使う）。
+  int callCount = 0;
+
+  void addRow(LocationPointMessage row) => _rows.add(row);
+
+  @override
+  Future<List<LocationPointMessage>> getLocationPoints(int afterId, int limit) async {
+    callCount++;
+    final matching = _rows.where((row) => row.id > afterId).toList()
+      ..sort((a, b) => a.id.compareTo(b.id));
+    return matching.take(limit).toList();
+  }
 }
 
-void _insertPoint(
-  sqlite3.Database db, {
+/// [_FakeLocationPointsApi.getLocationPoints] が呼ばれるたびに `Completer` で
+/// 完了を制御できるフェイク（「前回のポーリングが終わる前に次のポーリングが走らない」
+/// ことを検証するために使う）。
+class _BlockingFakeLocationPointsApi implements LocationPointsApi {
+  final List<LocationPointMessage> _rows = [];
+  int callCount = 0;
+  final List<_PendingCall> _pendingCalls = [];
+
+  void addRow(LocationPointMessage row) => _rows.add(row);
+
+  /// 保留中の呼び出しのうち最も古いものを、呼び出された時点の `afterId`/`limit` で
+  /// フィルタしてから完了させる。
+  void completeOldest() {
+    final pending = _pendingCalls.removeAt(0);
+    final matching = _rows.where((row) => row.id > pending.afterId).toList()
+      ..sort((a, b) => a.id.compareTo(b.id));
+    pending.completer.complete(matching.take(pending.limit).toList());
+  }
+
+  @override
+  Future<List<LocationPointMessage>> getLocationPoints(int afterId, int limit) {
+    callCount++;
+    final completer = Completer<List<LocationPointMessage>>();
+    _pendingCalls.add(_PendingCall(afterId: afterId, limit: limit, completer: completer));
+    return completer.future;
+  }
+}
+
+class _PendingCall {
+  _PendingCall({required this.afterId, required this.limit, required this.completer});
+
+  final int afterId;
+  final int limit;
+  final Completer<List<LocationPointMessage>> completer;
+}
+
+LocationPointMessage _row({
+  required int id,
   required String sessionId,
   required int elapsedRealtimeNanos,
   required double latitude,
@@ -43,45 +72,34 @@ void _insertPoint(
   double? accuracyMeters,
   bool possibleMockLocation = false,
 }) {
-  db.execute(
-    'INSERT INTO location_point '
-    '(session_id, elapsed_realtime_nanos, wall_clock_unix_millis, latitude, longitude, '
-    'accuracy_meters, possible_mock_location, inserted_at_unix_millis) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [
-      sessionId,
-      elapsedRealtimeNanos,
-      1757000000000,
-      latitude,
-      longitude,
-      accuracyMeters,
-      possibleMockLocation ? 1 : 0,
-      1757000000000,
-    ],
+  return LocationPointMessage(
+    id: id,
+    sessionId: sessionId,
+    elapsedRealtimeNanos: elapsedRealtimeNanos,
+    latitude: latitude,
+    longitude: longitude,
+    accuracyMeters: accuracyMeters,
+    possibleMockLocation: possibleMockLocation,
   );
 }
 
 void main() {
-  late Directory tempDir;
-  late String dbPath;
+  late _FakeLocationPointsApi fakeApi;
 
   setUp(() {
-    tempDir = Directory.systemTemp.createTempSync('native_position_provider_test');
-    dbPath = p.join(tempDir.path, 'location_track.sqlite');
+    fakeApi = _FakeLocationPointsApi();
   });
 
-  tearDown(() {
-    tempDir.deleteSync(recursive: true);
-  });
-
-  NativePositionProvider makeProvider({int sinceRowId = 0}) {
+  NativePositionProvider makeProvider({int sinceRowId = 0, int pageSize = 500}) {
     return NativePositionProvider(
-      databaseFilePathResolver: () async => dbPath,
+      api: fakeApi,
       pollInterval: const Duration(milliseconds: 20),
       sinceRowId: sinceRowId,
+      pageSize: pageSize,
     );
   }
 
-  test('ファイルがまだ存在しない間は何も流れない（正常系）', () async {
+  test('記録が1件も無い間は何も流れない（正常系）', () async {
     final provider = makeProvider();
     addTearDown(provider.close);
 
@@ -94,16 +112,16 @@ void main() {
   });
 
   test('購読前に記録済みの行も既定（sinceRowId=0）では全件流れる', () async {
-    final db = _createSchema(dbPath);
-    _insertPoint(
-      db,
-      sessionId: 'session-a',
-      elapsedRealtimeNanos: 2634654803000000,
-      latitude: 35.1,
-      longitude: 135.1,
-      accuracyMeters: 23.94,
+    fakeApi.addRow(
+      _row(
+        id: 1,
+        sessionId: 'session-a',
+        elapsedRealtimeNanos: 2634654803000000,
+        latitude: 35.1,
+        longitude: 135.1,
+        accuracyMeters: 23.94,
+      ),
     );
-    db.close();
 
     final provider = makeProvider();
     addTearDown(provider.close);
@@ -117,17 +135,17 @@ void main() {
     expect(position.spoofSuspected, isFalse);
   });
 
-  test('possible_mock_location=1 の行は spoofSuspected=true になる', () async {
-    final db = _createSchema(dbPath);
-    _insertPoint(
-      db,
-      sessionId: 'session-a',
-      elapsedRealtimeNanos: 1000,
-      latitude: 35.0,
-      longitude: 135.0,
-      possibleMockLocation: true,
+  test('possibleMockLocation=true の行は spoofSuspected=true になる', () async {
+    fakeApi.addRow(
+      _row(
+        id: 1,
+        sessionId: 'session-a',
+        elapsedRealtimeNanos: 1000,
+        latitude: 35.0,
+        longitude: 135.0,
+        possibleMockLocation: true,
+      ),
     );
-    db.close();
 
     final provider = makeProvider();
     addTearDown(provider.close);
@@ -136,17 +154,17 @@ void main() {
     expect(position.spoofSuspected, isTrue);
   });
 
-  test('accuracy_meters が NULL の行は accuracy が null になる', () async {
-    final db = _createSchema(dbPath);
-    _insertPoint(
-      db,
-      sessionId: 'session-a',
-      elapsedRealtimeNanos: 1000,
-      latitude: 35.0,
-      longitude: 135.0,
-      accuracyMeters: null,
+  test('accuracyMeters が null の行は accuracy が null になる', () async {
+    fakeApi.addRow(
+      _row(
+        id: 1,
+        sessionId: 'session-a',
+        elapsedRealtimeNanos: 1000,
+        latitude: 35.0,
+        longitude: 135.0,
+        accuracyMeters: null,
+      ),
     );
-    db.close();
 
     final provider = makeProvider();
     addTearDown(provider.close);
@@ -156,10 +174,9 @@ void main() {
   });
 
   test('sinceRowId を指定すると、それ以前の行は流れない', () async {
-    final db = _createSchema(dbPath);
-    _insertPoint(db, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 1, longitude: 1);
-    _insertPoint(db, sessionId: 's', elapsedRealtimeNanos: 2, latitude: 2, longitude: 2);
-    db.close();
+    fakeApi
+      ..addRow(_row(id: 1, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 1, longitude: 1))
+      ..addRow(_row(id: 2, sessionId: 's', elapsedRealtimeNanos: 2, latitude: 2, longitude: 2));
 
     final provider = makeProvider(sinceRowId: 1);
     addTearDown(provider.close);
@@ -168,7 +185,7 @@ void main() {
     expect(position.latitude, 2);
   });
 
-  test('購読後にファイルが作成され行が追加されると、ポーリングで検知して流れる', () async {
+  test('購読後に新しい行が記録されると、ポーリングで検知して流れる', () async {
     final provider = makeProvider();
     addTearDown(provider.close);
 
@@ -176,14 +193,12 @@ void main() {
     final sub = provider.positionUpdates.listen(events.add);
     addTearDown(sub.cancel);
 
-    // 最初のポーリングでファイル未作成を確認させてから、後追いで作成する
+    // 最初のポーリングで記録0件を確認させてから、後追いで行を追加する
     // （実運用の「サービス起動後、記録がたまってからDartが購読する」流れの近似）。
     await Future<void>.delayed(const Duration(milliseconds: 30));
     expect(events, isEmpty);
 
-    final db = _createSchema(dbPath);
-    _insertPoint(db, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 10, longitude: 20);
-    db.close();
+    fakeApi.addRow(_row(id: 1, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 10, longitude: 20));
 
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(events, hasLength(1));
@@ -191,8 +206,7 @@ void main() {
   });
 
   test('ポーリングのたびに、既に流した行は再送しない（id を進める）', () async {
-    final db = _createSchema(dbPath);
-    _insertPoint(db, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 1, longitude: 1);
+    fakeApi.addRow(_row(id: 1, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 1, longitude: 1));
 
     final provider = makeProvider();
     addTearDown(provider.close);
@@ -204,16 +218,67 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 60));
     expect(events, hasLength(1));
 
-    _insertPoint(db, sessionId: 's', elapsedRealtimeNanos: 2, latitude: 2, longitude: 2);
-    db.close();
+    fakeApi.addRow(_row(id: 2, sessionId: 's', elapsedRealtimeNanos: 2, latitude: 2, longitude: 2));
 
     await Future<void>.delayed(const Duration(milliseconds: 60));
     expect(events, hasLength(2));
     expect(events.map((e) => e.latitude), [1, 2]);
   });
 
-  group('64bit整数の受け渡し（docs/terrain.md §4.4・Issue #124「⚠️ 64bit値の受け渡し」）', () {
-    test('elapsed_realtime_nanos は Pigeon/JSON を経由しないため 2^53 を超えても丸められない', () async {
+  test('1回のポーリングでは pageSize 件ずつ取得し、件数が pageSize 未満になるまで取り切る', () async {
+    for (var i = 1; i <= 5; i++) {
+      fakeApi.addRow(
+        _row(id: i, sessionId: 's', elapsedRealtimeNanos: i, latitude: i.toDouble(), longitude: 0),
+      );
+    }
+
+    final provider = makeProvider(pageSize: 2);
+    addTearDown(provider.close);
+
+    final events = <GeoPosition>[];
+    final sub = provider.positionUpdates.listen(events.add);
+    addTearDown(sub.cancel);
+
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    // 5件を pageSize=2 で取り切るには3回の呼び出し（2+2+1）が必要。
+    expect(events, hasLength(5));
+    expect(events.map((e) => e.latitude), [1, 2, 3, 4, 5]);
+    expect(fakeApi.callCount, greaterThanOrEqualTo(3));
+  });
+
+  test('前回のポーリングが完了する前に次のポーリングが走っても行が二重に流れない', () async {
+    final blockingApi = _BlockingFakeLocationPointsApi()
+      ..addRow(_row(id: 1, sessionId: 's', elapsedRealtimeNanos: 1, latitude: 1, longitude: 1));
+
+    final provider = NativePositionProvider(
+      api: blockingApi,
+      pollInterval: const Duration(milliseconds: 10),
+      sinceRowId: 0,
+    );
+    addTearDown(provider.close);
+
+    final events = <GeoPosition>[];
+    final sub = provider.positionUpdates.listen(events.add);
+    addTearDown(sub.cancel);
+
+    // 最初のポーリングが呼ばれ、保留状態になるまで待つ。
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    expect(blockingApi.callCount, 1);
+
+    // pollInterval を複数回またいでも、前回が保留中なら新しい呼び出しは発生しない
+    // （_isPolling ガードの検証）。
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    expect(blockingApi.callCount, 1);
+
+    // 最初の呼び出しを完了させると、行が1件だけ流れる。
+    blockingApi.completeOldest();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    expect(events, hasLength(1));
+  });
+
+  group('64bit整数の受け渡し（docs/terrain.md §4.4・Issue #124/#131「⚠️ 64bit値の受け渡し」）', () {
+    test('elapsedRealtimeNanos は Pigeon/JSON を経由しないため 2^53 を超えても丸められない', () async {
       // 【値の選定について】実機（Pixel 7a）で確認された値は 2634654803000000
       // （docs/location-track-db.md §8.3）だが、これ自体は 2^53（9007199254740992）
       // 未満（端末起動から約104日未満に相当）であり、丸め問題の再現には使えない。
@@ -222,15 +287,9 @@ void main() {
       const nanos = 3400000000000000000; // > 2^53、int64の範囲内
       expect(nanos, greaterThan(1 << 53)); // 前提条件: この値は確かにJS安全整数を超える
 
-      final db = _createSchema(dbPath);
-      _insertPoint(
-        db,
-        sessionId: 's',
-        elapsedRealtimeNanos: nanos,
-        latitude: 1,
-        longitude: 1,
+      fakeApi.addRow(
+        _row(id: 1, sessionId: 's', elapsedRealtimeNanos: nanos, latitude: 1, longitude: 1),
       );
-      db.close();
 
       final provider = makeProvider();
       addTearDown(provider.close);
@@ -242,17 +301,34 @@ void main() {
       expect(reconstructedNanos, nanos - (nanos % 1000));
     });
 
-    test('LocationTrackConnection の生読み取りでも64bit値がそのまま得られる', () {
-      const nanos = 2634654803000000;
-      final db = _createSchema(dbPath);
-      _insertPoint(db, sessionId: 's', elapsedRealtimeNanos: nanos, latitude: 1, longitude: 1);
-      db.close();
+    test('Pigeon のメッセージコーデックで往復させても64bit値が変わらない（Issue #131）', () {
+      // NativePositionProvider を経由せず、Pigeon が実際に使うコーデック
+      // （LocationTrackingHostApi.pigeonChannelCodec・StandardMessageCodec 拡張）に
+      // 直接メッセージを通し、バイナリ表現の往復でも値が変わらないことを確認する。
+      // これにより「StandardMessageCodec は Kotlin の Long と Dart の int を
+      // そのまま運ぶ」という pigeons/location_api.dart の説明を実装で裏付ける。
+      const nanos = 3400000000000000000;
+      final message = LocationPointMessage(
+        id: 42,
+        sessionId: 'session-codec',
+        elapsedRealtimeNanos: nanos,
+        latitude: 35.6812,
+        longitude: 139.7671,
+        accuracyMeters: 12.5,
+        possibleMockLocation: true,
+      );
 
-      final connection = LocationTrackConnection.openIfExists(dbPath)!;
-      addTearDown(connection.close);
+      final codec = LocationTrackingHostApi.pigeonChannelCodec;
+      final encoded = codec.encodeMessage(message);
+      final decoded = codec.decodeMessage(encoded) as LocationPointMessage;
 
-      final row = connection.selectPointsAfter(0).single;
-      expect(row['elapsed_realtime_nanos'], nanos);
+      expect(decoded.id, message.id);
+      expect(decoded.sessionId, message.sessionId);
+      expect(decoded.elapsedRealtimeNanos, nanos);
+      expect(decoded.latitude, message.latitude);
+      expect(decoded.longitude, message.longitude);
+      expect(decoded.accuracyMeters, message.accuracyMeters);
+      expect(decoded.possibleMockLocation, message.possibleMockLocation);
     });
   });
 }

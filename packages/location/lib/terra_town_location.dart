@@ -5,22 +5,23 @@
 /// ネイティブの位置取得（Kotlin foreground service / Pigeon channel）を隠蔽する。
 ///
 /// 実装予定の構成は `specs/001-mvp/tasks.md` を参照:
-///   - src/position/ NativePositionProvider（T050・実装済み。Issue #124）・
+///   - src/position/ NativePositionProvider（T050・実装済み。Issue #124。Issue #131 で
+///     `location_track.sqlite` の直接読み取りから Pigeon 経由の取得に変更）・
 ///     NativeLocationTrackingControl（Pigeon `LocationTrackingHostApi` の
 ///     ラッパー。T049）・H3HexLocator（`HexLocator` 抽象の暫定実装。Issue #115。
 ///     Kotlin側への移行予定はIssue #108・`future`）
 ///   - src/pack/     RegionPackRepository（T069）
 ///   - src/map/      MapView・FogOfWarLayer・各種レイヤー（T055〜T056・T071・T090・T094）
-///   - src/db/       GameDatabase・RegionPackConnection（T030〜T034・Issue #83）・
-///     LocationTrackConnection（`location_track.sqlite` 読み取り専用接続。
-///     T050・Issue #124）
+///   - src/db/       GameDatabase・RegionPackConnection（T030〜T034・Issue #83）。
+///     `location_track.sqlite` は Issue #131（2026-09-11 代表決定）により
+///     **Kotlin 側のみが開く**ため、Dart 側の読み取り専用接続クラス
+///     （`LocationTrackConnection`）は削除済み（`docs/location-track-db.md` §2・§3）。
 library;
 
 import 'package:terra_town_core/terra_town_core.dart';
 
 export 'src/db/building_type.dart';
 export 'src/db/game_database.dart';
-export 'src/db/location_track_connection.dart';
 export 'src/db/region_pack_connection.dart';
 export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';

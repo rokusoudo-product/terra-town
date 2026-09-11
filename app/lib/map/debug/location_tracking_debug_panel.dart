@@ -25,7 +25,8 @@ import '../../design/spacing.dart';
 /// - 「停止」ボタン: Pigeon の `stopTracking()` を呼ぶ。
 /// - 「状態確認」ボタン: `getTrackingStatus()` を呼び、稼働中か・`session_id` を表示する。
 /// - 位置ログ: `NativePositionProvider.positionUpdates` を購読し、
-///   Kotlin が `location_track.sqlite` に書いた行を Dart 側が実際に読めていること
+///   Kotlin が `location_track.sqlite` に書いた行が Pigeon 経由（Issue #131・
+///   `LocationTrackingHostApi.getLocationPoints`）で Dart 側に実際に届いていること
 ///   （緯度経度・`trackingSessionId`・`spoofSuspected`）を直接確認できる。
 class LocationTrackingDebugPanel extends StatefulWidget {
   const LocationTrackingDebugPanel({
@@ -146,7 +147,7 @@ class _LocationTrackingDebugPanelState extends State<LocationTrackingDebugPanel>
               ),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                '受信した位置（location_track.sqlite・直近${_loggedPositions.length}件）:',
+                '受信した位置（Pigeon経由・location_track.sqlite・直近${_loggedPositions.length}件）:',
                 style: textTheme.bodySmall,
               ),
               if (_loggedPositions.isEmpty)
