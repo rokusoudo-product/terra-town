@@ -1,0 +1,8 @@
+# tools/pack-builder/tests/ の実行に必要な開発用依存（Issue #118）。
+#
+# requirements.txt（本番パイプライン用。osmium・h3・shapely・numpy・topojson）とは
+# 意図的に分離している。本ファイルが対象とするテスト（terrain_rules.py・hex_bridge.py）は
+# 標準ライブラリのみで動く純粋関数であり、data_cache/ や osmium 等のネイティブ依存は
+# 一切不要なため、CI で毎回インストールするのは pytest だけで済む
+# （osmium のネイティブビルドを PR CI に持ち込まないための分離。Issue #118）。
+pytest==9.1.1

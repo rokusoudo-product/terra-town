@@ -74,6 +74,26 @@ jobs:
       - name: Check toolchain version consistency (ci.yml vs docs/dev-setup.md §2)
         run: bash tools/check_toolchain_versions.sh
 
+      # tools/pack-builder/ の純粋関数（terrain_rules.py・hex_bridge.py）の単体テスト（Issue #118）。
+      # docs/terrain.md §5（OSMタグ→地形タイプ判定ルール）の判定ロジックがCIから
+      # 一切検証されておらず、判定ルールを書き換えても CI は green のまま通っていた
+      # （tools/pack-builder/README.md「単体テスト」節参照）。Flutter/JDKのセットアップより
+      # 前・軽量に実行できるため、他のガード同様ここで最短に検出する。
+      # 【重い依存を持ち込まない】requirements.txt（本番パイプライン用。osmium等）とは別に
+      # requirements-dev.txt（pytestのみ）を使う。data_cache/（OSM抽出・Planetiler補助データ）
+      # を要するテストは対象外（pack-build.yml・Issue #85・T045の担当のまま）。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pack-builder test dependencies
+        run: pip install -r requirements-dev.txt
+        working-directory: tools/pack-builder
+
+      - name: Test pack-builder (terrain_rules / hex_bridge, pure functions only)
+        run: python -m pytest
+        working-directory: tools/pack-builder
+
       - name: Resolve dependencies
         run: |
           flutter pub get -C packages/core
