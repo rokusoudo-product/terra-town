@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS location_track_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
--- 初期化時に1行だけ挿入: ('schema_version', '1')
+-- 初期化時に1行だけ挿入: ('schema_version', '2')
 
 CREATE TABLE IF NOT EXISTS location_point (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,16 +178,18 @@ CREATE TABLE IF NOT EXISTS location_point (
     longitude REAL NOT NULL,
     accuracy_meters REAL,
     possible_mock_location INTEGER NOT NULL DEFAULT 0,
-    inserted_at_unix_millis INTEGER NOT NULL
+    inserted_at_unix_millis INTEGER NOT NULL,
+    hex_id INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_location_point_session
 ON location_point (session_id, id);
 ```
 
-現在の `schema_version` = **1**。将来スキーマを変更する場合は
-`LocationTrackDatabaseHelper.onUpgrade`（現状は未実装で例外を投げる＝スキーマ変更を
-実装せず放置すると即座にクラッシュして気づける設計）を実装し、
+現在の `schema_version` = **2**（Issue #108・`hex_id` 列を追加。移行手順は下記参照）。
+将来さらにスキーマを変更する場合は `LocationTrackDatabaseHelper.onUpgrade` に
+移行処理を追加し（未対応の版の組み合わせは例外を投げる＝スキーマ変更を実装せず
+放置すると即座にクラッシュして気づける設計を維持する）、
 `location_track_meta.schema_version` の値も一緒に更新すること。
 
 ### 列の意味
@@ -202,6 +204,36 @@ ON location_point (session_id, id);
 | `accuracy_meters` | REAL（NULL可） | `Location.getAccuracy()`。値が無い fix は NULL。 |
 | `possible_mock_location` | INTEGER（0/1） | Android の `Location.isMock()`（API31+）／`isFromMockProvider()`（それ未満）の生の値。**Android の用語（`isFromMockProvider` 等）はこの列の実装に閉じており、列名・呼び出し側は中立な名前にしてある。** モック検出そのもの（判定ロジック）は本 Issue では実装していない。Issue #126 がこの値を読み、`packages/core` の `GeoPosition`（Issue #124 で追加予定の「偽装の疑い」フラグ）へ変換する想定。 |
 | `inserted_at_unix_millis` | INTEGER | 行を INSERT した時刻（`System.currentTimeMillis()`）。デバッグ用。 |
+| `hex_id` | INTEGER（NULL可・v2で追加） | 緯度経度から `H3HexIndexer`（解像度11・`docs/terrain.md` §4.2）が記録時点で計算した H3 インデックス。**列自体は NULL 許容だが、新規挿入では必ず値が入る**（SQLite は既定値なしの列を `ALTER TABLE` で `NOT NULL` にできないため列制約としては表現できない。v1→v2 移行で既存行もバックフィル済み）。Pigeon 経由で `GeoPosition.hexId` としてそのまま Dart へ渡る（Issue #108）。 |
+
+### 移行手順（v1→v2・Issue #108・このリポジトリで初めての本物のマイグレーション）
+
+`hex_id` 列の追加に伴う移行。`LocationTrackDatabaseHelper.onUpgrade`
+（`oldVersion=1, newVersion=2`）が次を行う:
+
+1. `ALTER TABLE location_point ADD COLUMN hex_id INTEGER`（NULL許容のまま追加）。
+2. 既存の全行を `(id, latitude, longitude)` で読み出し、`H3HexIndexer.locate` で
+   `hex_id` を計算して1行ずつ `UPDATE location_point SET hex_id = ? WHERE id = ?` で
+   バックフィルする。
+3. `UPDATE location_track_meta SET value = '2' WHERE key = 'schema_version'`。
+
+**同一トランザクションで行う理由**: `SQLiteOpenHelper` は `onUpgrade` 呼び出し自体を
+既に1つのトランザクション（`beginTransaction()` … `setVersion(2)` …
+`setTransactionSuccessful()` … `endTransaction()`）で包んでいる（`getDatabaseLocked` の
+実装）。そのため上記1〜3のいずれかで例外が起きても、フレームワークが提供する外側の
+トランザクションによって「列だけ追加されて `hex_id` が空欄の行が残る」という
+中途半端な状態にはならない。実装（`onUpgrade`）は独自に入れ子のトランザクションを
+開始していない（入れ子にする場合は `setTransactionSuccessful()` を対で呼ばないと
+外側のトランザクションまでロールバックしてしまう点に注意）。
+
+**テスト方針**: Android の `SQLiteOpenHelper` ライフサイクル全体を JVM 単体テストで
+動かすには Robolectric が必要になり、初めての Kotlin テスト導入と同時に入れるのは
+重いと判断した。代わりに、移行SQL自体（`LocationTrackMigrations` の3つの文字列定数。
+本番コードと文字どおり同じ定数）を xerial の `sqlite-jdbc`（JVM から使える純粋な
+SQLite 実装）に対して実行するテスト（`LocationTrackMigrationV1ToV2Test`）を書いた。
+**このテストが検証するのは SQL 文自体の効果であり、Android の `SQLiteOpenHelper` の
+呼び出しタイミングそのものではない**。実機の既存DB（schema_version 1）への
+上書きインストールでの確認は§8で行う。
 
 ## 5. 時刻の扱い（T048・重要な決定）
 
@@ -434,6 +466,44 @@ sqlite3 location_track.sqlite "SELECT * FROM location_point ORDER BY id DESC LIM
    ビルドでも同じ手順を行い、バッテリー消費・精度を比較する。
 5. 結果を `specs/001-mvp/research.md` に記録し、`distanceThresholdMeters` /
    `timeCapMillis` / `priority` の確定値を決める（plan.md §16 未確定事項②）。
+
+### 8.6 実機確認手順（Issue #108・スキーマ移行・hex_id の一致確認）
+
+⚠️ この確認も単体テストでは構造的に検出できない部分がある。`H3HexIndexerTest`・
+`LocationTrackMigrationV1ToV2Test`（JVM 単体テスト・§4「移行手順」参照）は
+Kotlin実装とSQL自体の正しさを検証するが、**実機の `SQLiteOpenHelper` が実際に
+`onUpgrade` を正しいタイミングで呼ぶか**・**Pigeon 経由で Dart に渡った `hexId` が
+DBの値と一致するか**は実機でのみ確認できる。
+
+**① 既存DB（schema_version 1）からの移行確認**（本 Issue のリリースを、
+schema_version 1 のまま運用していた既存インストールへ上書きインストールする形で
+確認する。アプリを消さずに上書きインストールする点が重要——既存DBがそのまま
+移行の実地テストになる）:
+
+1. 上書きインストール前に、§8.3 の手順で `location_track.sqlite` を取り出し、
+   `sqlite3 location_track.sqlite "SELECT value FROM location_track_meta WHERE key='schema_version';"`
+   で `1` であることを確認しておく（バックアップとしても保存しておく）。
+2. 本 Issue を含むビルドを上書きインストールし、アプリを起動する（`onUpgrade` が
+   一度だけ走るはずのタイミング）。
+3. 再度 §8.3 の手順で取り出し、次を確認する:
+   - `sqlite3 location_track.sqlite "SELECT value FROM location_track_meta WHERE key='schema_version';"` が `2` になっている。
+   - `sqlite3 location_track.sqlite "SELECT COUNT(*) FROM location_point WHERE hex_id IS NULL;"` が `0`
+     （既存行が全件バックフィルされている）。
+   - 移行前に記録されていた行の緯度経度から手計算（または `H3HexIndexerTest` と同じ
+     フィクスチャ生成スクリプトで単発計算）した `hex_id` と、実際に入っている値が
+     一致する。
+
+**② hexId のパネル表示とDBの値の一致確認**（int64がPigeonで丸められていないかの
+実測。§8.4 のデバッグパネル確認と同じ流れに追加する）:
+
+1. §8.4 の手順で位置記録を起動し、デバッグパネルの「受信した位置」欄に新しい行が
+   表示されるのを待つ（`hexId=...` が表示される。`location_tracking_debug_panel.dart`）。
+2. §8.3 の手順で `location_track.sqlite` を取り出し、同じ `id` の行の `hex_id` 列の
+   値を確認する。
+3. **パネル表示の `hexId` と DB の `hex_id` が完全一致することを確認する**
+   （2^53を超える値でも一致すれば、Pigeon の `StandardMessageCodec` 経由で
+   int64が丸められていないことの実測確認になる。`native_position_provider_test.dart`
+   の合成値でのテストと合わせて、実測と単体テストの両方でカバーする）。
 
 **本 Issue（#123）のスコープはここまでの手順の用意であり、実施は代表が行う。**
 

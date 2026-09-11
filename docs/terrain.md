@@ -103,24 +103,26 @@ supersedes: null
 - **採用: Uber の H3**（グローバルなヘクスグリッド索引）。
 - 理由:
   - 64bit整数のインデックスを標準で持ち、`HexId` が非負整数であるという既存の設計と整合する。
-  - 決定論的で、**Python（`h3` パッケージ）と Dart（`h3_dart` / `h3_flutter`）の双方に実装があり**、生成側と実行側で同じ緯度経度から同じ値を再現できる。独自方式を2言語で二重実装する理由がない。
+  - 決定論的で、**Python（`h3` パッケージ）と Kotlin（`com.uber:h3` / h3-java）の双方に実装があり**、生成側と実行側で同じ緯度経度から同じ値を再現できる。独自方式を2言語で二重実装する理由がない。
   - 全球をカバーするインデックスであり、「地球が自分の街になる」という将来像と矛盾しない。
   - §4.1 の「細分グリッドセルで地形判定 → 各セルを包含するヘクスへ割り当て → 多数決で集約」という流れをそのまま実装できる（§4.1 の「内部判定は矩形グリッド、表示のみヘクス」という設計を崩さない）。
-- **バージョン**: H3 は v3 と v4 で API・挙動が異なる。本 Issue で検証・採用したのは **H3 v4 世代の API**（Python `h3` 4.5.0・関数名 `latlng_to_cell`/`cell_to_latlng` 等）であり、Dart側で使う場合は `h3_dart` のうちバンドルする H3 コアが v4 世代のバージョン（`h3_dart` 0.7.0 で確認済み。関数名 `geoToCell`/`cellToGeo` 等、v4相当のAPI体系）を使うこと。v3世代のライブラリ（関数名 `geoToH3`/`h3ToGeo` 等）と混在させないこと。詳細は `specs/001-mvp/research.md` §8.3 参照。
-- **解像度**: §3.1 のとおり **解像度11** を採用する。
+- **バージョン**: H3 は v3 と v4 で API・挙動が異なる。採用したのは **H3 v4 世代の API**（Python `h3` 4.5.0・関数名 `latlng_to_cell`/`cell_to_latlng` 等）であり、Kotlin側では `com.uber:h3:4.5.0`（h3-java。関数名 `latLngToCell`/`cellToLatLng` 等、v4相当のAPI体系）を使う（Issue #108・2026-09-11）。v3世代のライブラリ（関数名 `geoToH3`/`h3ToGeo` 等）と混在させないこと。詳細は `specs/001-mvp/research.md` §8.3 参照。
+- **解像度**: §3.1 のとおり **解像度11** を採用する。`tools/pack-builder/config.py` の `H3_RESOLUTION` と Kotlin 側 `H3HexIndexer.RESOLUTION`（`app/android/app/src/main/kotlin/jp/rokusoudo/terra_town/location/H3HexIndexer.kt`）を必ず一致させること。
+
+【Issue #108・2026-09-11 追記】以前（Issue #107・#115）は「位置トラッキング基盤（Issue #10）に着手するまでの暫定」として、実行側の変換を Dart 側（`packages/location`・`h3_flutter`）で行っていた。位置記録 foreground service の実装（Issue #123）に伴い、この変換は**記録時点で Kotlin 側が行う**形に移行した（下記4.3参照）。以降「実行側」は Kotlin（`app/android/`）を指す。Dart側の `h3_flutter`／`h3_dart` 依存は撤去済み。
 
 ### 4.3 緯度経度 → 細分グリッドセル → H3ヘクス の導出手順
 
-生成側（`tools/pack-builder/`）と実行側（`location/`）の両方が「同じ緯度経度から同じ整数（H3 index）」を導けることが本節の目的。両者が実際に一致させる必要があるのは**手順2（緯度経度→H3セル）のみ**であり、手順1（グリッド細分化）はパック生成時にのみ必要な内部処理である点に注意。
+生成側（`tools/pack-builder/`）と実行側（`app/android/`・Kotlin）の両方が「同じ緯度経度から同じ整数（H3 index）」を導けることが本節の目的。両者が実際に一致させる必要があるのは**手順2（緯度経度→H3セル）のみ**であり、手順1（グリッド細分化）はパック生成時にのみ必要な内部処理である点に注意。
 
 1. **パック生成時のみ（`tools/pack-builder/`）**: 対象エリアを細分グリッドセル（§4.1。現在の実装値・妥当性は `research.md` §8.1 参照）に敷き詰め、セルごとに §5 の優先順位ルールで地形タイプを1つ確定する（= `cell_terrain` 相当）。
-2. **生成側・実行側で共通（必ず一致させる手順）**: 対象の緯度経度（生成側では各セルの代表点、実行側ではプレイヤーの現在地）を、**固定解像度11**で H3 セルインデックスに変換する。
+2. **生成側・実行側で共通（必ず一致させる手順）**: 対象の緯度経度（生成側では各セルの代表点、実行側では位置記録時点のプレイヤーの現在地）を、**固定解像度11**で H3 セルインデックスに変換する。
    - Python（生成側）: `h3.latlng_to_cell(lat, lon, 11)` → 16進文字列 → `h3.str_to_int(...)` で64bit整数化。
-   - Dart（実行側・`location/`）: `h3_dart` の `geoToCell(GeoCoord(lat: lat, lon: lon), 11)` → `H3Index`（`BigInt`）。
-   - H3 は公開仕様に基づく決定論的アルゴリズムであり、同一の実装世代（§4.2 のとおり v4世代同士）であれば言語が異なっても同じ緯度経度・同じ解像度から同じインデックス値が得られる。これは H3 自体の設計目標であり、本 Issue の実測でも Python側の値をそのまま使えることを確認している（`research.md` §8.4）。
+   - Kotlin（実行側・`app/android/`・`H3HexIndexer`）: `H3Core.latLngToCell(lat, lon, 11)` → `Long`。位置記録 foreground service（`LocationTrackingService`）が精度・距離のゲートを通過した点を記録する時点で計算し、`location_point.hex_id` に保存する（Pigeon 経由で Dart へ渡し、Dart は読むだけ。`docs/location-track-db.md` §2〜§4）。
+   - H3 は公開仕様に基づく決定論的アルゴリズムであり、同一の実装世代（§4.2 のとおり v4世代同士）であれば言語が異なっても同じ緯度経度・同じ解像度から同じインデックス値が得られる。これは H3 自体の設計目標であり、Python（h3-py 4.5.0）と Kotlin（h3-java 4.5.0）の実測（`H3HexIndexerTest`・`tools/pack-builder/generate_hex_locator_fixture.py`）でも同じ値になることを機械的に確認している。
 3. **パック生成時のみ**: 同じ H3 セルに属する複数の細分グリッドセルを、地形タイプの多数決（セル数最大。同数の場合は §5 の優先順位が高い方を採用する決定論的なタイブレーク）で1つの地形タイプに確定し、`hex_terrain(hex_id, terrain_type)` としてパックに格納する。
 
-実行側は `hex_terrain` を読むだけであり、手順1・3を再実装する必要はない。実行側が必要とするのは手順2（現在地→H3セルインデックス）と、そのインデックスをキーにした `hex_terrain` の検索だけである。
+Dart 側（`packages/location`・`RecordedHexLocator`）は `hex_terrain` を読むだけであり、手順1〜3のいずれも再実装しない。Dart が必要とするのは Kotlin が計算済みの `hex_id`（`GeoPosition.hexId`）と、そのインデックスをキーにした `hex_terrain` の検索だけである。
 
 ### 4.4 H3 index → 地図 Feature の `id` の橋渡し（Issue #38・2026-09-08 代表決定）
 
