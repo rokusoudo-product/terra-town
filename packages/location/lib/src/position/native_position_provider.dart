@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:terra_town_core/terra_town_core.dart';
 
 import 'location_api.g.dart';
+import 'location_point_record.dart';
 
 /// [NativePositionProvider] が読み取りに使う最小限のインターフェース（Issue #131）。
 ///
@@ -135,16 +136,32 @@ class NativePositionProvider implements PositionProvider {
   int _lastSeenId = 0;
   bool _isPolling = false;
   Timer? _timer;
-  StreamController<GeoPosition>? _controller;
+  StreamController<LocationPointRecord>? _controller;
 
-  @override
-  Stream<GeoPosition> get positionUpdates {
-    final controller = _controller ??= StreamController<GeoPosition>.broadcast(
+  /// [GeoPosition] に、その記録の由来である `location_point.id`（行id）を添えた
+  /// ストリーム（Issue #138）。
+  ///
+  /// 二重計上防止のウォーターマーク（「最後に計上した行id」）を必要とする
+  /// 呼び出し側（`app/lib/map/economy/terrain_yield_pipeline.dart`）はこちらを使う。
+  /// 内部の実装（ポーリング・重複防止・履歴の扱い）は [positionUpdates] と完全に共有する
+  /// （後述のとおり [positionUpdates] は本ストリームからの導出）。
+  Stream<LocationPointRecord> get recordedPositionUpdates {
+    final controller = _controller ??= StreamController<LocationPointRecord>.broadcast(
       onListen: _start,
       onCancel: _stop,
     );
     return controller.stream;
   }
+
+  /// 行idを必要としない既存の呼び出し側向けの後方互換ビュー（Issue #124・#131）。
+  ///
+  /// [recordedPositionUpdates] から [GeoPosition] だけを取り出す `map` ビューであり、
+  /// 独立したポーリング状態を持たない（`Stream.map` は broadcast性・購読/解除を
+  /// 元のストリームへそのまま委譲するため、[recordedPositionUpdates] と同じ
+  /// `onListen`/`onCancel`・履歴の全件再生の挙動を保つ）。
+  @override
+  Stream<GeoPosition> get positionUpdates =>
+      recordedPositionUpdates.map((record) => record.position);
 
   void _start() {
     _lastSeenId = sinceRowId;
@@ -175,7 +192,7 @@ class NativePositionProvider implements PositionProvider {
         if (controller.isClosed) return;
         for (final row in rows) {
           _lastSeenId = row.id;
-          controller.add(_toGeoPosition(row));
+          controller.add(_toRecord(row));
         }
         if (rows.length < pageSize) break;
       }
@@ -192,9 +209,9 @@ class NativePositionProvider implements PositionProvider {
     }
   }
 
-  static GeoPosition _toGeoPosition(LocationPointMessage row) {
+  static LocationPointRecord _toRecord(LocationPointMessage row) {
     final accuracyMeters = row.accuracyMeters;
-    return GeoPosition(
+    final position = GeoPosition(
       latitude: row.latitude,
       longitude: row.longitude,
       // 単調時計（elapsedRealtime）をそのままマイクロ秒へ変換する。壁時計は使わない
@@ -213,6 +230,7 @@ class NativePositionProvider implements PositionProvider {
       // Issue #126: row.stepCount（nullable）をそのまま写すだけ。
       cumulativeStepCount: row.stepCount,
     );
+    return LocationPointRecord(rowId: row.id, position: position);
   }
 
   /// 使用済みのリソース（ポーリングタイマー・StreamController）を解放する。
