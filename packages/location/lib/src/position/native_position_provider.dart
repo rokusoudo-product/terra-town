@@ -98,6 +98,10 @@ class _PigeonLocationPointsApi implements LocationPointsApi {
 /// - [GeoPosition.hexId]（Issue #108）: `LocationPointMessage.hexId`（Kotlin側
 ///   `H3HexIndexer` が記録時点で確定した H3 インデックス）を [HexId] でラップするだけ。
 ///   本クラスは変換ロジックを一切持たない（`RecordedHexLocator` のドキュメント参照）。
+/// - [GeoPosition.cumulativeStepCount]（Issue #126・T101）:
+///   `LocationPointMessage.stepCount` をそのまま写すだけ。null（歩数センサー無し・
+///   `ACTIVITY_RECOGNITION` 権限無し・未取得）はそのまま null として渡す
+///   （判定ロジック〔`RewardPolicy`〕側で「不明＝罰しない」として扱う）。
 ///
 /// ## 64bit整数について
 /// `elapsedRealtimeNanos` は実機で `2634654803000000` 程度の値になることを確認済み
@@ -206,6 +210,8 @@ class NativePositionProvider implements PositionProvider {
       // そのまま HexId でラップするだけ。Kotlin 側（H3HexIndexer）が記録時点で
       // 既に確定済みの値であり、ここでは変換を一切行わない。
       hexId: HexId(row.hexId),
+      // Issue #126: row.stepCount（nullable）をそのまま写すだけ。
+      cumulativeStepCount: row.stepCount,
     );
   }
 

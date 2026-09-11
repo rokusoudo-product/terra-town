@@ -12,6 +12,7 @@ related:
   - https://github.com/rokusoudo-product/terra-town/issues/124
   - https://github.com/rokusoudo-product/terra-town/issues/10
   - https://github.com/rokusoudo-product/terra-town/issues/131
+  - https://github.com/rokusoudo-product/terra-town/issues/126
 supersedes: null
 ---
 
@@ -35,6 +36,12 @@ supersedes: null
 > `possible_mock_location` は `GeoPosition.spoofSuspected` へそのまま写す
 > （判定ロジック自体は Issue #126）。位置記録サービスの起動・停止・状態問い合わせに加え、
 > 位置データそのものも Pigeon（`pigeons/location_api.dart`）経由で渡す。
+>
+> **2026-09-11 追記（Issue #126・T099・T101）**: `possible_mock_location`
+> （`GeoPosition.spoofSuspected`）を使って開拓を無効化する判定
+> （`RewardPolicy.allowsDisclosure`）と、歩数センサー突合（`step_count` 列・
+> schema v3）を実装した。スキーマは v2→v3 に改訂し、`onUpgrade` を段階的な
+> 移行ループに変更した（§4「段階的な移行ループ」参照）。
 
 ## 1. なぜゲーム状態DB（Drift）と別ファイルにするのか
 
@@ -179,18 +186,32 @@ CREATE TABLE IF NOT EXISTS location_point (
     accuracy_meters REAL,
     possible_mock_location INTEGER NOT NULL DEFAULT 0,
     inserted_at_unix_millis INTEGER NOT NULL,
-    hex_id INTEGER
+    hex_id INTEGER,
+    step_count INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_location_point_session
 ON location_point (session_id, id);
 ```
 
-現在の `schema_version` = **2**（Issue #108・`hex_id` 列を追加。移行手順は下記参照）。
+現在の `schema_version` = **3**（Issue #126・`step_count` 列を追加。移行手順は
+下記参照。v2までの経緯は「移行手順（v1→v2）」節に残す）。
 将来さらにスキーマを変更する場合は `LocationTrackDatabaseHelper.onUpgrade` に
 移行処理を追加し（未対応の版の組み合わせは例外を投げる＝スキーマ変更を実装せず
 放置すると即座にクラッシュして気づける設計を維持する）、
 `location_track_meta.schema_version` の値も一緒に更新すること。
+
+### 段階的な移行ループ（Issue #126）
+
+`onUpgrade` は `oldVersion` から `newVersion` まで **1バージョンずつ順に**
+移行を適用する（`for (fromVersion in oldVersion until newVersion) { applyMigrationStep(db, fromVersion) }`）。
+端末が複数世代分のスキーマ改訂を一度にまたいで更新される場合（例:
+schema_version 1 のまま長期間更新していなかった端末が、schema_version 3 の
+本アプリへ一気に更新される）に、v1→v2→v3 を順に適用できるようにするための
+設計である。`location_track_meta.schema_version` の更新は各ステップの途中では
+行わず、ループの最後に一度だけ `newVersion` へ更新する。未知のバージョン
+（`applyMigrationStep` が対応しない `fromVersion`）に遭遇した場合は、これまで
+どおり例外を投げて止める（実装せずに放置して静かに壊れることを避けるため）。
 
 ### 列の意味
 
@@ -205,6 +226,7 @@ ON location_point (session_id, id);
 | `possible_mock_location` | INTEGER（0/1） | Android の `Location.isMock()`（API31+）／`isFromMockProvider()`（それ未満）の生の値。**Android の用語（`isFromMockProvider` 等）はこの列の実装に閉じており、列名・呼び出し側は中立な名前にしてある。** モック検出そのもの（判定ロジック）は本 Issue では実装していない。Issue #126 がこの値を読み、`packages/core` の `GeoPosition`（Issue #124 で追加予定の「偽装の疑い」フラグ）へ変換する想定。 |
 | `inserted_at_unix_millis` | INTEGER | 行を INSERT した時刻（`System.currentTimeMillis()`）。デバッグ用。 |
 | `hex_id` | INTEGER（NULL可・v2で追加） | 緯度経度から `H3HexIndexer`（解像度11・`docs/terrain.md` §4.2）が記録時点で計算した H3 インデックス。**列自体は NULL 許容だが、新規挿入では必ず値が入る**（SQLite は既定値なしの列を `ALTER TABLE` で `NOT NULL` にできないため列制約としては表現できない。v1→v2 移行で既存行もバックフィル済み）。Pigeon 経由で `GeoPosition.hexId` としてそのまま Dart へ渡る（Issue #108）。 |
+| `step_count` | INTEGER（NULL可・v3で追加） | 歩数センサー（`TYPE_STEP_COUNTER`）による、記録時点までの累積歩数。**`hex_id` と異なり、新規挿入でも NULL になりうる**。歩数センサーが無い端末・`ACTIVITY_RECOGNITION` 権限（API 29+）が無い端末・まだ最初のセンサーイベントを受け取っていない場合は NULL（罰しない側に倒す設計・Issue #126）。v2→v3 移行では既存行を **バックフィルしない**（既存行は歩数データを持たないため、NULL＝「不明」が正しい値）。Pigeon 経由で `GeoPosition.cumulativeStepCount` としてそのまま Dart へ渡る（Issue #126）。 |
 
 ### 移行手順（v1→v2・Issue #108・このリポジトリで初めての本物のマイグレーション）
 
@@ -234,6 +256,50 @@ SQLite 実装）に対して実行するテスト（`LocationTrackMigrationV1ToV
 **このテストが検証するのは SQL 文自体の効果であり、Android の `SQLiteOpenHelper` の
 呼び出しタイミングそのものではない**。実機の既存DB（schema_version 1）への
 上書きインストールでの確認は§8で行う。
+
+### 移行手順（v2→v3・Issue #126・T101）
+
+`step_count` 列の追加に伴う移行。`LocationTrackDatabaseHelper.onUpgrade` の
+段階的ループ（上記「段階的な移行ループ」参照）が `fromVersion=2` の
+ステップとして次を行う:
+
+1. `ALTER TABLE location_point ADD COLUMN step_count INTEGER`（NULL許容のまま追加）。
+2. **既存行のバックフィルは行わない**（v1→v2 のときと異なる点。既存行は
+   歩数センサーのデータを持たないため、NULL＝「不明」が正しい値。`0` 等で
+   バックフィルすると「歩いていないのに移動した」という誤ったシグナルに
+   なってしまう）。
+3. ループの最後に `UPDATE location_track_meta SET value = ? WHERE key = 'schema_version'`
+   で `newVersion`（1バージョンずつのループなので v1 スタートなら最終的に
+   `3`）に更新する。
+
+v1 の端末が本アプリに更新される場合は、`fromVersion=1`（v1→v2 の hex_id
+バックフィル）→ `fromVersion=2`（本ステップ）の順に適用され、`hex_id` は
+バックフィルされるが `step_count` はバックフィルされない（両者で扱いが
+異なる点に注意）。
+
+**テスト方針**: v1→v2 のときと同じ理由（Robolectric 不採用）で、移行SQL自体を
+xerial `sqlite-jdbc` に対して実行するテスト（`LocationTrackMigrationTest`。
+Issue #126 で `LocationTrackMigrationV1ToV2Test` から改名・拡張）で検証する。
+v1→v3（複数ステップの一括適用）・v2→v3（単一ステップ）の両方をテストしている。
+実機の既存DB（schema_version 1 または 2）への上書きインストールでの確認は
+§8.7 で行う。
+
+### 歩数突合の閾値（Issue #126・正本は将来 `balance.csv`）
+
+`step_count` を使った歩数対距離の突合ロジック本体は `core`（GPS/Kotlin非依存）
+の `packages/core/lib/src/antispoof/reward_policy.dart`（`RewardPolicy`）に実装
+されている。閾値（歩幅上限・最小ウィンドウ距離・不一致時の倍率）は以下のとおり
+（詳細な根拠は同ファイルのクラスdoc参照）:
+
+| 定数 | 既定値 | 意味 |
+|---|---|---|
+| `RewardPolicy.defaultMaxStrideMeters` | 1.5m | 「歩数 × この値」で説明できる距離とみなす歩幅上限 |
+| `RewardPolicy.defaultMinWindowDistanceMeters` | 100m | このウィンドウ内の合計移動距離未満では判定しない |
+| `RewardPolicy.defaultStepMismatchMultiplier` | 0.5 | 不一致時の資材付与レート倍率（0にはしない） |
+
+**いずれも仮の値であり、正本は将来 `specs/001-mvp/balance.csv`（Issue #36・
+T106・未作成）。作成時はそこへ移す。** 最終調整は `tasks.md` T017（代表の
+実機スパイク）で行う。
 
 ## 5. 時刻の扱い（T048・重要な決定）
 
@@ -536,6 +602,56 @@ AGPの標準の `jniLibs` パッケージング（`build.gradle.kts` の `extrac
 
 **本 Issue（#123・#108）のスコープはここまでの手順の用意であり、実施は代表が行う。**
 
+### 8.7 実機確認手順（Issue #126・T099・T101・モック検出の無効化と歩数センサー突合）
+
+⚠️ この確認も単体テストでは構造的に検出できない部分がある。`reward_policy_test.dart`・
+`LocationTrackMigrationTest` は合成データ・SQL自体の正しさを検証するが、**実機の
+`SensorManager` が実際に `TYPE_STEP_COUNTER` イベントを配送するか**・**モック位置
+アプリでの検出が実際に開拓を止めるか**・**正規の歩行で報酬が没収されないか**は
+実機でのみ確認できる。
+
+**① `ACTIVITY_RECOGNITION` 権限の有無での歩数取得確認**:
+
+```bash
+# 権限を与えずに起動 → デバッグパネルの steps= が常に null のままであること
+adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACTIVITY_RECOGNITION
+# サービスを起動（§8.2）→ 歩いて記録を発生させる → デバッグパネルで steps=null を確認
+
+# 権限を与えて起動 → steps= が増えていくこと
+adb shell pm grant jp.rokusoudo.terra_town android.permission.ACTIVITY_RECOGNITION
+# サービスを再起動 → 歩いて記録を発生させる → デバッグパネルで steps= の値が増加することを確認
+```
+
+いずれの場合もサービス自体は正常に起動し記録が続くこと（歩数センサーの可否が
+位置記録そのものを妨げないこと）を確認する。
+
+**② モック位置アプリでの検出確認**（開発者向け設定でモック位置アプリを選択し、
+実際に位置を偽装するアプリで確認する）:
+
+1. モック位置アプリを有効にし、現在地から離れた地点をモック位置として設定する。
+2. サービスを起動し、モック位置が記録されることを確認する（`adb logcat` の
+   「位置記録」ログ、または §8.3 の手順で `possible_mock_location` が `1` の行を
+   確認する）。
+3. デバッグパネルの該当行で `spoofSuspected=true` になっていることを確認する。
+4. **アプリ側でその位置を含むヘクスの開拓（霧が晴れる表示）が起きないこと**を
+   確認する（`RewardPolicy.allowsDisclosure`・`DisclosureService.recordPosition`
+   の実装が実機でも機能していることの確認。地図描画への実際の配線は Issue #99・
+   #100 の範囲であり、本確認はその配線ができている前提で行う）。
+
+**③ 正規歩行で報酬（開拓・付与レート）が没収されないことの確認**:
+
+1. モック位置を使わず、通常の徒歩でサービスを起動し、しばらく歩く。
+2. 歩いた範囲の霧が晴れる（開拓される）ことを確認する。
+3. デバッグパネルの位置ログで `spoofSuspected=false`・`steps=` が距離に見合って
+   増えていることを確認する（極端に少ない場合は `RewardPolicy` の歩数不一致判定
+   により将来の資材付与レートが下がりうる。閾値の妥当性は T017 で確定する）。
+4. 本 Issue の時点では資材付与処理自体が未実装（Issue #126 本文「スコープ外」）
+   のため、付与レート低下の最終確認（実際に資材が減ることの確認）は付与処理の
+   実装後に改めて行う。本確認は「開拓が没収されないこと」・「歩数が概ね妥当に
+   計測されること」までとする。
+
+**本 Issue（#126）のスコープはここまでの手順の用意であり、実施は代表が行う。**
+
 ## 9. Google Play 関連の申告事項（PR本文にも記載）
 
 - **App content → Foreground service permissions**: `FOREGROUND_SERVICE_LOCATION` の
@@ -545,6 +661,13 @@ AGPの標準の `jniLibs` パッケージング（`build.gradle.kts` の `extrac
   収集し、端末上で処理する。サーバへは送信しない（`docs/architecture.md` のとおり MVP は
   外部通信ゼロ）。
 - バックグラウンド位置の申告は不要（要求していないため）。
+- **健康とフィットネス / フィットネス情報（歩数）**（Issue #126・T101で追加）:
+  歩数センサー（`TYPE_STEP_COUNTER`）による累積歩数を収集する。**端末内のみで
+  使用し、外部へ送信・共有しない**（GPS偽装対策の歩数突合にのみ使う。
+  `docs/architecture.md` のとおり MVP は外部通信ゼロ）。`ACTIVITY_RECOGNITION`
+  権限（API 29+）が必要。Google Play のデータセーフティ申告（「フィットネス」
+  カテゴリ・「歩数」データ型）に追加が必要（T104が本体を作成する
+  `docs/data-safety.md` に反映すること）。
 
 ## 10. 前提: Google Play services 依存
 

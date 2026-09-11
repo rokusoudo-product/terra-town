@@ -117,6 +117,30 @@ class GeoPosition {
   /// [NativePositionProvider]（`packages/location`）のみ。
   final HexId? hexId;
 
+  /// この観測時点までの、歩数センサーの累積歩数（Issue #126・T101）。
+  ///
+  /// ## なぜプラットフォーム中立な名前にしたか
+  /// [spoofSuspected]・[hexId] と同じ方針（Issue #124・#108）で、Android の
+  /// 用語（`TYPE_STEP_COUNTER` 等）をフィールド名・型に持ち込まない。「その時点
+  /// までの累積歩数」という意味だけを持たせてあり、iOS 実装（`CMPedometer` 等）
+  /// でも同じ意味で埋められる想定。
+  ///
+  /// ## 既定値は null（意味は「不明」）
+  /// [spoofSuspected]・[trackingSessionId]・[hexId] と同じ理由に加え、Issue #126
+  /// 本文の明示的な要求: **歩数センサーを持たない端末・権限が無い端末・値を
+  /// まだ取得できていない場合は null にし、突合ロジック（[RewardPolicy]・
+  /// `packages/core/lib/src/antispoof/reward_policy.dart`）側で「不明＝罰しない」
+  /// として扱う**（脅威モデル上、誤検出の方が正規ユーザーへの実害が大きいため。
+  /// Issue #126 本文「⚠️ 歩数センサーについて」参照）。
+  ///
+  /// ## 単調増加を仮定しない
+  /// この値は同一 [trackingSessionId] 内でも、端末再起動やセンサーのリセットで
+  /// 巻き戻りうる。呼び出し側（[RewardPolicy]）は前の観測より減っている場合を
+  /// 「不明」として扱う（[RewardPolicy] クラスdoc「4条件」の条件2参照）。
+  ///
+  /// 値を設定するのは [NativePositionProvider]（`packages/location`）のみ。
+  final int? cumulativeStepCount;
+
   const GeoPosition({
     required this.latitude,
     required this.longitude,
@@ -125,6 +149,7 @@ class GeoPosition {
     this.spoofSuspected = false,
     this.trackingSessionId,
     this.hexId,
+    this.cumulativeStepCount,
   })  : assert(
           latitude >= -90.0 && latitude <= 90.0,
           '緯度は -90.0〜90.0 の範囲でなければならない',
@@ -143,7 +168,8 @@ class GeoPosition {
       other.accuracy == accuracy &&
       other.spoofSuspected == spoofSuspected &&
       other.trackingSessionId == trackingSessionId &&
-      other.hexId == hexId;
+      other.hexId == hexId &&
+      other.cumulativeStepCount == cumulativeStepCount;
 
   @override
   int get hashCode => Object.hash(
@@ -154,10 +180,12 @@ class GeoPosition {
         spoofSuspected,
         trackingSessionId,
         hexId,
+        cumulativeStepCount,
       );
 
   @override
   String toString() => 'GeoPosition(lat: $latitude, lon: $longitude, at: $timestamp, '
       'accuracy: $accuracy, spoofSuspected: $spoofSuspected, '
-      'trackingSessionId: $trackingSessionId, hexId: $hexId)';
+      'trackingSessionId: $trackingSessionId, hexId: $hexId, '
+      'cumulativeStepCount: $cumulativeStepCount)';
 }

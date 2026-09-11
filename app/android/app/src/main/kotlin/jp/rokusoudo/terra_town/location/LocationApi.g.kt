@@ -445,7 +445,19 @@ data class LocationPointMessage (
    * 「開示が静かに壊れる」という本プロジェクトが繰り返し避けてきた失敗様式に
    * なるため採らない）。
    */
-  val hexId: Long
+  val hexId: Long,
+  /**
+   * `location_point.step_count`（Issue #126・T101・schema v3）。
+   *
+   * この観測時点までの、Android の歩数センサー（`TYPE_STEP_COUNTER`）による
+   * 起動後の累積歩数。**nullable**（[hexId] とは対照的）: 歩数センサーを持たない
+   * 端末・`ACTIVITY_RECOGNITION` 権限が無い端末・まだ最初のセンサーイベントを
+   * 受け取っていない場合は null になる（罰しない側に倒す・Issue #126 本文
+   * 「⚠️ 歩数センサーについて」）。[GeoPosition.cumulativeStepCount]
+   * （`packages/core`）へそのまま写される（`NativePositionProvider` の
+   * ドキュメント参照）。
+   */
+  val stepCount: Long? = null
 )
  {
   companion object {
@@ -458,7 +470,8 @@ data class LocationPointMessage (
       val accuracyMeters = pigeonVar_list[5] as Double?
       val possibleMockLocation = pigeonVar_list[6] as Boolean
       val hexId = pigeonVar_list[7] as Long
-      return LocationPointMessage(id, sessionId, elapsedRealtimeNanos, latitude, longitude, accuracyMeters, possibleMockLocation, hexId)
+      val stepCount = pigeonVar_list[8] as Long?
+      return LocationPointMessage(id, sessionId, elapsedRealtimeNanos, latitude, longitude, accuracyMeters, possibleMockLocation, hexId, stepCount)
     }
   }
   fun toList(): List<Any?> {
@@ -471,6 +484,7 @@ data class LocationPointMessage (
       accuracyMeters,
       possibleMockLocation,
       hexId,
+      stepCount,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -481,7 +495,7 @@ data class LocationPointMessage (
       return true
     }
     val other = other as LocationPointMessage
-    return LocationApiPigeonUtils.deepEquals(this.id, other.id) && LocationApiPigeonUtils.deepEquals(this.sessionId, other.sessionId) && LocationApiPigeonUtils.deepEquals(this.elapsedRealtimeNanos, other.elapsedRealtimeNanos) && LocationApiPigeonUtils.deepEquals(this.latitude, other.latitude) && LocationApiPigeonUtils.deepEquals(this.longitude, other.longitude) && LocationApiPigeonUtils.deepEquals(this.accuracyMeters, other.accuracyMeters) && LocationApiPigeonUtils.deepEquals(this.possibleMockLocation, other.possibleMockLocation) && LocationApiPigeonUtils.deepEquals(this.hexId, other.hexId)
+    return LocationApiPigeonUtils.deepEquals(this.id, other.id) && LocationApiPigeonUtils.deepEquals(this.sessionId, other.sessionId) && LocationApiPigeonUtils.deepEquals(this.elapsedRealtimeNanos, other.elapsedRealtimeNanos) && LocationApiPigeonUtils.deepEquals(this.latitude, other.latitude) && LocationApiPigeonUtils.deepEquals(this.longitude, other.longitude) && LocationApiPigeonUtils.deepEquals(this.accuracyMeters, other.accuracyMeters) && LocationApiPigeonUtils.deepEquals(this.possibleMockLocation, other.possibleMockLocation) && LocationApiPigeonUtils.deepEquals(this.hexId, other.hexId) && LocationApiPigeonUtils.deepEquals(this.stepCount, other.stepCount)
   }
 
   override fun hashCode(): Int {
@@ -494,10 +508,11 @@ data class LocationPointMessage (
     result = 31 * result + LocationApiPigeonUtils.deepHash(this.accuracyMeters)
     result = 31 * result + LocationApiPigeonUtils.deepHash(this.possibleMockLocation)
     result = 31 * result + LocationApiPigeonUtils.deepHash(this.hexId)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.stepCount)
     return result
   }
   override fun toString(): String {
-    return "LocationPointMessage(id=$id, sessionId=$sessionId, elapsedRealtimeNanos=$elapsedRealtimeNanos, latitude=$latitude, longitude=$longitude, accuracyMeters=$accuracyMeters, possibleMockLocation=$possibleMockLocation, hexId=$hexId)"
+    return "LocationPointMessage(id=$id, sessionId=$sessionId, elapsedRealtimeNanos=$elapsedRealtimeNanos, latitude=$latitude, longitude=$longitude, accuracyMeters=$accuracyMeters, possibleMockLocation=$possibleMockLocation, hexId=$hexId, stepCount=$stepCount)"
   }
 }
 private open class LocationApiPigeonCodec : StandardMessageCodec() {

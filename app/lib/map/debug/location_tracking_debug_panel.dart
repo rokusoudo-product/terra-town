@@ -28,6 +28,11 @@ import '../../design/spacing.dart';
 ///   Kotlin が `location_track.sqlite` に書いた行が Pigeon 経由（Issue #131・
 ///   `LocationTrackingHostApi.getLocationPoints`）で Dart 側に実際に届いていること
 ///   （緯度経度・`trackingSessionId`・`spoofSuspected`）を直接確認できる。
+///   **Issue #126（T101）追記**: 各行に `cumulativeStepCount`（`steps=`）も表示する。
+///   `adb shell pm grant .../ACTIVITY_RECOGNITION` の有無それぞれで実機起動し、
+///   許可時は数値が増えていくこと・未許可時は常に `null` のままであること
+///   （罰しない側に倒す実装の確認）を代表が確認する観測点
+///   （`docs/location-track-db.md` §8 の実機確認手順参照）。
 class LocationTrackingDebugPanel extends StatefulWidget {
   const LocationTrackingDebugPanel({
     super.key,
@@ -168,7 +173,12 @@ class _LocationTrackingDebugPanelState extends State<LocationTrackingDebugPanel>
                         // Issue #108: DBの hex_id と Dart が受け取った値が一致するか
                         // （int64がPigeonで丸められていないか）を実機で突き合わせるための
                         // 観測点。hexId.value を表示する（HexId(null) の場合は"null"）。
-                        'hexId=${position.hexId?.value}',
+                        'hexId=${position.hexId?.value} '
+                        // Issue #126（T101）: 累積歩数が実際に届いているか（ACTIVITY_RECOGNITION
+                        // 権限の有無・歩数センサーの有無を実機で確認するための観測点）。
+                        // null は「歩数センサー無し・権限無し・未取得」のいずれか
+                        // （区別が必要な場合は adb logcat の LocationTrackingService を見ること）。
+                        'steps=${position.cumulativeStepCount}',
                         style: textTheme.bodySmall,
                       );
                     },

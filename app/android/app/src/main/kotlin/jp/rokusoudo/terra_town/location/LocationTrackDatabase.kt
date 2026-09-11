@@ -70,8 +70,16 @@ object LocationTrackSchema {
      * 本物のスキーマ改訂・マイグレーション）。v1→v2 の移行手順は
      * [LocationTrackDatabaseHelper.onUpgrade]・[LocationTrackMigrations] を参照。
      * `docs/location-track-db.md` §4「移行手順」にも同内容を転記する。
+     *
+     * 【Issue #126 追記・v3】[COLUMN_STEP_COUNT] 列を追加した（T101・歩数センサー
+     * 突合）。v1→v2 のときと異なり、既存行のバックフィルは行わない（既存行は
+     * 歩数センサーのデータを持たないため、NULL＝「不明」が正しい値。
+     * [LocationTrackDatabaseHelper.onUpgrade] のドキュメント参照）。
+     * [LocationTrackDatabaseHelper.onUpgrade] は v1→v2→v3 のように、旧バージョンの
+     * 端末が複数世代分のスキーマ改訂を一度にまたいでも正しく適用できるよう、
+     * 移行を1バージョンずつの段階的なループとして実装している。
      */
-    const val SCHEMA_VERSION = 2
+    const val SCHEMA_VERSION = 3
 
     const val TABLE_META = "location_track_meta"
     const val TABLE_POINT = "location_point"
@@ -112,6 +120,14 @@ object LocationTrackSchema {
      *   v1→v2 移行時に既存行をバックフィルすることで実質的に「新規挿入では必ず
      *   値が入る・移行後は全行に値がある」状態にする。[LocationTrackDatabaseHelper.insertPoint]
      *   は必ず値を渡す）。
+     * - [COLUMN_STEP_COUNT]（Issue #126・v3で追加）: 歩数センサー
+     *   （`TYPE_STEP_COUNTER`）による、記録時点までの累積歩数。**NULL 許容であり、
+     *   [COLUMN_HEX_ID] と異なり新規挿入でも NULL になりうる**（歩数センサーが
+     *   無い端末・`ACTIVITY_RECOGNITION` 権限が無い端末・まだ最初のセンサー
+     *   イベントを受け取っていない場合。`LocationTrackingService` のドキュメント
+     *   参照）。v2→v3 移行では既存行をバックフィルしない（既存行は歩数データを
+     *   持たないため、NULL＝「不明」が正しい値であり、`0` 等でバックフィルすると
+     *   「歩いていないのに移動した」という誤ったシグナルになる）。
      */
     const val CREATE_TABLE_POINT = """
         CREATE TABLE IF NOT EXISTS $TABLE_POINT (
@@ -124,7 +140,8 @@ object LocationTrackSchema {
             accuracy_meters REAL,
             possible_mock_location INTEGER NOT NULL DEFAULT 0,
             inserted_at_unix_millis INTEGER NOT NULL,
-            hex_id INTEGER
+            hex_id INTEGER,
+            step_count INTEGER
         )
     """
 
@@ -144,6 +161,7 @@ object LocationTrackSchema {
     const val COLUMN_POSSIBLE_MOCK_LOCATION = "possible_mock_location"
     const val COLUMN_INSERTED_AT_UNIX_MILLIS = "inserted_at_unix_millis"
     const val COLUMN_HEX_ID = "hex_id"
+    const val COLUMN_STEP_COUNT = "step_count"
 
     const val META_KEY_SCHEMA_VERSION = "schema_version"
     const val META_COLUMN_KEY = "key"
@@ -157,8 +175,18 @@ object LocationTrackSchema {
 }
 
 /**
- * `location_track.sqlite` の v1→v2 マイグレーション（Issue #108）で使う SQL 文を
+ * `location_track.sqlite` のマイグレーション（Issue #108・#126）で使う SQL 文を
  * 定数として集約したオブジェクト。
+ *
+ * ## 段階的な移行（Issue #126・重要）
+ * [LocationTrackDatabaseHelper.onUpgrade] は、`oldVersion` から `newVersion` まで
+ * **1バージョンずつ順に**移行を適用する（例: v1の端末が v3 の本アプリへ更新された
+ * 場合、v1→v2→v3 を順に適用する）。本オブジェクトの定数は「バージョン X → X+1」の
+ * 単位で1組ずつ用意する（[V1_TO_V2_ADD_HEX_ID_COLUMN] 等が v1→v2、
+ * [V2_TO_V3_ADD_STEP_COUNT_COLUMN] が v2→v3）。将来 v3→v4 の移行を追加する場合も
+ * 同じ命名規則（`VX_TO_VY_...`）に従うこと。[UPDATE_SCHEMA_VERSION] のみ
+ * バージョンに依存しない汎用の定数にしてある（`onUpgrade` がループの最後に一度だけ
+ * 呼ぶため）。
  *
  * ## なぜ SQL を定数として切り出したか（テスト容易性のための設計判断・重要）
  * このリポジトリには Kotlin の単体テストがまだ無く（本 Issue が最初）、
@@ -200,8 +228,22 @@ object LocationTrackMigrations {
         "UPDATE ${LocationTrackSchema.TABLE_POINT} SET ${LocationTrackSchema.COLUMN_HEX_ID} = ? " +
             "WHERE ${LocationTrackSchema.COLUMN_ID} = ?"
 
-    /** v1→v2: `location_track_meta.schema_version` を更新する。 */
-    val V1_TO_V2_UPDATE_SCHEMA_VERSION =
+    /** v2→v3（Issue #126）: [LocationTrackSchema.COLUMN_STEP_COUNT] 列を追加する。
+     * 既定値なしのため NULL 許容。**既存行のバックフィルは行わない**
+     * （[LocationTrackSchema.CREATE_TABLE_POINT] のドキュメント「なぜバックフィル
+     * しないか」参照。NULL＝「不明」が正しい値であり、`0` 等でバックフィルすると
+     * 「歩いていないのに移動した」という誤ったシグナルになるため）。
+     */
+    val V2_TO_V3_ADD_STEP_COUNT_COLUMN =
+        "ALTER TABLE ${LocationTrackSchema.TABLE_POINT} " +
+            "ADD COLUMN ${LocationTrackSchema.COLUMN_STEP_COUNT} INTEGER"
+
+    /**
+     * `location_track_meta.schema_version` を更新する（バージョンに依存しない
+     * 汎用の定数。Issue #126 で `onUpgrade` を段階的なループに変更したことに伴い、
+     * `V1_TO_V2_UPDATE_SCHEMA_VERSION` から改名した。SQL文自体は変更していない）。
+     */
+    val UPDATE_SCHEMA_VERSION =
         "UPDATE ${LocationTrackSchema.TABLE_META} SET ${LocationTrackSchema.META_COLUMN_VALUE} = ? " +
             "WHERE ${LocationTrackSchema.META_COLUMN_KEY} = ?"
 }
@@ -263,80 +305,101 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
     }
 
     /**
-     * スキーマの移行（Issue #108・このリポジトリで初めての本物のマイグレーション）。
+     * スキーマの移行（Issue #108・このリポジトリで初めての本物のマイグレーション。
+     * Issue #126 で段階的なループに拡張した）。
      *
-     * ## v1→v2（[LocationTrackSchema.COLUMN_HEX_ID] の追加）
-     * 1. [LocationTrackMigrations.V1_TO_V2_ADD_HEX_ID_COLUMN] で列を追加する
-     *    （SQLite は既定値なしの列を `NOT NULL` として `ALTER TABLE` できないため、
-     *    列自体は NULL 許容のまま追加する）。
-     * 2. 既存行を全件読み出し、緯度経度から [H3HexIndexer.locate] で `hex_id` を計算し、
-     *    [LocationTrackMigrations.V1_TO_V2_UPDATE_HEX_ID] で1行ずつバックフィルする。
-     * 3. [LocationTrackMigrations.V1_TO_V2_UPDATE_SCHEMA_VERSION] で
-     *    `location_track_meta.schema_version` を更新する。
+     * ## 段階的な移行ループ（Issue #126）
+     * 端末が複数世代分のスキーマ改訂を一度にまたいで更新されうる（例: schema_version
+     * 1 のまま長期間更新していなかった端末が、schema_version 3 の本アプリへ
+     * 一気に更新される）。そのため `oldVersion` から `newVersion` まで
+     * **1バージョンずつ順に** [applyMigrationStep] を呼ぶループにしてある
+     * （v1の端末は v1→v2→v3 の順に適用される）。`location_track_meta.schema_version`
+     * の更新は、途中の各ステップでは行わず**ループの最後に一度だけ**
+     * [LocationTrackMigrations.UPDATE_SCHEMA_VERSION] で `newVersion` に更新する
+     * （各ステップの区切りでメタ情報を更新しない設計により、`applyMigrationStep` が
+     * 「そのバージョンのDDL・データ移行」だけに専念できる）。
      *
      * **同一トランザクションで行う理由**: `SQLiteOpenHelper` は `onUpgrade` 自体を
      * 呼び出す前後で既に1つのトランザクション
      * （`beginTransaction()` … `setVersion(newVersion)` … `setTransactionSuccessful()` …
      * `endTransaction()`）で包んでいる（`getDatabaseLocked` の実装）ため、本メソッドの
-     * 内容全体が既にアトミックである。列追加とバックフィルの間で例外が起きた場合に
-     * 「列だけ追加されて `hex_id` が空欄の行が残る」という中途半端な状態を防げるのは、
-     * このフレームワークが提供する外側のトランザクションのおかげであり、本メソッドが
-     * 独自に `db.beginTransaction()` を呼ぶ必要はない（呼ぶ場合は
-     * `setTransactionSuccessful()` を対で呼ばないと、外側のトランザクションまで
-     * ロールバックしてしまう点に注意。本実装では明示的な入れ子トランザクションは
-     * 使わず、フレームワークが提供する外側のトランザクションのみに委ねている）。
+     * 内容全体（ループ全体）が既にアトミックである。列追加とバックフィルの間、または
+     * 複数ステップの間で例外が起きた場合に中途半端な状態を防げるのは、この
+     * フレームワークが提供する外側のトランザクションのおかげであり、本メソッドが
+     * 独自に `db.beginTransaction()` を呼ぶ必要はない。
      *
-     * カーソルは全行読み終えてから閉じ（`use` ブロックの終了）、その後に
-     * `UPDATE` を発行する（同じテーブルに対して開いたカーソルの途中で書き込むと
-     * 未定義動作になりうるため）。
-     *
-     * v1→v2 以外（将来の未知のバージョンの組み合わせ）は、実装せずに放置して
-     * 静かに壊れることを避けるため、これまでどおり例外を投げて止める。
+     * 未知のバージョン（[applyMigrationStep] が対応しない `fromVersion`）に
+     * 遭遇した場合は、実装せずに放置して静かに壊れることを避けるため、これまでどおり
+     * 例外を投げて止める。
      */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion == 1 && newVersion == 2) {
-            db.execSQL(LocationTrackMigrations.V1_TO_V2_ADD_HEX_ID_COLUMN)
-
-            val points = mutableListOf<Pair<Long, Pair<Double, Double>>>()
-            db.rawQuery(LocationTrackMigrations.V1_TO_V2_SELECT_ALL_POINTS, null).use { cursor ->
-                val idIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_ID)
-                val latitudeIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_LATITUDE)
-                val longitudeIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_LONGITUDE)
-                while (cursor.moveToNext()) {
-                    points.add(
-                        cursor.getLong(idIndex) to
-                            (cursor.getDouble(latitudeIndex) to cursor.getDouble(longitudeIndex)),
-                    )
-                }
-            }
-
-            db.compileStatement(LocationTrackMigrations.V1_TO_V2_UPDATE_HEX_ID).use { statement ->
-                for ((id, latLon) in points) {
-                    val (latitude, longitude) = latLon
-                    val hexId = H3HexIndexer.locate(latitude, longitude)
-                    statement.bindLong(1, hexId)
-                    statement.bindLong(2, id)
-                    statement.executeUpdateDelete()
-                }
-            }
-
-            db.execSQL(
-                LocationTrackMigrations.V1_TO_V2_UPDATE_SCHEMA_VERSION,
-                arrayOf(newVersion.toString(), LocationTrackSchema.META_KEY_SCHEMA_VERSION),
-            )
-            return
+        for (fromVersion in oldVersion until newVersion) {
+            applyMigrationStep(db, fromVersion)
         }
-
-        // 未知のバージョンの組み合わせ。実装せずに放置して静かに壊れることを避けるため、
-        // Issue #123 時点から継続してこの経路は例外で止める（Issue #123 本文が Drift との
-        // 齟齬について指摘している問題と同種の事故を、Kotlin 側スキーマ自身の将来の
-        // 改訂でも起こさないための意図的な設計）。手順は docs/location-track-db.md に
-        // 記録すること。
-        throw IllegalStateException(
-            "location_track.sqlite の onUpgrade は oldVersion=$oldVersion → " +
-                "newVersion=$newVersion の移行に未対応です。" +
-                "docs/location-track-db.md の移行手順に従って実装してください。",
+        db.execSQL(
+            LocationTrackMigrations.UPDATE_SCHEMA_VERSION,
+            arrayOf(newVersion.toString(), LocationTrackSchema.META_KEY_SCHEMA_VERSION),
         )
+    }
+
+    /**
+     * `fromVersion` → `fromVersion + 1` の1ステップ分の移行を適用する
+     * （[onUpgrade] のループから呼ばれる）。`location_track_meta.schema_version` の
+     * 更新はここでは行わない（[onUpgrade] がループの最後に一度だけ行う）。
+     */
+    private fun applyMigrationStep(db: SQLiteDatabase, fromVersion: Int) {
+        when (fromVersion) {
+            1 -> {
+                // v1→v2（Issue #108）: [LocationTrackSchema.COLUMN_HEX_ID] の追加。
+                db.execSQL(LocationTrackMigrations.V1_TO_V2_ADD_HEX_ID_COLUMN)
+
+                val points = mutableListOf<Pair<Long, Pair<Double, Double>>>()
+                db.rawQuery(LocationTrackMigrations.V1_TO_V2_SELECT_ALL_POINTS, null).use { cursor ->
+                    val idIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_ID)
+                    val latitudeIndex =
+                        cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_LATITUDE)
+                    val longitudeIndex =
+                        cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_LONGITUDE)
+                    while (cursor.moveToNext()) {
+                        points.add(
+                            cursor.getLong(idIndex) to
+                                (cursor.getDouble(latitudeIndex) to cursor.getDouble(longitudeIndex)),
+                        )
+                    }
+                }
+
+                // カーソルは全行読み終えてから閉じ（`use` ブロックの終了）、その後に
+                // `UPDATE` を発行する（同じテーブルに対して開いたカーソルの途中で
+                // 書き込むと未定義動作になりうるため）。
+                db.compileStatement(LocationTrackMigrations.V1_TO_V2_UPDATE_HEX_ID).use { statement ->
+                    for ((id, latLon) in points) {
+                        val (latitude, longitude) = latLon
+                        val hexId = H3HexIndexer.locate(latitude, longitude)
+                        statement.bindLong(1, hexId)
+                        statement.bindLong(2, id)
+                        statement.executeUpdateDelete()
+                    }
+                }
+            }
+            2 -> {
+                // v2→v3（Issue #126）: [LocationTrackSchema.COLUMN_STEP_COUNT] の追加。
+                // バックフィルは行わない（列のドキュメント「なぜバックフィルしないか」
+                // 参照。既存行は NULL のまま＝「不明」が正しい値）。
+                db.execSQL(LocationTrackMigrations.V2_TO_V3_ADD_STEP_COUNT_COLUMN)
+            }
+            else -> {
+                // 未知のバージョン。実装せずに放置して静かに壊れることを避けるため、
+                // Issue #123 時点から継続してこの経路は例外で止める（Issue #123 本文が
+                // Drift との齟齬について指摘している問題と同種の事故を、Kotlin 側
+                // スキーマ自身の将来の改訂でも起こさないための意図的な設計）。手順は
+                // docs/location-track-db.md に記録すること。
+                throw IllegalStateException(
+                    "location_track.sqlite の onUpgrade は fromVersion=$fromVersion → " +
+                        "${fromVersion + 1} の移行に未対応です。" +
+                        "docs/location-track-db.md の移行手順に従って実装してください。",
+                )
+            }
+        }
     }
 
     /**
@@ -347,6 +410,11 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
      * ヘクスIDの確定は記録時点＝Kotlin側で行う）。新規挿入では必ず値を渡すこと
      * （列自体はマイグレーション上の制約で NULL 許容だが、新規行を NULL のまま
      * 挿入してはならない）。
+     *
+     * [stepCount] は [hexId] と異なり **新規挿入でも null を許容する**（Issue #126・
+     * T101）。歩数センサーが無い端末・`ACTIVITY_RECOGNITION` 権限が無い端末・
+     * まだ最初のセンサーイベントを受け取っていない場合は null を渡すこと
+     * （`LocationTrackSchema.CREATE_TABLE_POINT` のドキュメント参照）。
      */
     fun insertPoint(
         sessionId: String,
@@ -357,6 +425,7 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
         accuracyMeters: Float?,
         possibleMockLocation: Boolean,
         hexId: Long,
+        stepCount: Long?,
     ) {
         val values = ContentValues().apply {
             put(LocationTrackSchema.COLUMN_SESSION_ID, sessionId)
@@ -372,6 +441,11 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
             put(LocationTrackSchema.COLUMN_POSSIBLE_MOCK_LOCATION, if (possibleMockLocation) 1 else 0)
             put(LocationTrackSchema.COLUMN_INSERTED_AT_UNIX_MILLIS, System.currentTimeMillis())
             put(LocationTrackSchema.COLUMN_HEX_ID, hexId)
+            if (stepCount != null) {
+                put(LocationTrackSchema.COLUMN_STEP_COUNT, stepCount)
+            } else {
+                putNull(LocationTrackSchema.COLUMN_STEP_COUNT)
+            }
         }
         writableDatabase.insertOrThrow(LocationTrackSchema.TABLE_POINT, null, values)
     }
@@ -410,7 +484,8 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
                 "${LocationTrackSchema.COLUMN_LONGITUDE}, " +
                 "${LocationTrackSchema.COLUMN_ACCURACY_METERS}, " +
                 "${LocationTrackSchema.COLUMN_POSSIBLE_MOCK_LOCATION}, " +
-                "${LocationTrackSchema.COLUMN_HEX_ID} " +
+                "${LocationTrackSchema.COLUMN_HEX_ID}, " +
+                "${LocationTrackSchema.COLUMN_STEP_COUNT} " +
                 "FROM ${LocationTrackSchema.TABLE_POINT} " +
                 "WHERE ${LocationTrackSchema.COLUMN_ID} > ? " +
                 "ORDER BY ${LocationTrackSchema.COLUMN_ID} ASC " +
@@ -428,6 +503,7 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
             val possibleMockLocationIndex =
                 cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_POSSIBLE_MOCK_LOCATION)
             val hexIdIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_HEX_ID)
+            val stepCountIndex = cursor.getColumnIndexOrThrow(LocationTrackSchema.COLUMN_STEP_COUNT)
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idIndex)
                 if (cursor.isNull(hexIdIndex)) {
@@ -455,6 +531,14 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
                             },
                         possibleMockLocation = cursor.getInt(possibleMockLocationIndex) != 0,
                         hexId = cursor.getLong(hexIdIndex),
+                        // Issue #126: hex_id と異なり NULL を正当な値として扱う
+                        // （「不明」。selectPointsAfter のドキュメント参照）。
+                        stepCount =
+                            if (cursor.isNull(stepCountIndex)) {
+                                null
+                            } else {
+                                cursor.getLong(stepCountIndex)
+                            },
                     ),
                 )
             }
@@ -521,4 +605,10 @@ data class LocationPointRow(
      * 行に遭遇した場合は例外を投げるため、ここに到達する時点で必ず値がある）。
      */
     val hexId: Long,
+    /**
+     * `location_point.step_count`（Issue #126・T101・schema v3）。**nullable**
+     * （[hexId] とは対照的。歩数センサー無し・権限無し・未取得・移行前の既存行は
+     * すべて null。`LocationTrackSchema.CREATE_TABLE_POINT` のドキュメント参照）。
+     */
+    val stepCount: Long?,
 )

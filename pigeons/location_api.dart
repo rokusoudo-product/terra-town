@@ -142,6 +142,7 @@ class LocationPointMessage {
     this.accuracyMeters,
     required this.possibleMockLocation,
     required this.hexId,
+    this.stepCount,
   });
 
   /// `location_point.id`（`INTEGER PRIMARY KEY AUTOINCREMENT`）。挿入順に単調増加し、
@@ -189,6 +190,17 @@ class LocationPointMessage {
   /// 「開示が静かに壊れる」という本プロジェクトが繰り返し避けてきた失敗様式に
   /// なるため採らない）。
   final int hexId;
+
+  /// `location_point.step_count`（Issue #126・T101・schema v3）。
+  ///
+  /// この観測時点までの、Android の歩数センサー（`TYPE_STEP_COUNTER`）による
+  /// 起動後の累積歩数。**nullable**（[hexId] とは対照的）: 歩数センサーを持たない
+  /// 端末・`ACTIVITY_RECOGNITION` 権限が無い端末・まだ最初のセンサーイベントを
+  /// 受け取っていない場合は null になる（罰しない側に倒す・Issue #126 本文
+  /// 「⚠️ 歩数センサーについて」）。[GeoPosition.cumulativeStepCount]
+  /// （`packages/core`）へそのまま写される（`NativePositionProvider` の
+  /// ドキュメント参照）。
+  final int? stepCount;
 }
 
 @HostApi()
