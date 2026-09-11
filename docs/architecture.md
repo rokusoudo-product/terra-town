@@ -18,7 +18,8 @@ flowchart TB
             ui["UI 層<br/>地図・建設・図鑑・HUD<br/>(MapLibre GL / Material 3)"]
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画集計<br/>抽象を定義: PositionProvider / HexLocator / RegionPack"]
             reward["RewardPolicy（core・純粋）<br/>モック→開拓無効化（DisclosureServiceに配線済み）<br/>速度(SpeedFilter)・歩数不一致→付与倍率算出<br/>✅ 判定は実装済み（Issue #126・T099・T101）<br/>⚠️ 倍率を消費する資材付与処理自体は未実装"]
-            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator＝RecordedHexLocator。Kotlin側で確定済みのhex_idを読むだけ）"]
+            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（HexLocator＝RecordedHexLocator。Kotlin側で確定済みのhex_idを読むだけ／RegionPack＝RegionPackRepository／Repository&lt;DisclosedHex,HexId&gt;＝DisclosedHexRepository）"]
+            wiring["composition root（app・UI層）<br/>DisclosureCoordinator: 位置→DisclosureService.recordPosition→保存→revealHexを配線<br/>起動時にdisclosed_hexから復元（disclosure_restore.dart）<br/>✅ 実装済み（Issue #137・T060・T069）"]
         end
         subgraph native["Kotlin ネイティブ"]
             fg["foreground service<br/>fused location・距離ベース記録（暫定15m＋5分上限・T015で確定）・elapsedRealtime<br/>✅ 実装済み（Issue #123・T046〜T048）"]
@@ -29,7 +30,7 @@ flowchart TB
         subgraph store["端末内ストレージ（SQLite・接続を分離）"]
             gamedb[("ゲーム状態DB（Drift管理）<br/>disclosed_hex（開示済みヘクス・開示時点の地形分類スナップショット terrainType）<br/>inventory・building・district_progress・collection 等")]
             trackdb[("位置記録DB（Kotlin所有・別ファイル・Drift管理下ではない）<br/>location_track.sqlite: location_point（session_id・elapsedRealtimeNanos・緯度経度・accuracy・possible_mock_location・hex_id・step_count 等）<br/>schema v3（Issue #126・段階的移行ループ）<br/>開くのは Kotlin だけ（Dart は開かない・Issue #131）<br/>✅ 実装済み（Issue #123・#108・#126・docs/location-track-db.md）")]
-            pack[("地域パック DB（読取専用・別接続）<br/>tiles.mbtiles（表示専用ベクタタイル）<br/>region_pack.sqlite: cell_terrain / hex_terrain（境界 boundary_geojson は生成時に事前計算済） / district / hex_district / poi / pack_meta")]
+            pack[("地域パック DB（読取専用・別接続）<br/>tiles.mbtiles（表示専用ベクタタイル）<br/>region_pack.sqlite: hex_terrain（境界 boundary_geojson は生成時に事前計算済）・pack_meta は同梱済み<br/>district / hex_district / poi は Issue #86 未マージのため2026-09-11時点で未同梱（RegionPackRepositoryはforward-compat実装済み）")]
         end
         exp["エクスポート/インポート<br/>端末内ファイル・共有シート（サーバに送らない）<br/>(未実装・T105)"]
     end
@@ -47,6 +48,10 @@ flowchart TB
     core -->|地形属性は新規開示時のみ／区画・POIは常時 参照| pack
     core <--> gamedb
     gamedb -.-> exp
+    ui --> wiring
+    wiring -->|NativePositionProvider.positionUpdates を消費| loc
+    wiring -->|DisclosureService.disclose/recordPosition を呼ぶ| core
+    wiring -->|起動時・setStyle後にrevealHexで復元| loc
 
     subgraph packbuild["🛠 パック生成パイプライン（手動実行・実行時サーバではない）"]
         planetiler["tools/pack-builder/<br/>Python ＋ Planetiler（Java）<br/>OSM日本抽出 → ベクタタイル／ヘクス地形属性／区画／POI を事前計算"]
@@ -66,6 +71,7 @@ flowchart TB
 
 **図の注記（実装済みの主要設計決定）**:
 
+- **位置→開示判定→保存→霧の解除の配線は実装済み（Issue #137・2026-09-11・T060・T069）**: 以前は `RegionPack`（`RegionPackRepository`）・`Repository<DisclosedHex, HexId>`（`DisclosedHexRepository`）の実装、およびそれらを組み立てて `NativePositionProvider` → `DisclosureService` → 永続化 → `FogOfWarController.revealHex` へつなぐ composition root（上図の `wiring`）が存在しなかった。本 Issue で全て実装し、`app/lib/features/map/map_screen.dart` が地図画面の準備完了（`onFogLayerReady`）を起点に、(a) `disclosed_hex` から復元 → (b) 位置ストリームの購読開始、の順で配線する。
 - **開示時点スナップショット方式（Issue #96）**: 開示済みヘクスの地形分類の正は `disclosed_hex.terrainType`（開示した瞬間の値をスナップショットとして保存）であり、**地域パックを再度引き直すことはない**。地域パック（`hex_terrain`）を参照するのは「新規開示の瞬間」だけである。**区画（`district`）・名所 POI はスナップショットの対象外**で、常に現行の地域パックから解決する（区画は現在の区画定義に対する制覇率として意味を持つため。POI は `collection` テーブルが発見記録を別途担保するため）。
 - **fog of war は feature-state 方式（plan.md §8）**: 全ヘクスを起動時に1回だけ地図ソースへ追加し、開示は MapLibre の `feature-state` トグルで表現する。**地図側の feature-state は描画のための派生状態であり、開示状態の正ではない**（正は `disclosed_hex`）。`setStyle`（スタイル再読み込み）を呼ぶと feature-state は消えるため、その都度 `disclosed_hex` から再構築する。
 - **ヘクス境界の事前計算（Issue #105）**: フォグ表示に使うヘクスの六角形境界（GeoJSON）は実行時に計算せず、パック生成時に `hex_terrain.boundary_geojson` として算出・格納済みのものを読み込む。

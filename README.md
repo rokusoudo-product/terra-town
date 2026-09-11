@@ -22,6 +22,7 @@
 | [DESIGN.md](DESIGN.md) | UIデザイン仕様（Material 3 ＋ 独自トークン） |
 | [docs/architecture.md](docs/architecture.md) | 環境構成図（Mermaid・詳細版） |
 | [docs/location-track-db.md](docs/location-track-db.md) | 位置記録DB（Kotlin所有）のスキーマ・受け渡し方法（Issue #123・#124・#126） |
+| [docs/disclosure-and-fog.md](docs/disclosure-and-fog.md) | 位置→開示判定→保存→霧の解除の配線・永続化・復元・実機確認手順（Issue #137・#102） |
 | [docs/opening_points.md](docs/opening_points.md) | 開放ポイント（未踏破エリアの開放手段）定義（Issue #4） |
 | [docs/terrain.md](docs/terrain.md) | エリア（ヘクス）の形状・地形タイプ定義（2026-07-23、Issue #3） |
 | [docs/landmark_objects.md](docs/landmark_objects.md) | 名所・固有オブジェクト（大量配置POI）システム定義（2026-07-26、Issue #6） |
@@ -39,13 +40,14 @@ flowchart TB
         subgraph flutter["Flutter アプリ (Dart)"]
             ui["UI 層（MapLibre GL / Material 3）"]
             core["packages/core【純粋】<br/>開示判定・資材・建設・経済・区画"]
-            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装"]
+            loc["packages/location<br/>GPS変換・地図SDK連携<br/>core の抽象を実装（RegionPack/Repository&lt;DisclosedHex&gt;含む）"]
+            wiring["composition root（app）<br/>位置→開示判定→保存→霧の解除を配線<br/>起動時・setStyle後にdisclosed_hexから復元<br/>✅ 実装済み（Issue #137）"]
         end
         fg["Kotlin foreground service<br/>fused location・距離ベース記録・elapsedRealtime<br/>✅ 実装済み（Issue #123）"]
         pigeon["Pigeon channel (LocationTrackingHostApi)<br/>起動/停止/状態問い合わせ＋位置データの取得<br/>✅ 実装済み（Issue #124・#131）<br/>モック検出・歩数センサー突合は実装済み（Issue #126）<br/>Health Connectは別途未実装"]
         gamedb[("ゲーム状態 SQLite（Drift管理）<br/>disclosed_hex（開示時点の地形分類スナップショット）等")]
         trackdb[("位置記録DB（Kotlin所有・別ファイル）<br/>location_track.sqlite。開くのは Kotlin だけ（Dart は開かない）<br/>✅ 実装済み（Issue #123・#131）")]
-        pack[("地域パック（読取専用・別接続）<br/>tiles.mbtiles＋cell_terrain/hex_terrain（境界事前計算済）＋district＋poi")]
+        pack[("地域パック（読取専用・別接続）<br/>tiles.mbtiles＋hex_terrain（境界事前計算済）＋pack_meta<br/>district/poiはIssue #86未マージのため未同梱")]
     end
 
     ci["🛠 パック生成（手動実行の CI）<br/>tools/pack-builder/（Planetiler＋Python）"]
@@ -60,6 +62,9 @@ flowchart TB
     core -->|地形は新規開示時のみ／区画・POIは常時 参照| pack
     loc -->|表示専用タイル| pack
     ci ==>|同梱（生成物はコミットしない）| pack
+    ui --> wiring
+    wiring -->|positionUpdates を消費・DisclosureService経由でrevealHex| loc
+    wiring --> core
 
     classDef pure fill:#e8f5e9,stroke:#2e7d32;
     class core pure
