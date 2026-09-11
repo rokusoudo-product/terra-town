@@ -13,6 +13,12 @@ import io.flutter.plugin.common.StandardMethodCodec
 import io.flutter.plugin.common.StandardMessageCodec
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 private object LocationApiPigeonUtils {
 
   fun wrapResult(result: Any?): List<Any?> {
@@ -193,41 +199,66 @@ class FlutterError (
 ) : RuntimeException()
 
 /**
- * 位置記録 platform channel の型定義（Issue #124・T049）。
+ * 位置記録 platform channel の型定義（Issue #124・T049。Issue #131 で位置データの
+ * 受け渡し方法も本ファイルに統合）。
  *
  * `specs/001-mvp/plan.md` §1-C の決定 C「機微処理（背景位置・fused location・
  * モック検出・Play Integrity・歩数センサーはOS別実装が本質）」に基づき、
  * Pigeon の channel 契約ファイルを **iOS 移植の正** とする（advisor 評価：
  * 「Pigeon の channel 契約ファイルを iOS 移植の正とし、Dart 側ロジックは共通化する」）。
  *
- * ## ⚠️ なぜ位置データそのものをここに含めないか（Issue #124 起票時の論点・本 Issue で決定）
- * `docs/location-track-db.md` §2・§3 は、位置記録ファイル `location_track.sqlite` を
- * Dart 側から直接読み取り専用で開く方法（`NativePositionProvider`・
- * `packages/location/lib/src/db/location_track_connection.dart`）を推奨している。
- * 本 Pigeon ファイルは**位置データ（緯度経度・時刻・精度）を1件も運ばない**。
- * 代わりに運ぶのは、位置記録 foreground service（PR #128・`LocationTrackingService`）の
- * **起動・停止・状態問い合わせという制御面**だけである。
+ * ## ⚠️ 位置データを Pigeon で運ぶ（Issue #131・2026-09-11 代表決定。方針転換）
+ * 【この節は Issue #124 起票時の当初方針を、Issue #131 の実機不具合を受けて
+ * 訂正したものである。以前の記述（取り消し線部分）は経緯として残す】
  *
- * 理由:
- * 1. **効率**: 位置データは記録が進むにつれて増え続ける。Pigeon（1呼び出し1メッセージ）で
- *    1件ずつ運ぶより、まとまった単位でファイルを直接読む方が単純かつ効率的であり、
- *    `docs/location-track-db.md` が既にその経路（`app_flutter/` 配下の共有ディレクトリに
- *    Kotlin/Dart 双方がアクセスできる）を確立している。
- * 2. **64bit整数の丸め問題を経路自体から排除する**（`docs/terrain.md` §4.4・Issue #124
- *    本文「⚠️ 64bit整数の受け渡し」）。位置記録の `elapsed_realtime_nanos`
- *    （実機で `2634654803000000` 程度の値を確認済み）はJSON系の経路で2^53を超えて
- *    丸められる恐れがあるが、本ファイルのメッセージ型は**64bit整数を一切含まない**
- *    ため、この経路では問題が発生しようがない。SQLite 経由の64bit値は
- *    Dart のネイティブ `int`（VM上は64bit）でそのまま読める
- *    （`native_position_provider_test.dart`・`location_track_connection_test.dart`
- *    で丸めが起きないことを確認する）。
- * 3. **スコープの厳守**: Kotlin foreground service 本体（PR #128）の実装・スキーマを
- *    変更せずに済む。位置データの受け渡し方法は Issue #123 の時点で既に確定している
- *    （`docs/location-track-db.md`）。
+ * ~~本 Pigeon ファイルは位置データ（緯度経度・時刻・精度）を1件も運ばない。
+ * `docs/location-track-db.md` §2・§3 が確立した、Dart 側が `location_track.sqlite`
+ * を直接読み取り専用で開く経路（`NativePositionProvider`・
+ * `packages/location/lib/src/db/location_track_connection.dart`）を使う。~~
  *
- * 一方で、次の3つは位置データではなく「サービスの制御・状態」であり、
- * ファイル読み取りでは表現できない（ファイルには「今まさに稼働中か」
- * 「起動要求がなぜ失敗したか」は記録されない）ため、Pigeon で渡す:
+ * **Issue #131 の実機検証（2026-09-11・Pixel 7a）で、この当初方針が構造的な不具合を
+ * 持つことが判明した**: 同じアプリプロセスの中で Kotlin（`android.database.sqlite`）と
+ * Dart（`package:sqlite3` + `sqlite3_flutter_libs`）という**2つの別々の SQLite** が
+ * 同じ WAL ファイルを開いており、これは SQLite 公式
+ * [How To Corrupt An SQLite Database File §2.2.1](https://www.sqlite.org/howtocorrupt.html)
+ * が明示的に警告する構成（"Multiple copies of SQLite linked into the same
+ * application"）だった。POSIX のファイルロックはプロセス単位のため、同一プロセス内の
+ * 別々の SQLite 実装同士は互いのロックを認識できず、WAL の共有メモリ（`-shm`）の
+ * 協調が成り立たない。結果として、Kotlin が記録した新しい行が Dart 側に**最大2分以上
+ * 届かない**（開く順序によっては起きない場合もあるが、それは「問題が表に出ていないだけ」
+ * であり安全な構成ではない）ことが決定的に再現した（詳細:
+ * [PR #129 の検証コメント](https://github.com/rokusoudo-product/terra-town/pull/129#issuecomment-5629791422)）。
+ *
+ * **修正方針（採用）**: `location_track.sqlite` を開くのは **Kotlin だけ**にする。
+ * Dart はこのファイルを一切開かず、本ファイルの [LocationTrackingHostApi.getLocationPoints]
+ * （host API）経由で Kotlin から行を受け取る。ファイルとスキーマの所有者が Kotlin に
+ * 一本化され、`plan.md` §1-C 決定Cとも整合する（iOS 移植時は同じ契約を CoreLocation 側の
+ * 保存先で実装すればよい）。
+ *
+ * 不採用とした代替案（`docs/location-track-db.md` §2・§3 と同様、詳細は Issue #131 参照）:
+ * - **開く順序の調整**（Kotlin を先に開かせる）: 同じ問題を運が良ければ踏まないだけで、
+ *   構成自体が抱える欠陥は直らない。
+ * - **ポーリングごとに Dart の接続を開き直す**: 開くたびに `-shm` の初期化判定が走り、
+ *   Kotlin 側の WAL インデックスを壊しうる。現状より悪化する。
+ * - Dart 側を `sqflite`（Android 標準の SQLite を使うプラグイン）に替える: SQLite の
+ *   Dart バインディングが2種類（`sqlite3`・`sqflite`）になり、スキーマ知識も二重になる。
+ * - サービスを別プロセスにする: `LocationTrackingService.runningSessionId` がプロセス内の
+ *   静的状態を読んでいるため作り直しが必要で重い。
+ *
+ * ### 当初「64bit整数の丸め」を理由に挙げていた点について（訂正）
+ * 位置データを Pigeon で運ばない理由として、以前は「64bit整数の丸め」
+ * （`docs/terrain.md` §4.4）を挙げていた。**これは JSON 系の経路（例:
+ * `dart:convert` の `jsonEncode`/`jsonDecode` や MethodChannel の JSON コーデック）の
+ * 話であり、当たらない。** 本ファイルが使う Pigeon の既定コーデック
+ * （`StandardMessageCodec`。バイナリ形式）は、Kotlin の `Long`（64bit）と Dart の
+ * `int`（Dart VM 上は64bit）を数値としてそのままバイナリで運ぶため、JSON のように
+ * IEEE754 倍精度浮動小数点数（安全な整数範囲は 2^53 まで）を経由しない。
+ * [LocationPointMessage.elapsedRealtimeNanos]（実機で `2634654803000000` 程度の値を
+ * 確認済み）が Kotlin ⇔ Dart の往復で丸められずに一致することは
+ * `native_position_provider_test.dart` でテストする（合成的に 2^53 を超える値、および
+ * 生成されたメッセージコーデックでの往復の両方を確認する）。
+ *
+ * 一方で、次の3つは制御・状態であり、これは以前からPigeonで渡している:
  * - サービスの起動・停止（[LocationTrackingHostApi.startTracking]・
  *   [LocationTrackingHostApi.stopTracking]）。現状はデバッグ用 Intent
  *   （`MainActivity.handleDebugLocationServiceIntent`）でしか起動できない。
@@ -358,6 +389,90 @@ data class TrackingStatus (
     return "TrackingStatus(isRunning=$isRunning, sessionId=$sessionId)"
   }
 }
+
+/**
+ * `location_point` の1行分（Issue #131）。
+ *
+ * 列は `docs/location-track-db.md` §4 のスキーマそのまま
+ * （`wall_clock_unix_millis`・`inserted_at_unix_millis` は Dart 側の用途が無いため
+ * 含めない。理由は削除済みの `location_track_connection.dart` が持っていたのと同じ
+ * ——改竄可能な参考情報・デバッグ用途のみの列であり、[GeoPosition] には反映しない）。
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class LocationPointMessage (
+  /**
+   * `location_point.id`（`INTEGER PRIMARY KEY AUTOINCREMENT`）。挿入順に単調増加し、
+   * 値は再利用されない。[LocationTrackingHostApi.getLocationPoints] の `afterId` に
+   * そのまま渡せる。
+   */
+  val id: Long,
+  /** `location_point.session_id`。[TrackingStatus.sessionId] と同じ値。 */
+  val sessionId: String,
+  /**
+   * `location_point.elapsed_realtime_nanos`（単調時計・ナノ秒）。
+   *
+   * 64bit整数がここでは丸められないことについては、本ファイル冒頭の
+   * 「当初『64bit整数の丸め』を理由に挙げていた点について（訂正）」を参照。
+   */
+  val elapsedRealtimeNanos: Long,
+  val latitude: Double,
+  val longitude: Double,
+  /** `location_point.accuracy_meters`。値が無い fix は null。 */
+  val accuracyMeters: Double? = null,
+  /** `location_point.possible_mock_location`（0/1）を bool にしたもの。 */
+  val possibleMockLocation: Boolean
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): LocationPointMessage {
+      val id = pigeonVar_list[0] as Long
+      val sessionId = pigeonVar_list[1] as String
+      val elapsedRealtimeNanos = pigeonVar_list[2] as Long
+      val latitude = pigeonVar_list[3] as Double
+      val longitude = pigeonVar_list[4] as Double
+      val accuracyMeters = pigeonVar_list[5] as Double?
+      val possibleMockLocation = pigeonVar_list[6] as Boolean
+      return LocationPointMessage(id, sessionId, elapsedRealtimeNanos, latitude, longitude, accuracyMeters, possibleMockLocation)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      sessionId,
+      elapsedRealtimeNanos,
+      latitude,
+      longitude,
+      accuracyMeters,
+      possibleMockLocation,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as LocationPointMessage
+    return LocationApiPigeonUtils.deepEquals(this.id, other.id) && LocationApiPigeonUtils.deepEquals(this.sessionId, other.sessionId) && LocationApiPigeonUtils.deepEquals(this.elapsedRealtimeNanos, other.elapsedRealtimeNanos) && LocationApiPigeonUtils.deepEquals(this.latitude, other.latitude) && LocationApiPigeonUtils.deepEquals(this.longitude, other.longitude) && LocationApiPigeonUtils.deepEquals(this.accuracyMeters, other.accuracyMeters) && LocationApiPigeonUtils.deepEquals(this.possibleMockLocation, other.possibleMockLocation)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.id)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.sessionId)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.elapsedRealtimeNanos)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.latitude)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.longitude)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.accuracyMeters)
+    result = 31 * result + LocationApiPigeonUtils.deepHash(this.possibleMockLocation)
+    return result
+  }
+  override fun toString(): String {
+    return "LocationPointMessage(id=$id, sessionId=$sessionId, elapsedRealtimeNanos=$elapsedRealtimeNanos, latitude=$latitude, longitude=$longitude, accuracyMeters=$accuracyMeters, possibleMockLocation=$possibleMockLocation)"
+  }
+}
 private open class LocationApiPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -374,6 +489,11 @@ private open class LocationApiPigeonCodec : StandardMessageCodec() {
       131.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           TrackingStatus.fromList(it)
+        }
+      }
+      132.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          LocationPointMessage.fromList(it)
         }
       }
       else -> super.readValueOfType(type, buffer)
@@ -393,10 +513,15 @@ private open class LocationApiPigeonCodec : StandardMessageCodec() {
         stream.write(131)
         writeValue(stream, value.toList())
       }
+      is LocationPointMessage -> {
+        stream.write(132)
+        writeValue(stream, value.toList())
+      }
       else -> super.writeValue(stream, value)
     }
   }
 }
+
 
 /** Generated interface from Pigeon that represents a handler of messages from Flutter. */
 interface LocationTrackingHostApi {
@@ -412,6 +537,25 @@ interface LocationTrackingHostApi {
   fun stopTracking()
   /** 現在の稼働状態を問い合わせる。 */
   fun getTrackingStatus(): TrackingStatus
+  /**
+   * `location_point` から `id` が [afterId] より大きい行を、`id` 昇順で最大 [limit] 件返す
+   * （Issue #131）。
+   *
+   * - 記録がまだ1件も行われていない（`location_track.sqlite` 自体が存在しない）場合は
+   *   **ファイルを新規作成せず**空リストを返す（「記録0件＝ファイル無し」という既存の
+   *   意味を保つ。Kotlin 側実装は、読み取り用の共有ヘルパー経由で開く前に
+   *   ファイルの存在を確認すること。`SQLiteOpenHelper` 経由で先に開いてしまうと
+   *   `onCreate` が呼ばれて空のファイルが作られてしまう点に注意）。
+   * - 呼び出し側（Dart の `NativePositionProvider`）は、返却件数が [limit] 未満に
+   *   なるまで `afterId` を進めながら本メソッドを繰り返し呼び出し、溜まった行を
+   *   1回のポーリングで取り切る想定（長時間記録が続いた後の初回購読でも、1回の
+   *   メッセージが際限なく巨大にならないようにするため）。
+   *
+   * **`@async` にしてある**: Kotlin 側実装（`LocationApiHandler.kt`）は SQLite の
+   * 読み取りをメインスレッド以外（バックグラウンド Executor）で行う。UI スレッドで
+   * ブロッキング I/O を行わないため。
+   */
+  suspend fun getLocationPoints(afterId: Long, limit: Long): List<LocationPointMessage>
 
   companion object {
     /** The codec used by LocationTrackingHostApi. */
@@ -463,6 +607,26 @@ interface LocationTrackingHostApi {
               LocationApiPigeonUtils.wrapError(exception)
             }
             reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.terra_town_location.LocationTrackingHostApi.getLocationPoints$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val afterIdArg = args[0] as Long
+            val limitArg = args[1] as Long
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.getLocationPoints(afterIdArg, limitArg))
+              } catch (exception: Throwable) {
+                LocationApiPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
           }
         } else {
           channel.setMessageHandler(null)
