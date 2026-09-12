@@ -344,6 +344,52 @@ void main() {
     expect(events, hasLength(1));
   });
 
+  group('recordedPositionUpdates（行id付き・Issue #138）', () {
+    test('LocationPointMessage.id がそのまま rowId として届く', () async {
+      fakeApi
+        ..addRow(_row(id: 1, sessionId: 's', elapsedRealtimeNanos: 1000, latitude: 1, longitude: 1))
+        ..addRow(_row(id: 2, sessionId: 's', elapsedRealtimeNanos: 2000, latitude: 2, longitude: 2));
+
+      final provider = makeProvider();
+      addTearDown(provider.close);
+
+      final records = await provider.recordedPositionUpdates.take(2).toList();
+
+      expect(records.map((r) => r.rowId), [1, 2]);
+      expect(records.map((r) => r.position.latitude), [1, 2]);
+    });
+
+    test('positionUpdates と recordedPositionUpdates は同じ内部ポーリングを共有し、'
+        '購読前に記録済みの行も既定では全件流れる（既存の positionUpdates と同じ挙動）', () async {
+      fakeApi.addRow(
+        _row(id: 1, sessionId: 'session-a', elapsedRealtimeNanos: 1000, latitude: 35.1, longitude: 135.1),
+      );
+
+      final provider = makeProvider();
+      addTearDown(provider.close);
+
+      final record = await provider.recordedPositionUpdates.first;
+
+      expect(record.rowId, 1);
+      expect(record.position.latitude, 35.1);
+      expect(record.position.trackingSessionId, 'session-a');
+    });
+
+    test('positionUpdates（GeoPositionのみ）は引き続き従来どおり動作する（後方互換）', () async {
+      fakeApi.addRow(
+        _row(id: 1, sessionId: 's', elapsedRealtimeNanos: 1000, latitude: 9.0, longitude: 8.0),
+      );
+
+      final provider = makeProvider();
+      addTearDown(provider.close);
+
+      final position = await provider.positionUpdates.first;
+
+      expect(position.latitude, 9.0);
+      expect(position.longitude, 8.0);
+    });
+  });
+
   group('64bit整数の受け渡し（docs/terrain.md §4.4・Issue #124/#131「⚠️ 64bit値の受け渡し」）', () {
     test('elapsedRealtimeNanos は Pigeon/JSON を経由しないため 2^53 を超えても丸められない', () async {
       // 【値の選定について】実機（Pixel 7a）で確認された値は 2634654803000000

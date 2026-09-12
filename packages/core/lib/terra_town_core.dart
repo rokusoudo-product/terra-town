@@ -14,7 +14,9 @@
 ///                     （T035〜T036・実装済み。Issue #96 で `PackVersionResolver` を廃止し
 ///                     スナップショット方式に改訂）
 ///   - src/repository/ `Repository<T, ID>` 抽象（T038・実装済み）
-///   - src/economy/    Resource・Inventory（T026〜T027・実装済み）
+///   - src/economy/    Resource・Inventory（T026〜T027・実装済み）・
+///                     地形産出（受動・時間ベース）の決定論的な計算
+///                     （T066・T068・実装済み。Issue #138）
 ///   - src/disclosure/ HexLocator 抽象・DisclosureService（開示判定ロジック）
 ///                     （T054・実装済み。Issue #101）
 ///   - src/antispoof/  SpeedFilter（移動平均平滑化後の速度による偽装対策判定）
@@ -30,6 +32,8 @@ export 'src/disclosure/disclosure_service.dart';
 export 'src/disclosure/hex_locator.dart';
 export 'src/economy/inventory.dart';
 export 'src/economy/resource.dart';
+export 'src/economy/resource_grant_service.dart';
+export 'src/economy/terrain_hex_counter.dart';
 export 'src/geo/distance.dart';
 export 'src/geo/hex_geometry.dart';
 export 'src/geo/hex_id.dart';

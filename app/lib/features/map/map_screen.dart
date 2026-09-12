@@ -9,14 +9,17 @@ import '../../design/spacing.dart';
 import '../../map/debug/disclosure_debug_panel.dart';
 import '../../map/debug/fog_of_war_debug_panel.dart';
 import '../../map/debug/location_tracking_debug_panel.dart';
-import '../../map/disclosure/disclosure_coordinator.dart';
+import '../../map/debug/terrain_yield_debug_panel.dart';
 import '../../map/disclosure/disclosure_restore.dart';
+import '../../map/economy/terrain_yield_accrual_coordinator.dart';
+import '../../map/economy/terrain_yield_pipeline.dart';
 import '../../map/fog_of_war_layer_factory.dart';
 import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
 
-/// マップ（ホーム）画面（tasks.md T057・T060・T069・Issue #100・#101・#102・#137）。
+/// マップ（ホーム）画面（tasks.md T057・T060・T066・T068・T069・
+/// Issue #100・#101・#102・#137・#138）。
 ///
 /// DESIGN.md「画面一覧と状態」のマップ（ホーム）行に対応する。
 /// DESIGN.md が定義する4状態のうち本画面が扱うのは次の2つ + ローディングのみ:
@@ -41,6 +44,15 @@ import '../../map/region_pack_asset.dart';
 /// `FogOfWarController.revealHex` までを配線する（[_DisclosureAwareMapView] 参照）。
 /// `kDebugMode` 限定なのは、代表・秘書セッションが実機確認するための補助パネル
 /// （デバッグパネル群・「地図の中心のヘクスを開示」）のみである。
+///
+/// ## 2026-09-11（Issue #138）: 地形産出（受動・時間ベース）を同じパイプラインに統合
+/// 上記の配線を担っていた `DisclosureCoordinator` は、位置1件ごとに
+/// 「地形産出の計上」→「開示判定・霧の解除」を直列に行う `TerrainYieldPipeline`
+/// （`app/lib/map/economy/terrain_yield_pipeline.dart`）に置き換えた。**本番の
+/// 位置ストリーム（`NativePositionProvider.recordedPositionUpdates`）を購読する
+/// リスナーはこのパイプライン1つのみ**とし、`DisclosureCoordinator`
+/// （テスト・単体クラスとしては残す）は composition root では使わない。
+/// 詳細・判断の記録は `docs/terrain-yield.md` 参照。
 ///
 /// ## パックが無い場合の振る舞い（PR本文にも記載）
 /// 生成物（`app/assets/pack/`配下）はコミットしない方針（Issue #85）のため、
@@ -277,7 +289,9 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   DisclosedHexRepository? _disclosedHexRepository;
   DisclosedHexSet? _known;
   NativePositionProvider? _positionProvider;
-  DisclosureCoordinator? _coordinator;
+  TerrainHexCounter? _terrainHexCounter;
+  InventoryRepository? _inventoryRepository;
+  TerrainYieldPipeline? _pipeline;
 
   @override
   void initState() {
@@ -294,23 +308,41 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       _disclosedHexRepository = disclosedHexRepository;
       _known = known;
       _positionProvider = positionProvider;
-      _coordinator = DisclosureCoordinator(
-        service: DisclosureService(
-          hexLocator: const RecordedHexLocator(),
-          regionPack: regionPack,
-          known: known,
-          repository: disclosedHexRepository,
+
+      final service = DisclosureService(
+        hexLocator: const RecordedHexLocator(),
+        regionPack: regionPack,
+        known: known,
+        repository: disclosedHexRepository,
+      );
+      // _fogController は onFogLayerReady が発火するまで null。
+      // 呼び出し側は「新規開示イベントが来た時点の _fogController」を
+      // 都度読むだけなので、setStyle 相当でコントローラが差し替わっても
+      // （disclosure_coordinator.dart クラスdoc参照）ここを変更する必要はない。
+      Future<void> reveal(int featureId) async {
+        final controller = _fogController;
+        if (controller == null) return;
+        await controller.revealHex(featureId);
+      }
+
+      final terrainHexCounter = TerrainHexCounter();
+      final inventoryRepository = InventoryRepository(widget.paths.gameDatabase);
+      _terrainHexCounter = terrainHexCounter;
+      _inventoryRepository = inventoryRepository;
+      // 2026-09-11（Issue #138）: composition root は DisclosureCoordinator を
+      // TerrainYieldPipeline に置き換えた。位置1件ごとに「地形産出の計上」→
+      // 「開示判定・霧の解除」を直列に行う唯一のリスナーがこのパイプラインであり、
+      // 本番の位置ストリーム（recordedPositionUpdates）を購読するのはこれだけに
+      // 保つこと（`terrain_yield_pipeline.dart` クラスdoc参照）。
+      _pipeline = TerrainYieldPipeline(
+        disclosureService: service,
+        reveal: reveal,
+        accrualCoordinator: TerrainYieldAccrualCoordinator(
+          ledger: TerrainYieldLedger(widget.paths.gameDatabase),
         ),
-        positionUpdates: positionProvider.positionUpdates,
-        // _fogController は onFogLayerReady が発火するまで null。
-        // DisclosureCoordinator は「新規開示イベントが来た時点の _fogController」を
-        // 都度読むだけなので、setStyle 相当でコントローラが差し替わっても
-        // （disclosure_coordinator.dart クラスdoc参照）ここを変更する必要はない。
-        reveal: (featureId) async {
-          final controller = _fogController;
-          if (controller == null) return;
-          await controller.revealHex(featureId);
-        },
+        terrainHexCounter: terrainHexCounter,
+        disclosedHexRepository: disclosedHexRepository,
+        recordedPositionUpdates: positionProvider.recordedPositionUpdates,
       );
     } catch (e) {
       // 【本Issueが解消しようとしているリスクそのもの】地域パックDBが壊れている・
@@ -328,8 +360,8 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
 
     final repository = _disclosedHexRepository;
     final known = _known;
-    final coordinator = _coordinator;
-    if (repository == null || known == null || coordinator == null) return;
+    final pipeline = _pipeline;
+    if (repository == null || known == null || pipeline == null) return;
 
     final stats = await restoreDisclosedHexes(
       repository: repository,
@@ -340,14 +372,14 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     setState(() => _restoreStats = stats);
 
     // known への復元が完了した後に位置ストリームの購読を開始する（advisor
-    // 指摘の順序保証。disclosure_coordinator.dart クラスdoc参照）。2回目以降の
+    // 指摘の順序保証。`terrain_yield_pipeline.dart` クラスdoc参照）。2回目以降の
     // 呼び出し（将来のsetStyle相当）では start() は何もしない。
-    coordinator.start();
+    await pipeline.start();
   }
 
   @override
   void dispose() {
-    unawaited(_coordinator?.stop() ?? Future<void>.value());
+    unawaited(_pipeline?.stop() ?? Future<void>.value());
     unawaited(_positionProvider?.close() ?? Future<void>.value());
     unawaited(_regionPackConnection?.close() ?? Future<void>.value());
     super.dispose();
@@ -395,9 +427,11 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     final layersError = _layersError;
     final cameraReader = _cameraReader;
     final restoreStats = _restoreStats;
-    final coordinator = _coordinator!;
+    final pipeline = _pipeline!;
     final disclosedHexRepository = _disclosedHexRepository!;
     final known = _known!;
+    final terrainHexCounter = _terrainHexCounter!;
+    final inventoryRepository = _inventoryRepository!;
 
     return Stack(
       children: [
@@ -407,19 +441,24 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         // 準備完了を待つ必要が無いため常に表示する。
         //
         // ⚠️ composition root の NativePositionProvider（_positionProvider）は
-        // 本パネルに**共有してはならない**（advisor指摘・2026-09-11）。
-        // positionUpdates は broadcast Stream で `onListen`（履歴の全件再生・
-        // native_position_provider.dart クラスdoc「履歴の扱い」参照）は
-        // 0→1件目の購読者にのみ発火し、broadcast Stream は過去のイベントを
-        // 新しい購読者に再送しない。本パネルは fog レイヤーの準備を待たず
-        // build() の初回で即座に購読を始めるため、共有すると本パネルが
-        // 最初の購読者になってしまい、`onListen` の履歴再生が
-        // 「復元後に購読開始」する DisclosureCoordinator（_onFogLayerReady 参照）
-        // に届かなくなる（`_lastSeenId` が既に最新まで進んだ状態で
-        // coordinator が購読することになり、購読前に記録された位置の開示判定が
+        // 本パネルに**共有してはならない**（advisor指摘・2026-09-11。2026-09-11
+        // Issue #138 で購読側が DisclosureCoordinator → TerrainYieldPipeline に
+        // 置き換わった後もこの理由は変わらない）。
+        // recordedPositionUpdates/positionUpdates は broadcast Stream で
+        // `onListen`（履歴の全件再生・native_position_provider.dart クラスdoc
+        // 「履歴の扱い」参照）は 0→1件目の購読者にのみ発火し、broadcast Stream は
+        // 過去のイベントを新しい購読者に再送しない。本パネルは fog レイヤーの
+        // 準備を待たず build() の初回で即座に購読を始めるため、共有すると
+        // 本パネルが最初の購読者になってしまい、`onListen` の履歴再生が
+        // 「復元後に購読開始」する TerrainYieldPipeline（_onFogLayerReady 参照）に
+        // 届かなくなる（`_lastSeenId` が既に最新まで進んだ状態でパイプラインが
+        // 購読することになり、購読前に記録された位置の産出計上・開示判定が
         // 一切行われない）。そのため本パネルは自前の NativePositionProvider
         // インスタンスを持たせる（重複ポーリングは発生するが、デバッグ専用の
-        // 読み取りのみのポーリングであり実害はない）。
+        // 読み取りのみのポーリングであり実害はない。地形産出の観測は
+        // 本パネルではなく `TerrainYieldDebugPanel`〔パイプライン自身が公開する
+        // 派生ストリーム `stats` を読むだけで、位置ストリームを直接購読しない〕
+        // が担う）。
         Positioned(
           left: 0,
           right: 0,
@@ -465,22 +504,41 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (cameraReader != null)
-                  DisclosureDebugPanel(
-                    coordinator: coordinator,
-                    fogHexFeatureCollection: fogHexFeatureCollection,
-                    cameraReader: cameraReader,
-                  ),
-                FogOfWarDebugPanel(
-                  controller: fogController,
-                  repository: disclosedHexRepository,
-                  known: known,
+            // 画面下部のデバッグパネル群は、パネルが増えるほど上へ伸びて画面上部の
+            // 位置記録デバッグパネル（`LocationTrackingDebugPanel`）の「起動・停止・
+            // 状態確認」ボタンを覆ってしまう（2026-09-12 実機で確認。Issue #138 の
+            // `TerrainYieldDebugPanel` を足したことで、ボタンがタップできなくなった）。
+            // 高さを画面の半分までに制限し、収まらない分はスクロールで読めるようにする。
+            // `reverse: true` で初期表示は最下部（最後に追加したパネル）になる。
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height / 2,
+              ),
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (cameraReader != null)
+                      DisclosureDebugPanel(
+                        recordManualPosition: pipeline.recordManualPosition,
+                        fogHexFeatureCollection: fogHexFeatureCollection,
+                        cameraReader: cameraReader,
+                      ),
+                    FogOfWarDebugPanel(
+                      controller: fogController,
+                      repository: disclosedHexRepository,
+                      known: known,
+                    ),
+                    TerrainYieldDebugPanel(
+                      stats: pipeline.stats,
+                      terrainHexCounter: terrainHexCounter,
+                      inventoryRepository: inventoryRepository,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
       ],
