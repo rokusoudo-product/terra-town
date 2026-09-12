@@ -104,6 +104,35 @@ class TerrainYieldPipeline {
   /// デバッグパネル表示用の観測データ（`kDebugMode` 限定の用途を想定）。
   ValueListenable<TerrainYieldPipelineStats> get stats => _stats;
 
+  final ValueNotifier<GeoPosition?> _currentPosition = ValueNotifier(null);
+
+  /// 現在地表示（Issue #141・T058）用に公開する、直近に受け取った位置。
+  ///
+  /// ## なぜ [stats] に含めず別の [ValueNotifier] にしたか
+  /// [stats] の更新は [accrualCoordinator.accrue]・[disclosureService.recordPosition]
+  /// の両方の `await` が成功した後（`try` の末尾）にのみ行われる（クラスdoc
+  /// 「エラー時の挙動」参照）。現在地表示は「その位置が地形産出・開示判定に
+  /// 使えたか」とは独立した関心事であり、位置を1件受け取った時点（`try` に
+  /// 入る前）で更新する方が、「GPSは届いているのに画面上の現在地が更新
+  /// されない」という分かりにくい状態を避けられる。そのため本フィールドは
+  /// `try` の外（[_run] のループ先頭）で更新する。
+  ///
+  /// ## 本 Issue の最重要点との関係（位置ストリームの購読を増やさない）
+  /// 本パイプラインは既に [recordedPositionUpdates] を [StreamIterator] で
+  /// 1本だけ購読している（クラスdoc「なぜ1本の直列パイプラインにするか」）。
+  /// 現在地表示（`packages/location` の `MapView.currentLocation`）はこの
+  /// [ValueListenable] を購読するだけであり、`NativePositionProvider` の
+  /// ストリームを新たに購読しない（`stats` と全く同じ配線方式。
+  /// `app/lib/features/map/map_screen.dart` から `MapView` へそのまま渡す）。
+  ///
+  /// ## [recordManualPosition] では更新しない
+  /// デバッグ専用の「地図の中心のヘクスを開示」ボタン（[recordManualPosition]）
+  /// は地図の中心座標を渡すだけの合成的な観測であり、実際の現在地ではない。
+  /// これで本フィールドを更新すると、デバッグボタンを押すたびに現在地
+  /// マーカーが画面中心へ飛ぶという紛らわしい挙動になるため、意図的に
+  /// 更新対象から外している。
+  ValueListenable<GeoPosition?> get currentPosition => _currentPosition;
+
   bool _started = false;
   StreamIterator<LocationPointRecord>? _iterator;
 
@@ -137,6 +166,10 @@ class TerrainYieldPipeline {
     try {
       while (await iterator.moveNext()) {
         final record = iterator.current;
+        // 現在地表示（currentPosition）は、地形産出の計上・開示判定の成否とは
+        // 独立して、位置を受け取った時点で更新する（クラスdoc「なぜ stats に
+        // 含めず別のValueNotifierにしたか」参照）。
+        _currentPosition.value = record.position;
         try {
           await accrualCoordinator.accrue(record, terrainHexCounter.counts);
 
