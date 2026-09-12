@@ -47,6 +47,19 @@ class _FakeLedger implements OpeningPointLedgerStore {
   }
 }
 
+/// 歩数判定オプトアウト設定（Issue #135）のオンメモリフェイク。
+class _FakeRewardSettingsStore implements RewardSettingsStore {
+  _FakeRewardSettingsStore({required this.disabled});
+
+  final bool disabled;
+
+  @override
+  Future<bool> isStepCheckDisabled() async => disabled;
+
+  @override
+  Future<void> setStepCheckDisabled(bool value) async {}
+}
+
 class _ApplyCall {
   _ApplyCall({
     required this.grantedPoints,
@@ -220,6 +233,77 @@ void main() {
       // floor(3200m * 0.5 * 1000) = 1,600,000mm → 1P・端数100,000mm。
       expect(coordinator.points, 1);
       expect(coordinator.remainderMillimeters, 100000);
+    });
+
+    test(
+      '設定オン（歩数判定オプトアウト・Issue #135）: 歩数不一致相当の区間でも倍率1のまま計上される',
+      () async {
+        final ledger = _FakeLedger();
+        final coordinator = OpeningPointAccrualCoordinator(
+          ledger: ledger,
+          rewardSettings: _FakeRewardSettingsStore(disabled: true),
+        );
+        await coordinator.initialize();
+
+        // 「付与倍率0.5（歩数不一致）」テストと全く同じ位置・歩数だが、設定が
+        // オンのため歩数判定自体が行われず倍率1のまま扱われるはず。
+        await coordinator.accrue(
+          _record(rowId: 1, northMeters: 0, timestamp: _baseTime, cumulativeStepCount: 0),
+        );
+        await coordinator.accrue(
+          _record(
+            rowId: 2,
+            northMeters: 3200,
+            timestamp: _baseTime.add(const Duration(seconds: 1200)),
+            cumulativeStepCount: 1,
+          ),
+        );
+
+        expect(coordinator.lastAppliedMultiplier, 1.0);
+        expect(coordinator.lastReason, RewardSegmentReason.none);
+        // floor(3200m * 1.0 * 1000) = 3,200,000mm → 2P・端数200,000mm
+        // （設定オフのときの1P・端数100,000mmより多く付与される＝設定が実際に
+        // 効いていることの検証）。
+        expect(coordinator.points, 2);
+        expect(coordinator.remainderMillimeters, 200000);
+      },
+    );
+
+    test('設定オン（歩数判定オプトアウト）でもモック位置・速度超過は変わらず倍率0のまま', () async {
+      final mockLedger = _FakeLedger();
+      final mockCoordinator = OpeningPointAccrualCoordinator(
+        ledger: mockLedger,
+        rewardSettings: _FakeRewardSettingsStore(disabled: true),
+      );
+      await mockCoordinator.initialize();
+      await mockCoordinator.accrue(_record(rowId: 1, northMeters: 0, timestamp: _baseTime));
+      await mockCoordinator.accrue(
+        _record(
+          rowId: 2,
+          northMeters: 3200,
+          timestamp: _baseTime.add(const Duration(seconds: 2160)),
+          spoofSuspected: true,
+        ),
+      );
+      expect(mockCoordinator.points, 0);
+      expect(mockCoordinator.lastReason, RewardSegmentReason.mockSuspected);
+
+      final speedLedger = _FakeLedger();
+      final speedCoordinator = OpeningPointAccrualCoordinator(
+        ledger: speedLedger,
+        rewardSettings: _FakeRewardSettingsStore(disabled: true),
+      );
+      await speedCoordinator.initialize();
+      await speedCoordinator.accrue(_record(rowId: 1, northMeters: 0, timestamp: _baseTime));
+      await speedCoordinator.accrue(
+        _record(
+          rowId: 2,
+          northMeters: 3200,
+          timestamp: _baseTime.add(const Duration(seconds: 60)),
+        ),
+      );
+      expect(speedCoordinator.points, 0);
+      expect(speedCoordinator.lastReason, RewardSegmentReason.overSpeed);
     });
 
     test('上限（cap）到達後は歩いてもポイントが増えない（切り捨て）', () async {

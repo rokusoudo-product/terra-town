@@ -91,11 +91,20 @@ NativePositionProvider.recordedPositionUpdates（packages/location・行id付き
 
 `RewardSettingsRepository`（Issue #135・`reward.step_check_disabled`）がオンの場合、
 `RewardPolicy.useStepCheck` が false になり歩数不一致の判定自体が行われなくなる
-（歩数の観点では常に倍率1）。この設定の配線は `map_screen.dart` 側で
-`RewardPolicy` を構築する箇所を変更する必要があるが、**本 Issue の時点では
-`OpeningPointAccrualCoordinator` は既定の `RewardPolicy()`（`useStepCheck: true`）を
-使う**（`RewardSettingsRepository.buildRewardPolicy()` との配線は本 Issue のスコープ外・
-判断に迷った点としてPR本文に記載）。
+（歩数の観点では常に倍率1）。**本 Issue（#143）は「Issue #135 の設定が実際に効く
+最初の実装」でもあるため、`OpeningPointAccrualCoordinator` は `rewardSettings`
+（`RewardSettingsStore`）を受け取れるようにし、`map_screen.dart` から
+`RewardSettingsRepository(gameDatabase)` を渡して配線した。** `initialize()` が
+起動時に1度だけ `isStepCheckDisabled()` を読み、`rewardPolicyFor(stepCheckDisabled:
+...)`（`packages/location`）で `rewardPolicy` を組み立て直す。
+
+**設定の反映タイミング（判断の記録）**: 設定は `initialize()`（アプリ起動時）に
+一度だけ読み、位置1件ごとには読み直さない。設定タブでスイッチを変更しても、
+反映されるのは次回アプリ起動からになる（走行中に切り替えても即座には反映されない）。
+既存の地形産出（Issue #138・時間ベースで `RewardPolicy` を一切使わない）には
+そもそも配線対象が無かったため、この割り切りは本 Issue で新たに生じたものである。
+毎回のDB読み出しコストと実装の単純さを優先した判断であり、走行中の切り替えに
+即時追従させる必要が出てきた場合は見直すこと。
 
 ## 5. 距離の計算（`RewardPolicy` の既存の距離計算を再利用）
 
@@ -181,8 +190,23 @@ B→C しか見えず A→B 分の距離を失う（`opening_point_accrual_coord
 
 ## 10. 実機で確認する手順（秘書セッションが行う。1.5km歩かないと1P増えないため、進み具合の表示で確認する）
 
+**⚠️ 初回起動時の注意（判断の記録）**: `opening_point.watermark_row_id` は本PRで
+新規に追加した `settings` キーであり、初回は0から始まる。代表の端末には
+既に過去の位置記録（Issue #100以降の各種デバッグ確認で記録済みの
+`location_point` 行）が蓄積されている可能性が高く、`NativePositionProvider` は
+起動のたびに記録の先頭から全件を再生するため（`sinceRowId=0`）、**本PRのAPKを
+初めて起動した瞬間に、過去の全移動履歴がまとめて開放ポイントの計算対象になる**
+（地形産出・Issue #138も同じ構造で、初回リリース時に同じことが起きている）。
+そのため、**インストール直後の「開放ポイント デバッグパネル」の所持ポイントが
+既に0より大きい（最悪の場合いきなり上限50Pに達している）ことがある**。これは
+バグではない（二重計上でもない）。手順1の直後、何も歩いていない状態で
+所持ポイント・端数の値を一度記録し、**そこを基準値として**以降の増分を確認する
+こと（以下の手順は基準値からの増分を見る前提で記載する）。
+
 1. `docs/disclosure-and-fog.md` §4.1 の手順で `flutter build apk --debug` を
-   インストールする。
+   インストールする。インストール直後（サービス起動前）に「開放ポイント
+   デバッグパネル」の所持ポイント・端数を確認し、基準値として記録しておく
+   （上記「初回起動時の注意」参照）。
 2. 地図画面右上のデバッグパネル表示トグル（バグアイコン）をタップし、デバッグ
    パネル群を表示する（既定は非表示。`map_screen.dart` `_debugPanelsVisible`）。
 3. 「位置記録 デバッグパネル」の「起動」でサービスを開始する。
@@ -206,5 +230,10 @@ B→C しか見えず A→B 分の距離を失う（`opening_point_accrual_coord
    再起動する。開放ポイントデバッグパネルの所持ポイント・端数が、force-stop
    直前の値から**二重に増えていない**（同じ区間が2回計上されていない）ことを
    確認する。
+
+なお、上限50Pに初回起動時点で既に達している場合（「初回起動時の注意」参照）は
+歩いても所持ポイントの増加自体は確認できない。その場合は「直近区間」の距離・
+倍率の表示（増え続けるが上限で切り捨てられている旨）で計上そのものが機能して
+いることを確認する。
 
 **実機では未確認**（本 PR の時点。上記手順の用意までがスコープ）。

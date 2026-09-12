@@ -60,21 +60,53 @@ import 'package:terra_town_location/terra_town_location.dart';
 /// B→C の区間しか見えず、A→B 分の距離が失われる）。これを避けるため、
 /// 候補窓の構築は同期的な純粋計算として行い、[_window] への反映は
 /// [ledger.applyAccrual] の成功後にのみ行う。
+///
+/// ## 歩数判定オプトアウト設定（Issue #135）との配線
+/// 本 Issue（#143）は「Issue #126（`RewardPolicy` の付与倍率）・Issue #135
+/// （歩数判定オプトアウト）が実際に効く最初の実装」と位置づけられている
+/// （Issue #143 本文）。地形産出（Issue #138）は時間ベースで `RewardPolicy` を
+/// 一切使わないため配線の対象にならなかったが、本クラスは `RewardPolicy` を
+/// 直接使うため、[rewardSettings] を渡すことで設定を反映できるようにした。
+///
+/// [rewardSettings] を渡した場合、[initialize] で
+/// `rewardSettings.isStepCheckDisabled()` を1回読み、
+/// `rewardPolicyFor(stepCheckDisabled: ...)`（`packages/location`）で
+/// [rewardPolicy] を組み立て直す。**設定は起動時に1回だけ読み、以後
+/// [accrue] のたびには読み直さない**（設定タブでスイッチを変更した場合、
+/// 反映されるのは次回アプリ起動から。MVPでの割り切りとして明記する）。
+/// [rewardPolicy] を明示的に渡した場合（主にテスト用途）は [rewardSettings] より
+/// 優先する。どちらも渡さない場合は既定の `RewardPolicy()`
+/// （`useStepCheck: true`）のまま。
 class OpeningPointAccrualCoordinator {
   OpeningPointAccrualCoordinator({
     required this.ledger,
     RewardPolicy? rewardPolicy,
+    this.rewardSettings,
     this.cap = openingPointStockCap,
-  }) : rewardPolicy = rewardPolicy ?? RewardPolicy();
+  })  : _explicitRewardPolicy = rewardPolicy,
+        rewardPolicy = rewardPolicy ?? RewardPolicy(),
+        _maxWindowDuration = _computeMaxWindowDuration(rewardPolicy ?? RewardPolicy());
 
   final OpeningPointLedgerStore ledger;
-  final RewardPolicy rewardPolicy;
+
+  /// 歩数判定オプトアウト設定（Issue #135）の読み出し元。渡された場合、
+  /// [initialize] で [rewardPolicy] へ反映する（クラスdoc「歩数判定オプトアウト
+  /// 設定との配線」参照）。
+  final RewardSettingsStore? rewardSettings;
+
+  /// コンストラクタで明示的に渡された [RewardPolicy]（主にテスト用途）。
+  /// 非nullの場合、[rewardSettings] より優先し [initialize] での再構築を行わない。
+  final RewardPolicy? _explicitRewardPolicy;
+
+  /// 実際の判定に使う [RewardPolicy]。[rewardSettings] が渡されていれば
+  /// [initialize] 完了後に設定を反映した値へ差し替わる。
+  RewardPolicy rewardPolicy;
 
   /// 開放ポイントのストック上限（既定 [openingPointStockCap]）。テストで
   /// 上限到達を再現しやすくするため差し替え可能にしてある。
   final int cap;
 
-  late final Duration _maxWindowDuration = _computeMaxWindowDuration(rewardPolicy);
+  Duration _maxWindowDuration;
 
   int _watermarkRowId = 0;
   int _remainderMillimeters = 0;
@@ -104,13 +136,23 @@ class OpeningPointAccrualCoordinator {
   /// 直近の区間の [RewardSegmentReason]（未計上ならnull）。デバッグ表示用。
   RewardSegmentReason? get lastReason => _lastReason;
 
-  /// [ledger] から直近の状態（ウォーターマーク・端数・所持ポイント数）を読み込む。
+  /// [ledger] から直近の状態（ウォーターマーク・端数・所持ポイント数）を読み込み、
+  /// [rewardSettings] が渡されていれば歩数判定オプトアウト設定を [rewardPolicy] へ
+  /// 反映する（クラスdoc「歩数判定オプトアウト設定との配線」参照）。
   /// [accrue] を呼ぶ前に必ず1度呼ぶこと（`TerrainYieldPipeline.start` から呼ぶ）。
   Future<void> initialize() async {
     final snapshot = await ledger.readSnapshot();
     _watermarkRowId = snapshot.watermarkRowId;
     _remainderMillimeters = snapshot.remainderMillimeters;
     _points = snapshot.points;
+
+    final settings = rewardSettings;
+    if (_explicitRewardPolicy == null && settings != null) {
+      final disabled = await settings.isStepCheckDisabled();
+      rewardPolicy = rewardPolicyFor(stepCheckDisabled: disabled);
+      _maxWindowDuration = _computeMaxWindowDuration(rewardPolicy);
+    }
+
     _initialized = true;
   }
 

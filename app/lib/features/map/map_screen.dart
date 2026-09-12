@@ -399,8 +399,13 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         accrualCoordinator: TerrainYieldAccrualCoordinator(
           ledger: TerrainYieldLedger(widget.paths.gameDatabase),
         ),
+        // rewardSettings を渡すことで、設定タブの歩数判定オプトアウト
+        // （Issue #135・reward.step_check_disabled）が実際に反映される
+        // （`OpeningPointAccrualCoordinator` クラスdoc「歩数判定オプトアウト設定との
+        // 配線」参照。設定は次回起動時から反映される）。
         openingPointCoordinator: OpeningPointAccrualCoordinator(
           ledger: OpeningPointLedger(widget.paths.gameDatabase),
+          rewardSettings: RewardSettingsRepository(widget.paths.gameDatabase),
         ),
         terrainHexCounter: terrainHexCounter,
         disclosedHexRepository: disclosedHexRepository,
