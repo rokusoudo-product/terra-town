@@ -504,27 +504,41 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (cameraReader != null)
-                  DisclosureDebugPanel(
-                    recordManualPosition: pipeline.recordManualPosition,
-                    fogHexFeatureCollection: fogHexFeatureCollection,
-                    cameraReader: cameraReader,
-                  ),
-                FogOfWarDebugPanel(
-                  controller: fogController,
-                  repository: disclosedHexRepository,
-                  known: known,
+            // 画面下部のデバッグパネル群は、パネルが増えるほど上へ伸びて画面上部の
+            // 位置記録デバッグパネル（`LocationTrackingDebugPanel`）の「起動・停止・
+            // 状態確認」ボタンを覆ってしまう（2026-09-12 実機で確認。Issue #138 の
+            // `TerrainYieldDebugPanel` を足したことで、ボタンがタップできなくなった）。
+            // 高さを画面の半分までに制限し、収まらない分はスクロールで読めるようにする。
+            // `reverse: true` で初期表示は最下部（最後に追加したパネル）になる。
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height / 2,
+              ),
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (cameraReader != null)
+                      DisclosureDebugPanel(
+                        recordManualPosition: pipeline.recordManualPosition,
+                        fogHexFeatureCollection: fogHexFeatureCollection,
+                        cameraReader: cameraReader,
+                      ),
+                    FogOfWarDebugPanel(
+                      controller: fogController,
+                      repository: disclosedHexRepository,
+                      known: known,
+                    ),
+                    TerrainYieldDebugPanel(
+                      stats: pipeline.stats,
+                      terrainHexCounter: terrainHexCounter,
+                      inventoryRepository: inventoryRepository,
+                    ),
+                  ],
                 ),
-                TerrainYieldDebugPanel(
-                  stats: pipeline.stats,
-                  terrainHexCounter: terrainHexCounter,
-                  inventoryRepository: inventoryRepository,
-                ),
-              ],
+              ),
             ),
           ),
       ],
