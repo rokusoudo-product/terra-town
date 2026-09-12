@@ -334,4 +334,65 @@ void main() {
       expect(segments, isEmpty);
     });
   });
+
+  group('RewardPolicy.classify - distanceMeters（Issue #143）', () {
+    // 開放ポイントの歩行距離換算（`computeOpeningPointAccrual`）が区間ごとの
+    // 移動距離を必要とするため追加したフィールド。ここでは「正しい距離が
+    // 計算されている」ことと「倍率がどの理由（none/overSpeed/stepMismatch/
+    // mockSuspected）で決まった区間でも distanceMeters が欠けない」ことを検証する。
+    test('正規の徒歩区間: distanceMetersは速度×時間から逆算した値とほぼ一致する', () {
+      // 時速5km・15秒間隔 → 1区間あたり約20.833m。
+      final route = _walkingRoute(count: 3, speedKmh: 5.0, stepsPerPoint: 30);
+      final policy = RewardPolicy();
+
+      final segments = policy.classify(route);
+
+      const expectedMetersPerSegment = 5.0 / 3.6 * 15.0; // ≈20.833m
+      for (final segment in segments) {
+        expect(segment.distanceMeters, closeTo(expectedMetersPerSegment, 0.01));
+      }
+    });
+
+    test('モック位置疑いの区間でもdistanceMetersは非負の実測値を持つ（0扱いで握りつぶさない）', () {
+      final route = [
+        GeoPosition(
+          latitude: 35.0,
+          longitude: 135.0,
+          timestamp: _baseTime,
+          trackingSessionId: 'session-a',
+        ),
+        GeoPosition(
+          // 100km相当ワープ（テレポート）。
+          latitude: 35.0 + _latDeltaForMeters(100000),
+          longitude: 135.0,
+          timestamp: _baseTime.add(const Duration(seconds: 15)),
+          trackingSessionId: 'session-a',
+          spoofSuspected: true,
+        ),
+      ];
+      final policy = RewardPolicy();
+
+      final segments = policy.classify(route);
+
+      expect(segments, hasLength(1));
+      expect(segments.single.reason, RewardSegmentReason.mockSuspected);
+      expect(segments.single.multiplier, 0.0);
+      // 倍率は0だが、実際に移動した（とされる）距離自体は診断用に保持する。
+      expect(segments.single.distanceMeters, closeTo(100000, 100));
+    });
+
+    test('速度超過の区間でもdistanceMetersを持つ', () {
+      // 時速40kmで直進（平滑化後も閾値10km/hを大きく超え続ける）。
+      final route = _walkingRoute(count: 3, speedKmh: 40.0);
+      final policy = RewardPolicy();
+
+      final segments = policy.classify(route);
+
+      const expectedMetersPerSegment = 40.0 / 3.6 * 15.0; // ≈166.67m
+      for (final segment in segments) {
+        expect(segment.reason, RewardSegmentReason.overSpeed);
+        expect(segment.distanceMeters, closeTo(expectedMetersPerSegment, 0.1));
+      }
+    });
+  });
 }

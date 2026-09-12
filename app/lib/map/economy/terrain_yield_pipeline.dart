@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show ValueNotifier, ValueListenable, de
 import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart' show LocationPointRecord, hexIdToFeatureId;
 
+import 'opening_point_accrual_coordinator.dart';
 import 'terrain_yield_accrual_coordinator.dart';
 
 /// [TerrainYieldPipeline] が処理済みの位置について保持する観測用スナップショット
@@ -43,21 +44,68 @@ class TerrainYieldPipelineStats {
   final String? lastProcessedSessionId;
 }
 
-/// 位置1件ごとに「地形産出の計上」→「開示判定・霧の解除」を**この順序で・
-/// 直列に**行う composition root 用のパイプライン（Issue #138）。
+/// [TerrainYieldPipeline] が処理済みの位置について保持する、開放ポイント
+/// （歩行距離換算）の観測用スナップショット（`kDebugMode` のデバッグパネル表示専用。
+/// Issue #143）。
+class OpeningPointPipelineStats {
+  const OpeningPointPipelineStats({
+    required this.points,
+    required this.remainderMillimeters,
+    required this.watermarkRowId,
+    this.lastSegmentDistanceMeters,
+    this.lastAppliedMultiplier,
+    this.lastReason,
+  });
+
+  factory OpeningPointPipelineStats.initial() => const OpeningPointPipelineStats(
+        points: 0,
+        remainderMillimeters: 0,
+        watermarkRowId: 0,
+      );
+
+  /// 現在の開放ポイント所持数（0〜[openingPointStockCap]）。
+  final int points;
+
+  /// 次の1Pまでの端数〔ミリメートル〕。
+  final int remainderMillimeters;
+
+  /// 直近のウォーターマーク（最後に計上した行id）。
+  final int watermarkRowId;
+
+  /// 直近で計上に使われた区間の移動距離〔m〕。
+  final double? lastSegmentDistanceMeters;
+
+  /// 直近で計上に使われた区間の付与倍率（`RewardPolicy.classify` が返す値）。
+  final double? lastAppliedMultiplier;
+
+  /// 直近の区間の [RewardSegmentReason]（倍率がその値になった理由）。
+  final RewardSegmentReason? lastReason;
+}
+
+/// 位置1件ごとに「地形産出の計上」→「開放ポイント（歩行距離換算）の計上」→
+/// 「開示判定・霧の解除」を**この順序で・直列に**行う composition root 用の
+/// パイプライン（Issue #138・#143）。
 ///
 /// ## なぜ1本の直列パイプラインにするか
 /// `DisclosureCoordinator`（Issue #137）は位置ストリームに対する購読を1つに
-/// 保つことを重視していたが、本 Issue（#138）はさらに踏み込み、**同じ位置
+/// 保つことを重視していたが、Issue #138 はさらに踏み込み、**同じ位置
 /// ストリームに2つ目のリスナー（地形産出の計上用）を追加しない**。リスナーが
 /// 2つあると、それぞれの `await` した DB 書き込みが入れ違い、
 /// 「区間の産出には区間開始時点の開示済みヘクスを使う」（＝先に産出を計上し、
 /// その後にその区間の終点を開示する）という順序を保証できなくなる。
 ///
+/// Issue #143（開放ポイントの入手）もこの方針を踏襲し、**新たに3つ目の
+/// リスナーを追加せず**、既存の直列パイプラインへ処理ステップを1つ足す形で
+/// 実装した（`OpeningPointAccrualCoordinator.accrue` は地形産出の計上・開示判定の
+/// どちらとも独立した計算のため、両者のどちらの前後に置いても結果は変わらないが、
+/// 経済まわりの計上（地形産出・開放ポイント）を先にまとめて行い、最後に
+/// 開示判定を行う順序に揃えた）。
+///
 /// 本クラスは [recordedPositionUpdates] を [StreamIterator] で直接読み、
 /// 1件ごとに `await` で「産出の計上（[TerrainYieldAccrualCoordinator.accrue]）」
-/// → 「開示判定（[disclosureService.recordPosition]）・新規開示なら
-/// [reveal]」の**両方が完了してから次の位置に進む**。
+/// → 「開放ポイントの計上（[OpeningPointAccrualCoordinator.accrue]）」→
+/// 「開示判定（[disclosureService.recordPosition]）・新規開示なら
+/// [reveal]」の**すべてが完了してから次の位置に進む**。
 ///
 /// ## `DisclosureCoordinator` を置き換える（composition root）
 /// 本番の位置ストリーム（`NativePositionProvider.recordedPositionUpdates`）は
@@ -67,9 +115,9 @@ class TerrainYieldPipelineStats {
 ///
 /// ## 手動開示（「地図の中心のヘクスを開示」デバッグボタン）
 /// [recordManualPosition] は、`NativePositionProvider` を経由しない直接呼び出し
-/// （行id・経過時間の概念が無い一発の観測）のため、**地形産出の計上は行わず**
-/// 開示判定と霧の解除だけを行う。ただし新規開示の場合は必ず
-/// [terrainHexCounter] を更新すること（更新しないと、地域パック範囲外に
+/// （行id・経過時間の概念が無い一発の観測）のため、**地形産出・開放ポイントの
+/// どちらの計上も行わず**開示判定と霧の解除だけを行う。ただし新規開示の場合は
+/// 必ず [terrainHexCounter] を更新すること（更新しないと、地域パック範囲外に
 /// いる代表の端末でこのボタンから開示したヘクスが「地形別件数」に反映されず、
 /// 実機確認で地形産出が一切進まないという誤った結果になる。advisor 指摘）。
 ///
@@ -79,13 +127,15 @@ class TerrainYieldPipelineStats {
 /// 購読を使うため購読が終了し、以後 `moveNext()` は常に `false` を返す
 /// （`DisclosureCoordinator` がストリームのエラーで購読を終了するのと同じ
 /// 挙動）。一方、個々の位置の処理中（[TerrainYieldAccrualCoordinator.accrue]・
-/// [disclosureService.recordPosition]・[reveal]）で発生した例外はログに残した
-/// うえでその位置をスキップし、パイプライン自体は継続する。
+/// [OpeningPointAccrualCoordinator.accrue]・[disclosureService.recordPosition]・
+/// [reveal]）で発生した例外はログに残したうえでその位置をスキップし、
+/// パイプライン自体は継続する。
 class TerrainYieldPipeline {
   TerrainYieldPipeline({
     required this.disclosureService,
     required this.reveal,
     required this.accrualCoordinator,
+    required this.openingPointCoordinator,
     required this.terrainHexCounter,
     required this.disclosedHexRepository,
     required this.recordedPositionUpdates,
@@ -94,6 +144,9 @@ class TerrainYieldPipeline {
   final DisclosureService disclosureService;
   final Future<void> Function(int featureId) reveal;
   final TerrainYieldAccrualCoordinator accrualCoordinator;
+
+  /// 開放ポイント（歩行距離換算）の計上（Issue #143・T063）。
+  final OpeningPointAccrualCoordinator openingPointCoordinator;
   final TerrainHexCounter terrainHexCounter;
   final Repository<DisclosedHex, HexId> disclosedHexRepository;
   final Stream<LocationPointRecord> recordedPositionUpdates;
@@ -103,6 +156,13 @@ class TerrainYieldPipeline {
 
   /// デバッグパネル表示用の観測データ（`kDebugMode` 限定の用途を想定）。
   ValueListenable<TerrainYieldPipelineStats> get stats => _stats;
+
+  final ValueNotifier<OpeningPointPipelineStats> _openingPointStats =
+      ValueNotifier(OpeningPointPipelineStats.initial());
+
+  /// デバッグパネル表示用の開放ポイント観測データ（`kDebugMode` 限定の用途を想定・
+  /// Issue #143）。
+  ValueListenable<OpeningPointPipelineStats> get openingPointStats => _openingPointStats;
 
   final ValueNotifier<GeoPosition?> _currentPosition = ValueNotifier(null);
 
@@ -157,6 +217,13 @@ class TerrainYieldPipeline {
       remainderMicros: accrualCoordinator.remainderMicros,
     );
 
+    await openingPointCoordinator.initialize();
+    _openingPointStats.value = OpeningPointPipelineStats(
+      points: openingPointCoordinator.points,
+      remainderMillimeters: openingPointCoordinator.remainderMillimeters,
+      watermarkRowId: openingPointCoordinator.watermarkRowId,
+    );
+
     final iterator = StreamIterator<LocationPointRecord>(recordedPositionUpdates);
     _iterator = iterator;
     unawaited(_run(iterator));
@@ -172,6 +239,7 @@ class TerrainYieldPipeline {
         _currentPosition.value = record.position;
         try {
           await accrualCoordinator.accrue(record, terrainHexCounter.counts);
+          await openingPointCoordinator.accrue(record);
 
           final disclosed = await disclosureService.recordPosition(record.position);
           if (disclosed != null) {
@@ -186,6 +254,14 @@ class TerrainYieldPipeline {
             lastProcessedRowId: record.rowId,
             lastProcessedTimestamp: record.position.timestamp,
             lastProcessedSessionId: record.position.trackingSessionId,
+          );
+          _openingPointStats.value = OpeningPointPipelineStats(
+            points: openingPointCoordinator.points,
+            remainderMillimeters: openingPointCoordinator.remainderMillimeters,
+            watermarkRowId: openingPointCoordinator.watermarkRowId,
+            lastSegmentDistanceMeters: openingPointCoordinator.lastSegmentDistanceMeters,
+            lastAppliedMultiplier: openingPointCoordinator.lastAppliedMultiplier,
+            lastReason: openingPointCoordinator.lastReason,
           );
         } catch (e, stackTrace) {
           _log('位置の処理中にエラーが発生しました（この位置はスキップして次に進みます）: $e');

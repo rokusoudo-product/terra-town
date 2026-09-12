@@ -11,8 +11,10 @@ import '../../map/current_location_marker_factory.dart';
 import '../../map/debug/disclosure_debug_panel.dart';
 import '../../map/debug/fog_of_war_debug_panel.dart';
 import '../../map/debug/location_tracking_debug_panel.dart';
+import '../../map/debug/opening_point_debug_panel.dart';
 import '../../map/debug/terrain_yield_debug_panel.dart';
 import '../../map/disclosure/disclosure_restore.dart';
+import '../../map/economy/opening_point_accrual_coordinator.dart';
 import '../../map/economy/terrain_yield_accrual_coordinator.dart';
 import '../../map/economy/terrain_yield_pipeline.dart';
 import '../../map/fog_of_war_layer_factory.dart';
@@ -66,6 +68,13 @@ import '../permissions/tracking_control_button.dart';
 /// 本ウィジェットの `_isFollowing` が保持し、[CurrentLocationFollowButton] で
 /// 切り替える。利用者が地図を動かして追従が解除された場合は
 /// [MapView.onFollowDismissedByUser] 経由で `_isFollowing` を false に戻す。
+///
+/// ## 2026-09-12（Issue #143）: 開放ポイント（歩行距離換算）の入手（T063）
+/// `TerrainYieldPipeline` に `OpeningPointAccrualCoordinator` を統合し、同じ
+/// 直列パイプラインの中で開放ポイント（歩行距離換算・上限50P）を計上する
+/// （新たな位置ストリームの購読は追加しない。詳細は
+/// `docs/opening-points-impl.md`・`terrain_yield_pipeline.dart` クラスdoc参照）。
+/// 自然回復（1P/日）は MVP では実装しない（`docs/opening_points.md` §2.1）。
 ///
 /// ## 2026-09-12（Issue #142）: 位置記録の開始・停止と権限リクエスト（T059）
 /// [TrackingControlButton]（`app/lib/features/permissions/`）を release ビルドを
@@ -381,11 +390,17 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       // 「開示判定・霧の解除」を直列に行う唯一のリスナーがこのパイプラインであり、
       // 本番の位置ストリーム（recordedPositionUpdates）を購読するのはこれだけに
       // 保つこと（`terrain_yield_pipeline.dart` クラスdoc参照）。
+      // 2026-09-12（Issue #143）: 開放ポイント（歩行距離換算）の計上も同じ
+      // パイプラインに統合する（新たな位置ストリームの購読は追加しない。
+      // `terrain_yield_pipeline.dart` クラスdoc参照）。
       _pipeline = TerrainYieldPipeline(
         disclosureService: service,
         reveal: reveal,
         accrualCoordinator: TerrainYieldAccrualCoordinator(
           ledger: TerrainYieldLedger(widget.paths.gameDatabase),
+        ),
+        openingPointCoordinator: OpeningPointAccrualCoordinator(
+          ledger: OpeningPointLedger(widget.paths.gameDatabase),
         ),
         terrainHexCounter: terrainHexCounter,
         disclosedHexRepository: disclosedHexRepository,
@@ -653,6 +668,9 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
                       stats: pipeline.stats,
                       terrainHexCounter: terrainHexCounter,
                       inventoryRepository: inventoryRepository,
+                    ),
+                    OpeningPointDebugPanel(
+                      stats: pipeline.openingPointStats,
                     ),
                   ],
                 ),
