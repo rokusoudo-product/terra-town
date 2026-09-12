@@ -310,6 +310,16 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   /// 驚きが大きいと判断した実装判断）。
   bool _isFollowing = false;
 
+  /// デバッグパネル群（`kDebugMode` 限定）を表示するか。
+  ///
+  /// パネルが増えるたびに地図と製品UIのボタンが覆われ、実機確認が行えなくなる
+  /// 問題が繰り返し起きたため、一括で隠せるようにした（2026-09-12）:
+  ///   - Issue #137 の検証時: パネルが地図中心を覆い、霧が晴れる様子を目視できなかった
+  ///   - Issue #138 の検証時: 位置記録パネルの「起動・停止」ボタンが覆われ、タップできなかった
+  ///   - Issue #141 の検証時: 追従ボタンが位置記録パネルの下に隠れ、タップできなかった
+  /// 隠している間も本トグル自身と製品UI（追従ボタン）は操作できる。
+  bool _debugPanelsVisible = true;
+
   @override
   void initState() {
     super.initState();
@@ -469,7 +479,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     // 適用した）。release ビルドでは通常の画面右下に置く。
     final followButton = Positioned(
       right: AppSpacing.md,
-      bottom: kDebugMode
+      bottom: kDebugMode && _debugPanelsVisible
           ? MediaQuery.sizeOf(context).height / 2 + AppSpacing.md
           : AppSpacing.md,
       child: SafeArea(
@@ -520,6 +530,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         // 本パネルではなく `TerrainYieldDebugPanel`〔パイプライン自身が公開する
         // 派生ストリーム `stats` を読むだけで、位置ストリームを直接購読しない〕
         // が担う）。
+        if (_debugPanelsVisible)
         Positioned(
           left: 0,
           right: 0,
@@ -560,7 +571,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
             ],
           ),
         ),
-        if (fogController != null)
+        if (fogController != null && _debugPanelsVisible)
           Positioned(
             left: 0,
             right: 0,
@@ -602,6 +613,28 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
               ),
             ),
           ),
+        // デバッグパネルの一括表示/非表示トグル（`kDebugMode` 限定）。
+        // パネル群より後ろ（前面）に置き、パネルを表示している間も押せるようにする。
+        Positioned(
+          right: AppSpacing.sm,
+          top: 0,
+          child: SafeArea(
+            bottom: false,
+            child: Tooltip(
+              message: _debugPanelsVisible ? 'デバッグパネルを隠す' : 'デバッグパネルを表示する',
+              child: FloatingActionButton.small(
+                heroTag: 'debug_panels_toggle',
+                onPressed: () =>
+                    setState(() => _debugPanelsVisible = !_debugPanelsVisible),
+                child: Icon(
+                  _debugPanelsVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.bug_report_outlined,
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
