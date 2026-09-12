@@ -44,6 +44,7 @@ export 'src/map/mbtiles_source.dart';
 export 'src/map/map_view.dart';
 export 'src/pack/region_pack_repository.dart';
 export 'src/db/inventory_repository.dart';
+export 'src/db/opening_point_ledger.dart';
 export 'src/db/resource_key_codec.dart';
 export 'src/db/terrain_yield_ledger.dart';
 export 'src/position/location_api.g.dart';

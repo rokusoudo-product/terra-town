@@ -218,6 +218,7 @@ class RewardPolicy {
           to: to,
           multiplier: 0.0,
           reason: RewardSegmentReason.mockSuspected,
+          distanceMeters: _haversineMeters(from, to),
         );
       }
     }
@@ -246,6 +247,7 @@ class RewardPolicy {
         for (var s = 0; s < speedSegments.length; s++) {
           final k = i + s;
           final speedSegment = speedSegments[s];
+          final distanceMeters = _haversineMeters(speedSegment.from, speedSegment.to);
           if (!speedSegment.rewardEligible) {
             // 4条件のうち条件4: 既に速度超過で倍率0の区間には歩数判定を重ねない。
             results[k] = RewardSegment(
@@ -253,6 +255,7 @@ class RewardPolicy {
               to: speedSegment.to,
               multiplier: 0.0,
               reason: RewardSegmentReason.overSpeed,
+              distanceMeters: distanceMeters,
               speedSegment: speedSegment,
             );
           } else {
@@ -264,6 +267,7 @@ class RewardPolicy {
               reason: stepMultiplier < 1.0
                   ? RewardSegmentReason.stepMismatch
                   : RewardSegmentReason.none,
+              distanceMeters: distanceMeters,
               speedSegment: speedSegment,
             );
           }
@@ -367,6 +371,7 @@ class RewardSegment {
     required this.to,
     required this.multiplier,
     required this.reason,
+    required this.distanceMeters,
     this.speedSegment,
   });
 
@@ -384,6 +389,21 @@ class RewardSegment {
   /// [multiplier] がその値になった理由（デバッグ・テスト可読性のため）。
   final RewardSegmentReason reason;
 
+  /// [from] から [to] までの移動距離〔m〕（Haversine公式・本ファイル末尾の
+  /// [_haversineMeters]）。
+  ///
+  /// ## 追加した理由（Issue #143・T063）
+  /// 開放ポイントの歩行距離換算（`docs/opening_points.md` §2.2・
+  /// `computeOpeningPointAccrual`）は区間ごとの移動距離が必要になる。
+  /// [_haversineMeters] は本ファイル（[_stepWindowMultipliers]）と
+  /// `speed_filter.dart`（[SpeedFilter]）に**既に意図的に重複定義されている**
+  /// （両ファイルのクラスdoc「距離計算」参照。[SpeedFilter] を書き直さない
+  /// 方針のため公開APIへの昇格ではなく重複を選んだ経緯がある）。本フィールドは
+  /// その**3つ目の重複を作らず**、[_classifySession] が既に構築できる値を
+  /// 呼び出し側へ公開するだけの変更である（呼び出し側〔`app` の
+  /// `OpeningPointAccrualCoordinator`〕が改めて距離計算を持つ必要が無くなる）。
+  final double distanceMeters;
+
   /// この区間の [SpeedFilter] 判定結果（診断用途）。[from]/[to] のいずれかが
   /// [GeoPosition.spoofSuspected] な区間では [SpeedFilter] を呼ばないため null。
   final SpeedSegment? speedSegment;
@@ -395,14 +415,16 @@ class RewardSegment {
       other.to == to &&
       other.multiplier == multiplier &&
       other.reason == reason &&
+      other.distanceMeters == distanceMeters &&
       other.speedSegment == speedSegment;
 
   @override
-  int get hashCode => Object.hash(from, to, multiplier, reason, speedSegment);
+  int get hashCode =>
+      Object.hash(from, to, multiplier, reason, distanceMeters, speedSegment);
 
   @override
   String toString() => 'RewardSegment(from: $from, to: $to, multiplier: $multiplier, '
-      'reason: $reason)';
+      'reason: $reason, distanceMeters: $distanceMeters)';
 }
 
 /// 歩数突合の移動窓に保持する、生の区間データ。

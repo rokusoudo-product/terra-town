@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
+import 'package:terra_town/map/economy/opening_point_accrual_coordinator.dart';
 import 'package:terra_town/map/economy/terrain_yield_accrual_coordinator.dart';
 import 'package:terra_town/map/economy/terrain_yield_pipeline.dart';
 
@@ -72,6 +73,39 @@ class _FakeLedger implements TerrainYieldLedgerStore {
   }
 }
 
+/// 開放ポイント（Issue #143）用のオンメモリフェイク実装。本テストファイルは
+/// `TerrainYieldPipeline` に統合された `OpeningPointAccrualCoordinator` の詳細な
+/// 挙動までは検証しない（それは
+/// `app/test/map/economy/opening_point_accrual_coordinator_test.dart` の責務）。
+/// ここでは単に「新しい必須引数が増えたことでコンパイルが壊れない」
+/// 「地形産出のテストに影響しない」ことを確認する目的でフェイクを用意する。
+class _FakeOpeningPointLedger implements OpeningPointLedgerStore {
+  int watermarkRowId = 0;
+  int remainderMillimeters = 0;
+  int points = 0;
+
+  @override
+  Future<OpeningPointLedgerSnapshot> readSnapshot() async => OpeningPointLedgerSnapshot(
+        watermarkRowId: watermarkRowId,
+        remainderMillimeters: remainderMillimeters,
+        points: points,
+      );
+
+  @override
+  Future<void> applyAccrual({
+    required int grantedPoints,
+    required int remainderMillimeters,
+    required int watermarkRowId,
+  }) async {
+    points += grantedPoints;
+    this.remainderMillimeters = remainderMillimeters;
+    this.watermarkRowId = watermarkRowId;
+  }
+}
+
+OpeningPointAccrualCoordinator _fakeOpeningPointCoordinator() =>
+    OpeningPointAccrualCoordinator(ledger: _FakeOpeningPointLedger());
+
 LocationPointRecord _record({
   required int rowId,
   required int hexId,
@@ -119,6 +153,7 @@ void main() {
           disclosureService: service,
           reveal: (featureId) async => revealed.add(featureId),
           accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: ledger),
+          openingPointCoordinator: _fakeOpeningPointCoordinator(),
           terrainHexCounter: terrainHexCounter,
           disclosedHexRepository: repository,
           recordedPositionUpdates: controller.stream,
@@ -174,6 +209,7 @@ void main() {
         disclosureService: service,
         reveal: (featureId) async => revealed.add(featureId),
         accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: ledger),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
         terrainHexCounter: terrainHexCounter,
         disclosedHexRepository: repository,
         recordedPositionUpdates: const Stream<LocationPointRecord>.empty(),
@@ -208,6 +244,7 @@ void main() {
         disclosureService: service,
         reveal: (featureId) async => revealed.add(featureId),
         accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: ledger),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
         terrainHexCounter: TerrainHexCounter(),
         disclosedHexRepository: repository,
         recordedPositionUpdates: controller.stream,
@@ -253,6 +290,7 @@ void main() {
           revealed.add(featureId);
         },
         accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
         terrainHexCounter: TerrainHexCounter(),
         disclosedHexRepository: repository,
         recordedPositionUpdates: controller.stream,
@@ -292,6 +330,7 @@ void main() {
         disclosureService: service,
         reveal: (featureId) async => revealed.add(featureId),
         accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
         terrainHexCounter: TerrainHexCounter(),
         disclosedHexRepository: repository,
         recordedPositionUpdates: controller.stream,
@@ -335,6 +374,7 @@ void main() {
         // したか」参照）。
         reveal: (featureId) async => throw StateError('意図的な失敗（テスト用）'),
         accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
         terrainHexCounter: TerrainHexCounter(),
         disclosedHexRepository: repository,
         recordedPositionUpdates: controller.stream,
@@ -377,6 +417,7 @@ void main() {
           disclosureService: service,
           reveal: (featureId) async => revealed.add(featureId),
           accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+          openingPointCoordinator: _fakeOpeningPointCoordinator(),
           terrainHexCounter: TerrainHexCounter(),
           disclosedHexRepository: repository,
           recordedPositionUpdates: controller.stream,
@@ -421,6 +462,7 @@ void main() {
         disclosureService: service,
         reveal: (featureId) async {},
         accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
         terrainHexCounter: TerrainHexCounter(),
         disclosedHexRepository: repository,
         recordedPositionUpdates: const Stream<LocationPointRecord>.empty(),
