@@ -311,5 +311,126 @@ void main() {
       await controller.close();
       await pipeline.stop();
     });
+
+    // Issue #141（現在地表示）受け入れ基準
+    // 「記録サービス稼働中に位置が届くと、地図上の現在地マーカーが更新される」
+    // 「位置ストリームの購読が増えていない（TerrainYieldPipelineの1本から
+    // 派生している）ことがコードとテストで分かる」に対応する。
+    test('currentPositionは位置1件ごとに更新される（accrue/revealの成否に関わらず）', () async {
+      final controller = StreamController<LocationPointRecord>();
+      final known = DisclosedHexSet();
+      final repository = _InMemoryDisclosedHexRepository();
+
+      final service = DisclosureService(
+        hexLocator: const RecordedHexLocator(),
+        regionPack: _FakeRegionPack(terrainByHex: {const HexId(1): TerrainType.forest}),
+        known: known,
+        repository: repository,
+      );
+
+      final pipeline = TerrainYieldPipeline(
+        disclosureService: service,
+        // reveal が常に失敗しても currentPosition の更新には影響しないことを
+        // あわせて検証する（クラスdoc「なぜstatsに含めず別のValueNotifierに
+        // したか」参照）。
+        reveal: (featureId) async => throw StateError('意図的な失敗（テスト用）'),
+        accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+        terrainHexCounter: TerrainHexCounter(),
+        disclosedHexRepository: repository,
+        recordedPositionUpdates: controller.stream,
+      );
+
+      expect(pipeline.currentPosition.value, isNull);
+
+      await pipeline.start();
+
+      final record = _record(rowId: 1, hexId: 1, micros: 0);
+      controller.add(record);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(pipeline.currentPosition.value, record.position);
+
+      await controller.close();
+      await pipeline.stop();
+    });
+
+    test(
+      'currentPositionを購読しても位置ストリーム（recordedPositionUpdates）の購読は1つのまま増えない',
+      () async {
+        var listenCount = 0;
+        final controller = StreamController<LocationPointRecord>.broadcast(
+          onListen: () => listenCount++,
+        );
+        final known = DisclosedHexSet();
+        final repository = _InMemoryDisclosedHexRepository();
+        final revealed = <int>[];
+
+        final service = DisclosureService(
+          hexLocator: const RecordedHexLocator(),
+          regionPack: _FakeRegionPack(terrainByHex: {const HexId(1): TerrainType.forest}),
+          known: known,
+          repository: repository,
+        );
+
+        final pipeline = TerrainYieldPipeline(
+          disclosureService: service,
+          reveal: (featureId) async => revealed.add(featureId),
+          accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+          terrainHexCounter: TerrainHexCounter(),
+          disclosedHexRepository: repository,
+          recordedPositionUpdates: controller.stream,
+        );
+
+        await pipeline.start();
+        expect(listenCount, 1);
+
+        // 現在地表示側は pipeline.currentPosition（ValueListenable）を
+        // 購読するだけで、recordedPositionUpdates を直接購読しない
+        // （MapView.currentLocation の配線と同じ）。ここでは相当する操作
+        // として addListener を行い、購読数（listenCount）が増えないことを
+        // 確認する。
+        void noop() {}
+        pipeline.currentPosition.addListener(noop);
+
+        controller.add(_record(rowId: 1, hexId: 1, micros: 0));
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(listenCount, 1); // 増えていない
+        expect(pipeline.currentPosition.value, isNotNull);
+
+        pipeline.currentPosition.removeListener(noop);
+        await controller.close();
+        await pipeline.stop();
+      },
+    );
+
+    test('recordManualPositionはcurrentPositionを更新しない（合成的な観測のため）', () async {
+      final known = DisclosedHexSet();
+      final repository = _InMemoryDisclosedHexRepository();
+
+      final service = DisclosureService(
+        hexLocator: const RecordedHexLocator(),
+        regionPack: _FakeRegionPack(terrainByHex: {const HexId(9): TerrainType.sea}),
+        known: known,
+        repository: repository,
+      );
+
+      final pipeline = TerrainYieldPipeline(
+        disclosureService: service,
+        reveal: (featureId) async {},
+        accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: _FakeLedger()),
+        terrainHexCounter: TerrainHexCounter(),
+        disclosedHexRepository: repository,
+        recordedPositionUpdates: const Stream<LocationPointRecord>.empty(),
+      );
+
+      await pipeline.recordManualPosition(
+        GeoPosition(latitude: 1, longitude: 1, timestamp: DateTime.now(), hexId: const HexId(9)),
+      );
+
+      expect(pipeline.currentPosition.value, isNull);
+    });
   });
 }

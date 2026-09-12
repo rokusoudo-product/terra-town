@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:terra_town_core/terra_town_core.dart' show GeoPosition;
 
+import 'current_location_marker.dart';
 import 'fog_of_war_layer.dart';
 import 'map_camera_position.dart';
 import 'mbtiles_source.dart';
@@ -70,7 +74,9 @@ class MapLineLayerStyle {
 /// 【スコープ】本ウィジェットは「同梱の地域パック（ベクタタイル MBTiles）を
 /// ローカル読込して表示する」ところと、fog of war（未開示ヘクスの暗幕・
 /// plan.md §8・tasks.md T056。[fogOfWarLayer]/[fogHexFeatureCollection] が
-/// 渡された場合のみ）を担う。現在地表示と地図追従（T058）は含まない。
+/// 渡された場合のみ）、現在地マーカーの表示と地図追従（tasks.md T058・
+/// Issue #141。[currentLocation]/[currentLocationMarkerStyle] が渡された
+/// 場合のみ。詳細は該当パラメータのドキュメント参照）を担う。
 ///
 /// 【入力】[mbtilesFilePath] は呼び出し側が [resolveBundledMbtilesPath] 等で
 /// あらかじめ書き込み可能な領域に用意した、実ファイルシステム上の絶対パスを渡すこと
@@ -114,6 +120,12 @@ class MapView extends StatefulWidget {
     this.fogLayerId = FogOfWarController.defaultLayerId,
     this.onFogLayerReady,
     this.onMapControllerReady,
+    this.currentLocation,
+    this.currentLocationMarkerStyle,
+    this.currentLocationSourceId = _defaultCurrentLocationSourceId,
+    this.currentLocationLayerId = _defaultCurrentLocationLayerId,
+    this.followCurrentLocation = false,
+    this.onFollowDismissedByUser,
   });
 
   /// [resolveBundledMbtilesPath] 等で解決済みの、書き込み可能な領域にある
@@ -187,6 +199,52 @@ class MapView extends StatefulWidget {
   /// 最小限の口であり、カメラ移動・ズーム操作等は含まない。
   final void Function(MapCameraReader reader)? onMapControllerReady;
 
+  /// 現在地（Issue #141・T058）。composition root（`app`）が
+  /// `TerrainYieldPipeline.currentPosition`（`app/lib/map/economy/
+  /// terrain_yield_pipeline.dart`）から渡す [ValueListenable] を想定する。
+  ///
+  /// 【なぜ位置ストリームを直接渡させないか（最重要）】本 Issue の受け入れ
+  /// 基準「位置ストリームの購読が増えていない」ことを満たすため、[MapView] は
+  /// `NativePositionProvider.recordedPositionUpdates`/`positionUpdates` を
+  /// 一切購読しない。既に1本だけ購読している `TerrainYieldPipeline` が
+  /// 公開する派生的な通知（`stats` と同じ [ValueListenable] 方式）を、呼び出し
+  /// 側が渡すだけにする（値の出所は呼び出し側の責務。[MapView] 自身は
+  /// 「渡された値をそのまま描画する」ことだけを行う）。
+  ///
+  /// 値が null（またはこのフィールド自体が null）の間はマーカーを表示しない
+  /// （[buildCurrentLocationFeatureCollection] のドキュメント「未取得の場合の
+  /// 表示」参照）。
+  final ValueListenable<GeoPosition?>? currentLocation;
+
+  /// 現在地マーカーの色・サイズ（`app` から注入。Issue #57 の注入方式）。
+  /// null の場合は現在地マーカーのソース/レイヤー自体を追加しない
+  /// （fog と同じ「両方揃ったら追加」ではなく、こちらは本パラメータ単体の
+  /// 有無で決まる。[currentLocation] が無くても表示するものが無いだけで
+  /// レイヤー自体は追加でき、逆に [currentLocation] があっても見た目
+  /// （本パラメータ）が無ければ描画できないため）。
+  final CurrentLocationMarkerStyle? currentLocationMarkerStyle;
+
+  /// 現在地マーカーの GeoJSON ソース ID。
+  final String currentLocationSourceId;
+
+  /// 現在地マーカーの fill レイヤー ID。
+  final String currentLocationLayerId;
+
+  /// 追従（カメラが現在地を追う）が有効かどうか。トグルの状態そのものは
+  /// 呼び出し側（`app`）が保持する（[MapView] は状態を持たず、渡された値に
+  /// 従って `animateCamera` を発行するだけ）。
+  final bool followCurrentLocation;
+
+  /// 追従が有効な状態で、利用者の操作（ドラッグ・ピンチ等）によってカメラが
+  /// 動いたと判定された場合に呼ぶ（[CameraFollowTracker] のドキュメント
+  /// 「採用した区別方法」参照）。呼び出し側はこれを受けて追従トグルを
+  /// オフにすること（[MapView] 自身は自分の [followCurrentLocation] を
+  /// 書き換えられないため）。
+  final VoidCallback? onFollowDismissedByUser;
+
+  static const _defaultCurrentLocationSourceId = 'terra_town_current_location';
+  static const _defaultCurrentLocationLayerId = 'terra_town_current_location_layer';
+
   @override
   State<MapView> createState() => _MapViewState();
 }
@@ -223,6 +281,108 @@ class MapCameraReader {
 class _MapViewState extends State<MapView> {
   MapLibreMapController? _controller;
 
+  /// `_addRegionPackLayers`（`onStyleLoadedCallback`）が完了し、現在地マーカーの
+  /// ソース/レイヤーが（追加されていれば）追加済みかどうか。これが true になる
+  /// 前に [currentLocation] の更新が届いた場合は、完了後に [_lastKnownPosition]
+  /// を使って一度だけ反映する（クラスdoc「なぜファイルを直接読まなくなったか」
+  /// と同種の「まだ準備が整っていない間に届いた値を取りこぼさない」ための対処）。
+  bool _styleReady = false;
+
+  /// [currentLocation] から直近に受け取った値（[_styleReady] が false の間も
+  /// 保持しておき、準備完了時にまとめて反映する）。
+  GeoPosition? _lastKnownPosition;
+
+  /// 追従カメラと利用者操作を区別するための状態機械
+  /// （[CameraFollowTracker] のドキュメント参照）。
+  final CameraFollowTracker _followTracker = CameraFollowTracker();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.currentLocation?.addListener(_onCurrentLocationChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant MapView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.currentLocation, widget.currentLocation)) {
+      oldWidget.currentLocation?.removeListener(_onCurrentLocationChanged);
+      widget.currentLocation?.addListener(_onCurrentLocationChanged);
+      _onCurrentLocationChanged();
+    }
+    // 追従がオフ→オンに切り替わった瞬間は、次の位置更新を待たず直ちに
+    // 現在地へカメラを寄せる（利用者がボタンを押した直後に反応させるため。
+    // Issue #141 受け入れ基準「ボタンで再開できる」）。
+    if (!oldWidget.followCurrentLocation && widget.followCurrentLocation) {
+      final position = _lastKnownPosition;
+      if (position != null) _moveCameraTo(position);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.currentLocation?.removeListener(_onCurrentLocationChanged);
+    super.dispose();
+  }
+
+  void _onCurrentLocationChanged() {
+    final position = widget.currentLocation?.value;
+    _lastKnownPosition = position;
+    if (!_styleReady) {
+      // _addRegionPackLayers 完了時にまとめて反映する（上記フィールドdoc参照）。
+      return;
+    }
+    unawaited(_updateCurrentLocationMarker(position));
+    if (position != null && widget.followCurrentLocation) {
+      _moveCameraTo(position);
+    }
+  }
+
+  Future<void> _updateCurrentLocationMarker(GeoPosition? position) async {
+    final controller = _controller;
+    if (controller == null || widget.currentLocationMarkerStyle == null) return;
+    try {
+      await controller.setGeoJsonSource(
+        widget.currentLocationSourceId,
+        buildCurrentLocationFeatureCollection(position),
+      );
+    } catch (e, stackTrace) {
+      _log('失敗: 現在地マーカーの更新でエラー: $e');
+      developer.log(
+        '現在地マーカーの更新に失敗しました',
+        name: 'terra_town_location.map_view',
+        error: e,
+        stackTrace: stackTrace,
+        level: 1000,
+      );
+    }
+  }
+
+  void _moveCameraTo(GeoPosition position) {
+    final controller = _controller;
+    if (controller == null) return;
+    _followTracker.markProgrammaticMove();
+    unawaited(
+      controller.animateCamera(
+        CameraUpdate.newLatLng(LatLng(position.latitude, position.longitude)),
+        // 位置は最短5秒間隔（NativePositionProvider.pollInterval既定値）で
+        // 届く。毎回この程度の短さで収める（長いと次の更新が来ても前の
+        // アニメーションが終わっていない状態が起こりやすくなる）。
+        duration: const Duration(milliseconds: 500),
+      ),
+    );
+  }
+
+  /// `MapLibreMap.onCameraIdle`（[build] で登録）から呼ぶ。
+  void _handleCameraIdle() {
+    final shouldDismiss = _followTracker.handleCameraIdle(
+      followEnabled: widget.followCurrentLocation,
+    );
+    if (shouldDismiss) {
+      widget.onFollowDismissedByUser?.call();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MapLibreMap(
@@ -247,6 +407,9 @@ class _MapViewState extends State<MapView> {
         widget.onMapControllerReady?.call(MapCameraReader(controller));
       },
       onStyleLoadedCallback: _addRegionPackLayers,
+      // 追従中に利用者が地図を動かしたら追従を解除する（Issue #141 提案2）ための
+      // 検知経路。[CameraFollowTracker] のドキュメント「なぜ必要か」参照。
+      onCameraIdle: _handleCameraIdle,
     );
   }
 
@@ -350,6 +513,61 @@ class _MapViewState extends State<MapView> {
           );
           widget.onLayersFailed?.call(e, stackTrace);
         }
+      }
+
+      // 【T058（現在地マーカー・Issue #141）】fog と同じく、ベースレイヤー
+      // 追加後に独立した try/catch で追加する。fog 失敗時にも現在地
+      // マーカーは表示できるようにする（逆も同様）ため、fog のブロックとは
+      // 意図的に分けている。fog より後に追加することで、霧の上にマーカーが
+      // 見える描画順にする（未開示ヘクスにいても現在地が見えるようにする。
+      // Issue #141 本文「実機の現在地は地域パックの範囲外」に対応するため、
+      // パック範囲外かどうかによらず常にこのソース/レイヤーを追加する）。
+      final markerStyle = widget.currentLocationMarkerStyle;
+      if (markerStyle != null) {
+        try {
+          // 初期状態は空の FeatureCollection（＝マーカー無し）で追加し、
+          // 実際の位置が届いたら setGeoJsonSource で更新する
+          // （buildCurrentLocationFeatureCollection のドキュメント参照）。
+          await controller.addGeoJsonSource(
+            widget.currentLocationSourceId,
+            buildCurrentLocationFeatureCollection(null),
+          );
+          await controller.addCircleLayer(
+            widget.currentLocationSourceId,
+            widget.currentLocationLayerId,
+            CircleLayerProperties(
+              circleRadius: markerStyle.radius,
+              circleColor: markerStyle.fillColorHex,
+              circleStrokeColor: markerStyle.strokeColorHex,
+              circleStrokeWidth: markerStyle.strokeWidth,
+            ),
+          );
+          _log('現在地マーカーのソース/レイヤーを追加しました');
+        } catch (e, stackTrace) {
+          _log('失敗: 現在地マーカーのソース/レイヤー追加でエラー: $e');
+          developer.log(
+            '現在地マーカーのソース/レイヤー追加に失敗しました',
+            name: 'terra_town_location.map_view',
+            error: e,
+            stackTrace: stackTrace,
+            level: 1000,
+          );
+          widget.onLayersFailed?.call(e, stackTrace);
+        }
+      }
+
+      // ここまでで（成否によらず）onStyleLoadedCallback の一連の処理が
+      // 完了した。以後に届く currentLocation の更新は _onCurrentLocationChanged
+      // が直接処理できるようにする。また、初回のみ「これまでに届いていた値」
+      // （_onCurrentLocationChanged が _styleReady==false のため保留していた分・
+      // または初期値としてすでに [ValueListenable.value] に入っていた分）を
+      // まとめて反映する。
+      _styleReady = true;
+      final pending = widget.currentLocation?.value;
+      _lastKnownPosition = pending;
+      unawaited(_updateCurrentLocationMarker(pending));
+      if (pending != null && widget.followCurrentLocation) {
+        _moveCameraTo(pending);
       }
     } catch (e, stackTrace) {
       // 【本Issueが解消しようとしているリスクそのもの】plan.md §8「未計測」＝

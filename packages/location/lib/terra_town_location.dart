@@ -34,6 +34,7 @@ export 'src/db/disclosed_hex_repository.dart';
 export 'src/db/game_database.dart';
 export 'src/db/region_pack_connection.dart';
 export 'src/db/reward_settings_repository.dart';
+export 'src/map/current_location_marker.dart';
 export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';
 export 'src/map/hex_feature_bridge.dart';

@@ -6,6 +6,8 @@ import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import '../../design/spacing.dart';
+import '../../map/current_location_follow_button.dart';
+import '../../map/current_location_marker_factory.dart';
 import '../../map/debug/disclosure_debug_panel.dart';
 import '../../map/debug/fog_of_war_debug_panel.dart';
 import '../../map/debug/location_tracking_debug_panel.dart';
@@ -18,8 +20,8 @@ import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
 
-/// マップ（ホーム）画面（tasks.md T057・T060・T066・T068・T069・
-/// Issue #100・#101・#102・#137・#138）。
+/// マップ（ホーム）画面（tasks.md T057・T058・T060・T066・T068・T069・
+/// Issue #100・#101・#102・#137・#138・#141）。
 ///
 /// DESIGN.md「画面一覧と状態」のマップ（ホーム）行に対応する。
 /// DESIGN.md が定義する4状態のうち本画面が扱うのは次の2つ + ローディングのみ:
@@ -53,6 +55,16 @@ import '../../map/region_pack_asset.dart';
 /// リスナーはこのパイプライン1つのみ**とし、`DisclosureCoordinator`
 /// （テスト・単体クラスとしては残す）は composition root では使わない。
 /// 詳細・判断の記録は `docs/terrain-yield.md` 参照。
+///
+/// ## 2026-09-12（Issue #141）: 現在地表示と地図追従（T058）
+/// `TerrainYieldPipeline.currentPosition`（`stats` と同じ [ValueListenable]
+/// 方式で公開する派生的な通知）を [MapView.currentLocation] にそのまま渡す。
+/// **位置ストリーム（`NativePositionProvider.recordedPositionUpdates`）を
+/// 新たに購読することはしない**（`terrain_yield_pipeline.dart` クラスdoc
+/// 「なぜ stats に含めず別のValueNotifierにしたか」参照）。追従のオン/オフは
+/// 本ウィジェットの `_isFollowing` が保持し、[CurrentLocationFollowButton] で
+/// 切り替える。利用者が地図を動かして追従が解除された場合は
+/// [MapView.onFollowDismissedByUser] 経由で `_isFollowing` を false に戻す。
 ///
 /// ## パックが無い場合の振る舞い（PR本文にも記載）
 /// 生成物（`app/assets/pack/`配下）はコミットしない方針（Issue #85）のため、
@@ -293,6 +305,11 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   InventoryRepository? _inventoryRepository;
   TerrainYieldPipeline? _pipeline;
 
+  /// 地図追従（Issue #141・T058）のオン/オフ。既定はオフ（利用者がボタンを
+  /// 押すまでカメラは動かない。地図を開いた直後に勝手にカメラが動く方が
+  /// 驚きが大きいと判断した実装判断）。
+  bool _isFollowing = false;
+
   @override
   void initState() {
     super.initState();
@@ -377,6 +394,19 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     await pipeline.start();
   }
 
+  /// [CurrentLocationFollowButton] から呼ぶ。
+  void _toggleFollow() {
+    setState(() => _isFollowing = !_isFollowing);
+  }
+
+  /// [MapView.onFollowDismissedByUser] から呼ぶ（追従中に利用者が地図を
+  /// 動かした場合。Issue #141 受け入れ基準「利用者が地図を動かすと追従が
+  /// 解除される」）。
+  void _onFollowDismissedByUser() {
+    if (!mounted) return;
+    setState(() => _isFollowing = false);
+  }
+
   @override
   void dispose() {
     unawaited(_pipeline?.stop() ?? Future<void>.value());
@@ -393,6 +423,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     }
 
     final fogHexFeatureCollection = _fogHexFeatureCollection!;
+    final pipeline = _pipeline!;
 
     final mapView = MapView(
       mbtilesFilePath: widget.paths.mbtilesFilePath,
@@ -419,15 +450,44 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
               setState(() => _cameraReader = reader);
             }
           : null,
+      // 2026-09-12（Issue #141・T058）: 現在地表示と地図追従。
+      // pipeline.currentPosition は TerrainYieldPipeline が唯一購読している
+      // 位置ストリームから派生した ValueListenable であり、ここで新たに
+      // NativePositionProvider を購読するわけではない（クラスdoc参照）。
+      currentLocation: pipeline.currentPosition,
+      currentLocationMarkerStyle: buildCurrentLocationMarkerStyle(),
+      followCurrentLocation: _isFollowing,
+      onFollowDismissedByUser: _onFollowDismissedByUser,
     );
 
-    if (!kDebugMode) return mapView;
+    // 追従トグルボタン（release ビルドでも常に表示する製品UI）。
+    // kDebugMode 配下ではデバッグパネル群が画面下半分（高さ height/2）を
+    // 占有しうるため、それより上に置いて既存の操作ボタン（デバッグパネルの
+    // 「起動・停止・状態確認」ボタン等）と重ならないようにする
+    // （2026-09-12 に下部デバッグパネルを画面高の1/2までに制限した際と同じ
+    // 「パネルが操作ボタンを覆わないこと」という方針を、新設するボタン側にも
+    // 適用した）。release ビルドでは通常の画面右下に置く。
+    final followButton = Positioned(
+      right: AppSpacing.md,
+      bottom: kDebugMode
+          ? MediaQuery.sizeOf(context).height / 2 + AppSpacing.md
+          : AppSpacing.md,
+      child: SafeArea(
+        child: CurrentLocationFollowButton(
+          isFollowing: _isFollowing,
+          onPressed: _toggleFollow,
+        ),
+      ),
+    );
+
+    if (!kDebugMode) {
+      return Stack(children: [mapView, followButton]);
+    }
 
     final fogController = _fogController;
     final layersError = _layersError;
     final cameraReader = _cameraReader;
     final restoreStats = _restoreStats;
-    final pipeline = _pipeline!;
     final disclosedHexRepository = _disclosedHexRepository!;
     final known = _known!;
     final terrainHexCounter = _terrainHexCounter!;
@@ -436,6 +496,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     return Stack(
       children: [
         mapView,
+        followButton,
         // 画面上部: レイヤー追加エラー（あれば）＋ 位置記録デバッグパネル
         // （Issue #124・T049・T050）を縦に並べる。位置記録パネルは fog レイヤーの
         // 準備完了を待つ必要が無いため常に表示する。
