@@ -6,18 +6,17 @@ plugins {
 
 android {
     namespace = "jp.rokusoudo.terra_town"
-    compileSdk = flutter.compileSdkVersion
+    // Issue #142（T059）: `permission_handler_android`（14.1.0）が SDK 37 でのコンパイルを
+    // 要求する（`flutter.compileSdkVersion` は本 Flutter バージョン時点で 36）。
+    // Gradle のエラーメッセージが案内する対処（`compileSdk` を明示的に上書き）をそのまま採用。
+    // 上位互換のため下位の `minSdk`/`targetSdk`（`flutter.minSdkVersion`/`flutter.targetSdkVersion`）
+    // には影響しない。
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    buildFeatures {
-        // Issue #123: MainActivity のデバッグ専用フック（実機検証用。T059で削除予定）が
-        // BuildConfig.DEBUG を参照するため有効化する（AGP 8+ の既定は false）。
-        buildConfig = true
     }
 
     defaultConfig {

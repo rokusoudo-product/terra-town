@@ -386,42 +386,95 @@ foreground service は「フォアグラウンド位置」権限（`ACCESS_FINE_
 **画面消灯・アプリがバックグラウンドに回っても動作し続ける**（Android の
 while-in-use 制限は「アプリの画面が前面にあること」ではなく「foreground service が
 動作していること」を条件にしているため）。したがって「フォアグラウンド位置」は
-「アプリの画面を見ていること」を意味しない。サービスを止めるのは
-明示的な停止操作（T059）のみで、本 Issue の時点では代表がデバッグフック
-（`MainActivity.handleDebugLocationServiceIntent`）で止める。
+「アプリの画面を見ていること」を意味しない。サービスを止めるのは明示的な停止操作のみ。
+**2026-09-12（Issue #142・T059）**: 製品UI（マップ画面下部中央の記録ボタン。
+`app/lib/features/permissions/tracking_control_button.dart`）から起動・停止できるように
+なった。以前ここに書いていた「代表がデバッグフック（`MainActivity.
+handleDebugLocationServiceIntent`）で止める」は Issue #142 で当該フックごと削除済み
+（§8.2参照）。
 
 **`onStartCommand` は `START_STICKY` ではなく `START_NOT_STICKY` を返す**（プロセスが
 kill された場合にシステムに自動再起動させない）。自動再起動しても、その時点でアプリに
 前面の Activity が無ければ（Android 11+ の while-in-use 制限により）
 `ACCESS_BACKGROUND_LOCATION` なしでは位置更新自体が届かず、「通知は表示されるが記録が
-一切増えない」状態になるだけで意味が無いため。再開はユーザー操作（T059）に委ねる。
+一切増えない」状態になるだけで意味が無いため。再開はユーザー操作（製品UIの「記録開始」
+ボタン。Issue #142・T059で実装済み）に委ねる。
 
 ## 8. 代表が実機で確認する手順
 
-### 8.1 前提（初回のみ）
+### 8.1 前提
+
+**2026-09-12（Issue #142・T059）以降は、権限のadb事前付与は不要**（アプリの製品UIが
+起動時に権限をリクエストする。§8.2参照）。動作確認を素早く繰り返したい場合のみ、
+従来どおり事前付与しておいてよい:
 
 ```bash
 adb shell pm grant jp.rokusoudo.terra_town android.permission.ACCESS_FINE_LOCATION
 adb shell pm grant jp.rokusoudo.terra_town android.permission.POST_NOTIFICATIONS
 ```
 
-`POST_NOTIFICATIONS` を許可しなくてもサービスは起動する（常駐通知が表示されないだけ）。
+`POST_NOTIFICATIONS` を許可しなくてもサービスは起動する（常駐通知が表示されないだけ。
+本権限は製品UI側もベストエフォートでリクエストするのみで、拒否されても記録開始を
+ブロックしない。`app/lib/features/permissions/location_permission_gateway.dart` 参照）。
 通知が出ない場合はこの許可を疑うこと。
 
-### 8.2 サービスの起動・停止（T059未実装のためデバッグフック経由）
+### 8.2 サービスの起動・停止（製品UI・Issue #142・T059）
+
+**`adb shell am start` の `terra_town.debug.startLocationService`/
+`terra_town.debug.stopLocationService`（`MainActivity.handleDebugLocationServiceIntent`）は
+Issue #142 で削除済み。使えない。** 起動・停止は次のとおりアプリの製品UIから行う。
+
+1. アプリを起動し、マップ画面下部中央の記録ボタン（`TrackingControlButton`。既定ラベル
+   「記録開始」）をタップする。
+2. 権限が未付与の場合はOSの許可ダイアログが表示される。「アプリの使用中のみ許可」を
+   選ぶ（plan.md §10・フォアグラウンド位置のみ。「常に許可」の選択肢自体が
+   `AndroidManifest.xml` に `ACCESS_BACKGROUND_LOCATION` が無いため現れない）。
+   許可すると自動的に記録が始まる。
+3. 稼働中はボタンが「記録中」（背景色・アイコンも変化）に変わる。同じボタンを
+   再度タップすると停止する。
+
+起動確認（"location" の foregroundServiceType が付いたサービスが見えるはず）:
 
 ```bash
-# 起動
-adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
-  --ez terra_town.debug.startLocationService true
-
-# 起動確認（"location" の foregroundServiceType が付いたサービスが見えるはず）
 adb shell dumpsys activity services jp.rokusoudo.terra_town
-
-# 停止
-adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
-  --ez terra_town.debug.stopLocationService true
 ```
+
+**権限の再要求（拒否/永久拒否）の確認手順（Issue #142 受け入れ基準）**:
+
+⚠️ **`adb shell pm revoke` はアプリのプロセスを強制終了する**（`am start` でホーム画面から
+戻すような操作では代用できない）。取り消した後は明示的にアプリを起動し直すこと。
+
+```bash
+# 一度許可した権限を取り消す（この時点でアプリのプロセスは終了する）
+adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACCESS_FINE_LOCATION
+adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACCESS_COARSE_LOCATION
+
+# プロセスが落ちているため、改めてアプリを起動する（再開ではなく新規起動）
+adb shell am start -n jp.rokusoudo.terra_town/.MainActivity
+```
+
+1. 起動直後（`initState` での確認）にマップ画面下部中央のボタンが「権限が必要です」
+   （警告色・`location_disabled` アイコン）になっていることを確認する。
+2. ボタンをタップ → OSの許可ダイアログが**再び表示される**ことを確認する。
+   - ここで**許可**すると記録が始まり、ボタンが「記録中」に戻ることを確認する。
+   - ここで**拒否**すると、アプリ独自の説明ダイアログ（「位置情報の権限が必要です」＋
+     なぜ必要かの説明＋「もう一度リクエストする」ボタン）が出ることを確認する。
+     **Android 11 (API 30) 以降は「今後表示しない」チェックボックス自体が存在せず、
+     2回連続で拒否すると自動的に永久拒否（`shouldShowRequestPermissionRationale` が
+     false）扱いになる**（Pixel 7a はこれに該当）。そのため2回目の拒否のタイミングで
+     次の3の状態に切り替わる。
+3. 永久拒否の確認: 上記2の説明ダイアログで「もう一度リクエストする」→ OSダイアログで
+   再度拒否する（＝合計2回拒否。Android 11+ ではこれだけで永久拒否になる。チェック
+   ボックスの操作は不要）。再度ボタンをタップすると、OSダイアログは**表示されず**、
+   アプリの説明ダイアログが「設定を開く」ボタンで表示されることを確認する。
+   「設定を開く」をタップして端末のアプリ情報画面（権限設定）に遷移することも確認する。
+4. **フォアグラウンド復帰時の再確認（`didChangeAppLifecycleState` の `resumed`）の確認**:
+   上記3の状態（永久拒否）のまま、「設定を開く」で遷移した端末のアプリ情報画面から
+   位置情報の権限を手動で許可し、**戻るボタンでアプリに戻る**（再起動ではなく、
+   バックグラウンドにいたアプリがフォアグラウンドに復帰する経路）。アプリを一切
+   操作しなくても、マップ画面のボタンが自動的に「記録開始」に変わることを確認する
+   （タップして初めて反映されるのではなく、フォアグラウンド復帰時点で反映されること
+   が本項目の確認ポイント）。
 
 **2026-09-11 訂正（Issue #131）**: 以前は上記コメントに「`close()` により WAL が自動的に
 チェックポイントされる」と書いていたが、`LocationTrackDatabaseHelper` はサービス停止時に
@@ -446,12 +499,24 @@ adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
 （`onStartCommand`）の確認は二重防御として残っているが、その経路でも
 `startForeground()` を先に呼んでから停止するためクラッシュしない。
 
+**2026-09-12（Issue #142・T059）追記**: 製品UI（`TrackingControlButton`）は権限が
+無い場合そもそも `startTracking()`（＝`Companion.start()`）を呼ばない
+（Dart側で先に権限状態を確認するため。`tracking_control_button.dart` クラスdoc参照）。
+そのため本項が検証したい「Kotlin側の防御が単体で効いていること」は、権限チェックを
+経由しない `kDebugMode` 限定の `LocationTrackingDebugPanel`（マップ画面の位置記録
+デバッグパネル。「起動」ボタンが無条件で `startTracking()` を呼ぶ）を使って確認する
+（旧 `adb shell am start --ez terra_town.debug.startLocationService` は Issue #142 で
+削除済みのファイルを参照する。使えない）。
+
 ```bash
 adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACCESS_FINE_LOCATION
 adb shell pm revoke jp.rokusoudo.terra_town android.permission.ACCESS_COARSE_LOCATION
-adb shell am start -n jp.rokusoudo.terra_town/.MainActivity \
-  --ez terra_town.debug.startLocationService true
+```
 
+上記で権限を取り消した状態で、アプリ（デバッグビルド）のマップ画面にある
+「位置記録 デバッグパネル」の「起動」ボタンをタップする。
+
+```bash
 # 修正の確認: プロセスが生存していること（PID が返ること）
 adb shell pidof jp.rokusoudo.terra_town
 

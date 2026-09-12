@@ -19,6 +19,7 @@ import '../../map/fog_of_war_layer_factory.dart';
 import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
+import '../permissions/tracking_control_button.dart';
 
 /// マップ（ホーム）画面（tasks.md T057・T058・T060・T066・T068・T069・
 /// Issue #100・#101・#102・#137・#138・#141）。
@@ -65,6 +66,17 @@ import '../../map/region_pack_asset.dart';
 /// 本ウィジェットの `_isFollowing` が保持し、[CurrentLocationFollowButton] で
 /// 切り替える。利用者が地図を動かして追従が解除された場合は
 /// [MapView.onFollowDismissedByUser] 経由で `_isFollowing` を false に戻す。
+///
+/// ## 2026-09-12（Issue #142）: 位置記録の開始・停止と権限リクエスト（T059）
+/// [TrackingControlButton]（`app/lib/features/permissions/`）を release ビルドを
+/// 含む全ビルドに表示する。従来 `kDebugMode` 限定の [LocationTrackingDebugPanel]
+/// にしか無かった起動/停止操作を、権限が無い場合の要求・拒否時の案内込みで製品UIに
+/// 昇格したもの（デバッグパネル側はそのまま残す。Issue #142 提案内容1）。本ウィジェットは
+/// 独自の `NativeLocationTrackingControl`/`PermissionHandlerLocationGateway` を持ち、
+/// composition root の `_positionProvider`（位置**読み取り**用。`TerrainYieldPipeline` が
+/// 唯一の購読者であるべき理由は上記2026-09-11の節を参照）とは別物であり、記録の
+/// **起動/停止**という制御操作は複数箇所から呼んでも安全（Kotlin側は状態を持つのは
+/// サービス自身であり、多重呼び出しは冪等）なため共有の必要が無い。
 ///
 /// ## パックが無い場合の振る舞い（PR本文にも記載）
 /// 生成物（`app/assets/pack/`配下）はコミットしない方針（Issue #85）のため、
@@ -490,8 +502,33 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       ),
     );
 
+    // 位置記録の起動/停止（release ビルドでも常に表示する製品UI・Issue #142・T059）。
+    //
+    // 【配置は画面下中央】左右の角には既存のUIが既に置かれている:
+    //   - 右下: [followButton]（Issue #141）に加え、MapLibre の attribution ボタン
+    //     （`MapLibreMap.attributionButtonPosition` 既定値 `bottomRight`。
+    //     `map_view.dart` は本パラメータを未指定のためこの既定のまま。OSM/ODbL の
+    //     帰属表示としてタップ可能である必要があるため覆えない）。
+    //   - 左下: MapLibre のロゴ（`logoViewPosition` 未指定時のネイティブ既定
+    //     `Gravity.BOTTOM|Gravity.START`。`MapLibreMapController.java` 参照）。
+    // 左右どちらの角に置いても、追従ボタンで直した「操作ボタンが別のUIに覆われて
+    // タップできない」不具合（#137・#138・#141）と同じ構造の問題を新たに作ってしまう
+    // ため、本ボタンは両者と重ならない画面下**中央**に置く。
+    // デバッグパネル群が画面下半分を占有しうる点への対処（上記 followButton と同じ理由）
+    // も同じ計算式で揃える。
+    final trackingControlButton = Positioned(
+      left: 0,
+      right: 0,
+      bottom: kDebugMode && _debugPanelsVisible
+          ? MediaQuery.sizeOf(context).height / 2 + AppSpacing.md
+          : AppSpacing.md,
+      child: const SafeArea(
+        child: Center(child: TrackingControlButton()),
+      ),
+    );
+
     if (!kDebugMode) {
-      return Stack(children: [mapView, followButton]);
+      return Stack(children: [mapView, followButton, trackingControlButton]);
     }
 
     final fogController = _fogController;
@@ -507,6 +544,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       children: [
         mapView,
         followButton,
+        trackingControlButton,
         // 画面上部: レイヤー追加エラー（あれば）＋ 位置記録デバッグパネル
         // （Issue #124・T049・T050）を縦に並べる。位置記録パネルは fog レイヤーの
         // 準備完了を待つ必要が無いため常に表示する。

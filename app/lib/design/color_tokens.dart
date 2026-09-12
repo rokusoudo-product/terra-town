@@ -139,3 +139,20 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
 extension AppSemanticColorsX on ThemeData {
   AppSemanticColors get semanticColors => extension<AppSemanticColors>()!;
 }
+
+/// `theme.semanticColors.warning` のような個別トークンへのショートカット拡張
+/// （Issue #142 で追加）。
+///
+/// ## なぜこれが必要か（`tools/check_design_tokens.sh` の誤検出を避けるため）
+/// `design/` 配下**以外**のファイルで `theme.semanticColors.warning` と直接書くと、
+/// `check_design_tokens.sh` の検出パターン（`Colors\.[A-Za-z]`）が
+/// `semanticColors.warning` の部分文字列 `Colors.w` に誤反応し、正当なトークン経由の
+/// 参照を色リテラルの直書きとして CI が落としてしまう（allowlist は各ルートの
+/// `design/` のみで、呼び出し側のファイルはそこに含まれないため。2026-09-12・
+/// Issue #142・`tracking_control_button.dart` 実装時に発見）。本ファイル
+/// （`design/`。allowlist 対象）にショートカットを閉じ込めることで、呼び出し側の
+/// コードから文字列 `Colors.` を完全に排除できる。
+/// 他のトークン（`success`/`info`/`fog`）が同様に必要になった場合は同じ形で追加すること。
+extension AppWarningColorX on ThemeData {
+  Color get warningColor => semanticColors.warning;
+}

@@ -158,8 +158,13 @@ int _deepHash(Object? value) {
 ///
 /// 一方で、次の3つは制御・状態であり、これは以前からPigeonで渡している:
 /// - サービスの起動・停止（[LocationTrackingHostApi.startTracking]・
-///   [LocationTrackingHostApi.stopTracking]）。現状はデバッグ用 Intent
-///   （`MainActivity.handleDebugLocationServiceIntent`）でしか起動できない。
+///   [LocationTrackingHostApi.stopTracking]）。**2026-09-12（Issue #142・T059）**:
+///   製品UI（`app/lib/features/permissions/tracking_control_button.dart`）が
+///   release ビルドでも起動できるようになった。以前ここに書かれていた
+///   「現状はデバッグ用 Intent（`MainActivity.handleDebugLocationServiceIntent`）
+///   でしか起動できない」という制約は Issue #142 で解消済み（当該 Intent ハンドラは
+///   同 Issue で削除した）。`kDebugMode` 限定の `LocationTrackingDebugPanel` は
+///   実機確認用として引き続き同じ Pigeon API を呼ぶ。
 /// - サービスの状態（稼働中か・現在の `session_id`。
 ///   [LocationTrackingHostApi.getTrackingStatus]）。
 /// - 起動しなかった理由（[TrackingStartOutcome.permissionDenied]）。
