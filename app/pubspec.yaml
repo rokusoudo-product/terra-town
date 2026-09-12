@@ -51,6 +51,15 @@ dependencies:
   terra_town_location:
     path: ../packages/location
 
+  # Issue #142（T059）: 位置情報権限（フォアグラウンドのみ）・通知権限のリクエストUIに使用。
+  # 「拒否」と「永久拒否（今後表示しない）」を区別する必要があり、Android の
+  # `shouldShowRequestPermissionRationale` を自前で Pigeon 越しに実装すると
+  # 状態管理が二重化するため、実装済みのプラグインを採用した（PR本文に判断根拠を記載）。
+  # `core`（純粋 Dart・GPS_ARCHITECTURE 準拠）はこの依存を持たない。
+  # `location`（GPS/地図SDK層）にも置かず、UI 層の関心事として `app` に閉じる
+  # （Pigeon の位置記録開始/停止 API 自体は既存の `terra_town_location` 経由のまま）。
+  permission_handler: ^13.0.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
