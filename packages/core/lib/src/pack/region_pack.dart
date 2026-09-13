@@ -72,4 +72,22 @@ abstract interface class RegionPack {
   /// コレクションは失われない。ヘクスと POI の対応づけを別途凍結すると、
   /// 同じ情報を二重に持つことになるため凍結しない。
   Iterable<PointOfInterest> get pointsOfInterest;
+
+  /// [hexId] に隣接するヘクスの一覧（Issue #151・#152。パック生成時にH3で事前計算済み）。
+  ///
+  /// 出典: Issue #151（開放ポイントの消費）の隣接制約「開放済みヘクスに隣接する
+  /// ヘクスのみ開放できる」（`docs/opening_points.md` §5.2）に必要な「あるヘクスの
+  /// 隣は誰か」を提供する。H3（ヘクスの計算）は Issue #108 で Kotlin 側に寄せたため、
+  /// `core`・`location` の Dart 側は実行時に H3 を呼ばない。`tools/pack-builder/`
+  /// （`compute_hex_neighbors.py`）がパック生成時に `h3.grid_ring(k=1)` で計算し、
+  /// `region_pack.sqlite` の `hex_neighbor` テーブルに事前計算済みの結果として格納する。
+  /// 本メソッドはその結果を読み取るだけであり、GPS_ARCHITECTURE 準拠で `core` は
+  /// H3・地図SDKいずれにも依存しない（[HexId] の値のみを扱う）。
+  ///
+  /// **パック範囲外へ出る隣接は含まれない**（`tools/pack-builder/hex_neighbors.py`
+  /// 参照）。パック範囲の縁のヘクスは6件未満になりうる。このパックに収録されていない
+  /// [hexId]、または隣接関係が同梱されていない旧パックに対しては空のイテラブルを返す
+  /// （`districtOf`/`pointsOfInterest` と同じ forward-compat 方針。
+  /// `RegionPackRepository` 実装のクラスコメント参照）。
+  Iterable<HexId> neighborsOf(HexId hexId);
 }

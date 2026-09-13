@@ -2,17 +2,20 @@
 
 Issue #38（[Spike] pack-builder 最小プロトタイプで地形属性の事前計算を1エリア分検証する）と
 Issue #85（[Impl] Planetiler でベクタタイル MBTiles を生成しバーティカルスライスの地域パックを
-同梱する）、Issue #86（[Impl] 地域パックに行政区域と名所POIを追加しT040の完了状態を確定する）
-の成果物。
+同梱する）、Issue #86（[Impl] 地域パックに行政区域と名所POIを追加しT040の完了状態を確定する）、
+Issue #94（[Impl] 行政区域・名所POIを region_pack.sqlite に統合しパックに同梱する）、
+Issue #152（[Impl] ヘクスの隣接関係をパック生成時に事前計算して同梱する）の成果物。
 
 `specs/001-mvp/plan.md` §3.2「地域パックの内容物」・§4「資材分類の決定論（事前計算）」・
-`docs/terrain.md` §4・§5 で定義されたパイプラインの実装:
+`docs/terrain.md` §4・§5・`docs/opening_points.md` §5.2 で定義されたパイプラインの実装:
 
 ```
 OSM抽出 → 細分グリッドセルでの地形判定 → H3ヘクスへの多数決集約 → SQLite出力（Issue #38・T040）
                                                                   → ベクタタイルMBTiles生成（Planetiler・Issue #85・T039）
 国土数値情報N03 → 対象エリアと交差する市区町村を抽出 → トポロジ保持簡略化 → ヘクス帰属判定 → SQLite出力（Issue #86・T041）
 OSM抽出 → 観光POIタグ（Tier 1）抽出 → 名称・面積フィルタ → SQLite出力（Issue #86・T042）
+hex_terrainのヘクス集合 → H3で距離1の隣接候補を計算 → パック範囲外を除外 → SQLite出力（Issue #152）
+上記4つの出力 → 整合性検証 → 統合・軽量化 → region_pack.sqlite（Issue #94・#152・slim_pack_for_bundle.py）
 ```
 
 **本ツールの生成物（`.osm.pbf`・`*.sqlite`・`*.mbtiles`・`data_cache/`配下全般）は
@@ -32,7 +35,7 @@ OSM抽出 → 観光POIタグ（Tier 1）抽出 → 名称・面積フィルタ 
 
 ## スコープ
 
-本ツールが実装するのはこれだけ（Issue #38・#85・#86）:
+本ツールが実装するのはこれだけ（Issue #38・#85・#86・#94・#152）:
 
 - 対象エリア1つ分の OSM抽出 → 地形属性の事前計算 → SQLite出力（Issue #38・T040）
 - 分類結果の抜き取り検証・決定論の検証（Issue #38）
@@ -43,20 +46,24 @@ OSM抽出 → 観光POIタグ（Tier 1）抽出 → 名称・面積フィルタ 
 - **パック生成のCI化（Issue #85・T045・`.github/workflows/pack-build.yml`）**
 - **行政区域ポリゴン（国土数値情報N03）の取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041）**
 - **名所POI（OSM観光POI・Tier 1）の抽出（Issue #86・T042）**
+- **行政区域・名所POIを`region_pack.sqlite`へ統合し`app/assets/pack/`に同梱（Issue #94。
+  下記「出力（`out/region_pack.sqlite`）の統合」参照）**
+- **ヘクス隣接関係の事前計算・同梱（Issue #152。下記「ヘクス隣接関係」参照）**
 
 以下は**スコープ外**（他のIssueで実装する、または本Issueで明示的に見送った）:
 
 - 地図表示の実装そのもの（T055）
 - 地図表示側の検証（Issue #24のR1・R2。`spikes/`配下は本ツールと無関係）
-- ODbL適合の詳細検証・`docs/licenses.md`への記録（Issue #37）
+- ODbL適合の詳細検証・`docs/licenses.md`への記録（Issue #37）。**Issue #94時点でもdocs/licenses.md
+  はまだ存在しない**ため、出典・CC BY 4.0・加工した旨・承認番号は本ツールの`pack_meta`と
+  本READMEにのみ記録した（下記「データソースとライセンス」参照）。画面上での常時表示は
+  T108（未実装）の担当であり、本Issueでは実装していない
 - 名所オブジェクトのゲーム内仕様（`is_bonus`・収集判定・報酬計算等。Issue #6・`docs/landmark_objects.md`）
 - Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）の抽出（`poi_rules.py`のdocstring参照。
-  目標密度・allowlistとも仮値/未整備のため本Issueでは実装しない）
-- `district`/`hex_district`/`poi`テーブルを`region_pack.sqlite`（`slim_pack_for_bundle.py`・
-  `bundle_region_pack.sh`・`app/assets/pack/`）へ同梱すること（Issue #85・T044の対象であり
-  本Issueでは「作り直さない」よう明示されている。本Issueは`out/districts.sqlite`・
-  `out/poi.sqlite`という独立した出力を作るところまで。同梱への統合は別途フォローアップが必要
-  — 下記「既知の簡略化・未解決事項」参照）
+  目標密度・allowlistとも仮値/未整備のため実装しない）
+- 開放ポイント消費による隣接制約の実装そのもの（Issue #151。本ツールは`hex_neighbor`の
+  データを用意するところまで）
+- 立入禁止エリアの判定（別Issue・MVP対象外）
 
 ## T040（地形属性の事前計算）の完了状態の調査結果（Issue #86・2026-09-10実施）
 
@@ -215,11 +222,10 @@ bash build_vector_tiles.sh
 # 8. 同一入力から同一出力になることの検証（Planetilerを2回実行して比較。約1.5〜2分）
 ./.venv/bin/python verify_tiles_determinism.py
 
-# 9. 同梱用に軽量化（cell_terrainを除いたSQLiteを作る）
-./.venv/bin/python slim_pack_for_bundle.py
-# out/region_pack.sqlite が生成される（約3.16MB。cell_terrain込みの66MBに対して約4.8%。
-# Issue #105でhex_terrain.boundary_geojson（ヘクス境界）を追加したため、
-# 追加前の約750KBから増加した。詳細は下記「ヘクス境界（boundary_geojson・Issue #105）」参照）
+# 9. （旧手順。Issue #94/#152で18番へ統合・移動した）
+# ⚠️ ここで slim_pack_for_bundle.py を実行しても、この時点ではまだ
+# districts.sqlite/poi.sqlite/hex_neighbor.sqliteが無いためエラーで停止する。
+# 統合・軽量化は district/POI/隣接関係の生成（11〜17）を終えたあと、18番で行うこと。
 
 # 10. 各ヘクスFeature直下に整数idがあることの検証（T043の受け入れ基準を実際に確認する）
 # （Issue #105以降は、格納済みboundary_geojsonが再計算結果と一致することもあわせて検証する）
@@ -242,15 +248,28 @@ bash download_n03.sh
 
 # 15. POI抽出の決定論検証
 ./.venv/bin/python verify_poi_determinism.py
+
+# 16. ヘクス隣接関係の事前計算（Issue #152・約0.2秒）
+./.venv/bin/python compute_hex_neighbors.py
+# out/hex_neighbor.sqlite が生成される（テーブル: hex_neighbor, pack_meta）
+
+# 17. ヘクス隣接関係の決定論検証
+./.venv/bin/python verify_hex_neighbor_determinism.py
+
+# 18. 4つの出力（pack.sqlite・districts.sqlite・poi.sqlite・hex_neighbor.sqlite）を
+#     統合し、同梱用に軽量化（Issue #94・#152。out/pack.sqliteのhex_terrainを先に
+#     生成しておくこと。約0.1秒）
+./.venv/bin/python slim_pack_for_bundle.py
+# out/region_pack.sqlite が生成される（テーブル: hex_terrain, district, hex_district,
+# poi, hex_neighbor, pack_meta。実測 約5.5MB）
 ```
 
-上記3（`classify_terrain.py`）・7（`build_vector_tiles.sh`）・9（`slim_pack_for_bundle.py`）
+上記3（`classify_terrain.py`）・7（`build_vector_tiles.sh`）・18（`slim_pack_for_bundle.py`）
 と`app/assets/pack/`へのコピーを一括で実行する場合は `bash bundle_region_pack.sh` を使う
-（下記「バーティカルスライス対象エリアの同梱」参照）。**決定論の検証（4・8・13・15）や
+（下記「バーティカルスライス対象エリアの同梱」参照。**2026-09-13・Issue #94/#152で
+拡張し、`download_n03.sh`・`extract_districts.py`・`extract_poi.py`・
+`compute_hex_neighbors.py`も一括実行の対象に含めた**）。**決定論の検証（4・8・13・15・17）や
 Feature id の検証（10）は含まれない**ため、それらは別途上記の手順で個別に実行すること。
-**`bundle_region_pack.sh`は12〜15（行政区域・POI）を含んでいない**（下記「スコープ」・
-「既知の簡略化・未解決事項」参照。`out/districts.sqlite`・`out/poi.sqlite`は
-`app/assets/pack/`への同梱・`slim_pack_for_bundle.py`への統合を本Issueでは行っていない）。
 
 ## 出力（`out/pack.sqlite`）のテーブル構成
 
@@ -263,8 +282,9 @@ Feature id の検証（10）は含まれない**ため、それらは別途上�
 **`cell_terrain`は同梱対象外と判断した**（Issue #85・T044）。生成過程の中間データであり
 （抜き取り検証`spot_check_samples.py`・デバッグ用途）、fog of war の実行には`hex_terrain`
 だけで足りるため。`slim_pack_for_bundle.py`が`cell_terrain`を除いた`region_pack.sqlite`
-（実測 約3.16MB。Issue #105で`boundary_geojson`を追加する前は約750KBだった。
-`cell_terrain`込みの66MBに対して約4.8%）を作る。
+を作る（`pack.sqlite`〔`cell_terrain`込みで約66MB〕からの軽量化としては約8.3%〔統合後の
+約5.5MB時点〕。Issue #94/#152で`district`/`hex_district`/`poi`/`hex_neighbor`の統合先にも
+なった経緯・実測推移は「バーティカルスライス対象エリアの同梱」節参照）。
 
 ## 出力（`out/districts.sqlite`）のテーブル構成（T041）
 
@@ -306,6 +326,74 @@ Tier 2（補完層）・ボーナスオブジェクト（`is_bonus`・allowlist�
 持たない地物は`poi`に含めない（名所図鑑〔Issue #12〕上、名称のない地物は意味を
 持たないため）。
 
+## 出力（`out/hex_neighbor.sqlite`）のテーブル構成・ヘクス隣接関係（Issue #152）
+
+| テーブル | 列 | 説明 |
+|---|---|---|
+| `hex_neighbor` | `hex_id, neighbor_count, neighbor_hex_ids` | ヘクス1件の隣接関係。`neighbor_hex_ids`は隣接ヘクスのH3 index（整数）を昇順に並べたJSON配列のテキスト（例: `[123, 456]`）。`neighbor_count`は配列長のキャッシュ（`len(json.loads(neighbor_hex_ids))`と常に一致） |
+| `pack_meta` | `key, value` | 生成条件（計算方式・エッジヘクス件数・隣接数の最小/最大・所要時間・h3-pyのバージョン等） |
+
+**計算方式**: `hex_terrain`の全ヘクスについて、H3の`grid_ring(hex, 1)`（距離ちょうど1の
+隣接セル。通常6個、対象エリアにはペンタゴンセルが存在しないため考慮不要）を求め、
+**パック範囲外（`hex_terrain`に存在しない）の候補は除外**して昇順に並べる
+（`hex_neighbors.filter_and_sort_intra_pack_neighbors`）。**パック範囲の縁のヘクスは、
+この除外の結果として隣接が6件未満になる**（実測: 狭山湖周辺エリア13,106ヘクス中469件が
+6件未満・最小2件・最大6件）。全ヘクスについて1行を書き込むため
+（隣接0件のヘクスがあっても行自体は存在する）、`set(hex_neighbor.hex_id)`は常に
+`set(hex_terrain.hex_id)`と一致する（`slim_pack_for_bundle.py`の統合時にこの等価性を
+fail-loudで検証する。下記「出力（`out/region_pack.sqlite`）の統合」参照）。
+
+**対称性の自動検証**: パック範囲内に制限した隣接関係は構造的に対称になる
+（AがBを隣接に持てば、BもAを隣接に持つ）。`compute_hex_neighbors.py`は実データに対して
+これを実行時に検証し（`verify_symmetry`）、崩れていれば停止する。
+
+**保存形式の判断（テーブル1本・JSON配列列 vs 隣接ペアの関係テーブル）**: `hex_id, neighbor_hex_id`
+の2列・複合主キー（`WITHOUT ROWID`）というペア単位の関係テーブルも検討し、実データ
+（13,106ヘクス・有向辺77,692本）で両方式を実測した。
+
+| 方式 | サイズ（実測） |
+|---|---|
+| JSON配列列（1ヘクス1行・採用） | 1,847,296 bytes（約1.76MB） |
+| 関係テーブル（1辺1行・`WITHOUT ROWID`） | 1,732,608 bytes（約1.65MB） |
+
+関係テーブルの方が約6%（約114KB）小さいが、次の理由でJSON配列列を採用した:
+- **1ヘクスの隣接一覧を得るのに1行の読み取りで済む**（関係テーブルだと`WHERE hex_id = ?`の
+  範囲スキャン+集約が必要）。`RegionPackRepository`は起動時に全件をメモリへ読み込む方式
+  （`region_pack_repository.dart`のクラスコメント参照）のため実行時性能への影響はどちらでも
+  軽微だが、読み込みコード自体は単純になる。
+- **`hex_terrain.boundary_geojson`と同じ「1行1ヘクス・JSON列」という既存パターンに揃う**
+  （`hex_geometry.py`・`classify_terrain.py`参照）。パック内のテーブル設計の一貫性を優先した。
+- 6%の差は同梱パック全体（`region_pack.sqlite`約5.5MB＋`tiles.mbtiles`約680KB）に対して
+  無視できる規模であり、`plan.md`・`docs/`に同梱アセットのサイズ上限は明記されていない
+  （「ヘクス境界」節の判断と同じ理由）。
+
+## 出力（`out/region_pack.sqlite`）の統合（Issue #94・#152）
+
+`slim_pack_for_bundle.py`が、これまで別々の`out/*.sqlite`だった4つの出力
+（`pack.sqlite`・`districts.sqlite`・`poi.sqlite`・`hex_neighbor.sqlite`）を
+1つの`region_pack.sqlite`（テーブル: `hex_terrain, district, hex_district, poi,
+hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #94本文コメント）
+「#94と#152は同じパック作り直しにまとめること」に従い、両方の統合窓口を1本化した。**
+
+**統合前の整合性チェック（fail-loud）**: 4つの入力は別々のスクリプト・別々の実行時刻で
+生成されうるため、黙って統合すると「古い`districts.sqlite`と新しい`pack.sqlite`を
+組み合わせた中身の壊れたパック」がエラーなく生成される事故になりうる。そのため
+統合前に次を検証し、いずれかが崩れていれば停止する:
+- `poi.sqlite`の`input_pbf_sha256`が`pack.sqlite`のそれと一致すること
+- `hex_neighbor.sqlite`の`hex_neighbor`のhex_id集合が`pack.sqlite`の`hex_terrain`と
+  **完全一致**すること
+- `districts.sqlite`の`hex_district`のhex_id集合が`hex_terrain`の**部分集合**であること
+- `districts.sqlite`の`pack_meta`に`n03_sha256_11`・`n03_sha256_13`が存在すること
+
+**`pack_meta`のキー名前空間**: 4つの入力はそれぞれ独立したスクリプトが書いており、
+`generated_at_utc`・`generation_seconds`・`h3_py_version`・`shapely_version`・
+`osmium_version`・`input_pbf`・`input_pbf_sha256`のような共通の列名を複数の入力が持つ。
+単純に全メタを1つの`pack_meta`テーブルへ入れると後勝ちで上書きされ「どの入力のどの値か」が
+失われるため、`pack.sqlite`由来のキーは無印のまま、`districts.sqlite`/`poi.sqlite`/
+`hex_neighbor.sqlite`由来でまだプレフィックスの付いていないキーには、それぞれ
+`district_`/`poi_`/`hex_neighbor_`を付けて名前空間を分離した（`district_source`のように
+既にプレフィックス済みのキーはそのまま）。
+
 ## データソースとライセンス（Issue #86）
 
 ### 行政区域ポリゴン（T041）
@@ -322,12 +410,33 @@ Tier 2（補完層）・ボーナスオブジェクト（`is_bonus`・allowlist�
   ことを確認して判明した。8桁日付（`N03-20230101_*`）の版が現行の行政区域ポリゴン
   （属性`N03_001`〜`N03_004`・`N03_007`、面データ）であることを確認済み。
   `download_n03.sh`のコメントにも記録している。
-- **利用規約**: 「国土数値情報 利用規約」（令和元年以降のデータはオープンデータ）。
-  ただし配布ページには「測量法に基づく国土地理院長承認（複製）R 4JHf 430」
+- **利用規約**: 「国土数値情報 利用規約」（令和元年以降のデータはオープンデータ・
+  **CC BY 4.0**）。配布ページには「測量法に基づく国土地理院長承認（複製）R 5JHf 357」
   「本製品を複製する場合には、国土地理院の長の承認を得なければならない。」という
-  原典表示の注記がある。**この複製承認の要否・対応はIssue #86では判断せず、
-  代表確認事項として残す**（詳細なライセンス適合の記録・`docs/licenses.md`への反映は
-  Issue #37のスコープ）。
+  原典表示の注記がある。
+- **⚠️ 承認番号の訂正（Issue #94・2026-09-13）**: 本節は当初「R 4JHf 430」と記載していたが、
+  これは誤りだった。秘書が一次資料を確認した結果、本リポジトリが使用する
+  `N03-20230101`（令和5年版）に対応する正しい番号は**「R 5JHf 357」**である
+  （代表決定コメント: https://github.com/rokusoudo-product/terra-town/issues/94#issuecomment-5650198269 ）。
+- **2026-09-13代表決定（Issue #94）**: 帰属表示に**出典（国土交通省 国土数値情報
+  行政区域データ・URL）／CC BY 4.0／加工した旨／上記承認番号**を含める（安全側に
+  倒す）。`extract_districts.py`が`pack_meta`に個別キーで記録する
+  （`slim_pack_for_bundle.py`の統合時に`district_`プレフィックス済みのため
+  そのまま`region_pack.sqlite`にも残る）:
+  - `district_source_site_url`（**T108が画面表示に使うべきキー**。「国土数値情報
+    利用規約」の表示例「出典：国土交通省 国土数値情報ダウンロードサイト（URL）」の
+    URLに対応する、クリック可能な実在のURL＝サイトトップ`https://nlftp.mlit.go.jp/ksj/`）
+  - `district_source_url`（監査目的。実際に取得した個別ファイル名の記録。
+    ブレース展開`N03-20230101_{11,13}_GML.zip`はURLとして単体でクリック・表示できる
+    形式ではないため、`district_source_site_url`とは別キーに分離した）
+  - `district_license_cc`・`district_processing_note`・`district_survey_approval`
+  **画面上での常時表示（T108）は本Issueのスコープ外─未実装のまま**であり、
+  T108実装時にこれらのキーをそのまま読めばよい。
+  **⚠️ 法的な判断は本Issueの範囲外**: 「派生物をアプリに同梱して一般公開する際に、
+  あらためて国土地理院への承認申請が必要か」は判断できる事項ではない。**一般公開
+  （ストア配信）の前に、代表が国土地理院に確認すること**を推奨する。MVPの開発・実機検証の
+  段階では、上記の表示（データとしての保持）を入れたうえで進めてよい。この論点は
+  Issue #37（ODbL適合検証・`docs/licenses.md`）にも記録する。
 - **座標系**: JGD2011（EPSG:6668）。OSM由来データ（WGS84）との差は数10cmオーダーで、
   本パイプラインの精度要件（ヘクス約50m四方）に対して無視できるため、既存の
   `classify_terrain.py`と同様に座標変換は行っていない。
@@ -340,15 +449,43 @@ Tier 2（補完層）・ボーナスオブジェクト（`is_bonus`・allowlist�
 - **詳細な適合検証（属性表示義務・派生データベースの扱い等）はIssue #37のスコープ**であり、
   本Issueでは出典の記録のみを行う。
 
-## `pack_version`（T043）
+## `pack_version`（T043・2026-09-13代表決定でIssue #94時点で組み直し）
 
-`classify_terrain.py`が`pack_meta`に書き込む。形式:
-`{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{入力OSM抽出のsha256先頭12桁}`
-（例: `sayamako-v1-9a66e066b0d4`）。生成時刻や生成順序に依存しない純関数
-（`hex_bridge.py`の`feature_id`と同じ設計方針。理由は`config.py`の`PACK_SCHEMA_VERSION`
-のコメント参照）。**`terrain_rules.py`の判定ルールや`H3_RESOLUTION`を変えたときは、
-必ず`config.PACK_SCHEMA_VERSION`をインクリメントすること**（さもないと同一OSM入力に対して
-ロジックが変わったのに同じ`pack_version`になり、plan.md §3.3の不変性ルールの前提が壊れる）。
+**中間生成物`out/pack.sqlite`の`pack_version`と、同梱物`out/region_pack.sqlite`の
+`pack_version`は値が異なる。** 前者は`classify_terrain.py`が書き込む値
+（例: `sayamako-v1-9a66e066b0d4`。地形判定ルール・OSM抽出のみが入力）だが、
+後者は`slim_pack_for_bundle.py`が統合時に**組み直した値**（例: `sayamako-v1-2671a8f4ea2c`）
+であり、**同梱物の`region_pack.sqlite`のほうを正とする**（アプリが読むのは常にこちら）。
+
+**含める入力の一覧**（2026-09-13代表決定・Issue #94「版番号はパックの中身を一意に表す
+指紋であるべき」という理由）:
+
+1. `input_pbf_sha256`（`area.osm.pbf`。地形・POI抽出の入力）
+2. `n03_sha256_11`・`n03_sha256_13`（N03行政区域データ、都道府県別GMLzip。埼玉県・東京都）
+3. `poi_rules_sha256`（`poi_rules.py`のファイル内容のsha256。POI抽出ルールの変更を捕捉）
+
+`{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{上記4値を連結した文字列のsha256先頭12桁}`という形式
+（`classify_terrain.py`と同じ「生成時刻・生成順序に依存しない純関数」という設計方針を踏襲）。
+実際に使った各値は`region_pack.sqlite`の`pack_meta`に監査用キー
+（`pack_version_input_pbf_sha256`・`pack_version_n03_sha256_11`・
+`pack_version_n03_sha256_13`・`pack_version_poi_rules_sha256`）としてそのまま残るため、
+後から「何が版に効いたか」を追える。
+
+**`hex_neighbor`（ヘクス隣接関係・Issue #152）は`pack_version`のハッシュ入力に
+含めていない**: `hex_terrain`のヘクス集合とH3ライブラリのみに依存する純関数であり、
+既存の`input_pbf_sha256`（ヘクス集合を決める入力）で「入力データ」としては実質的に
+捕捉済みのため（h3-pyのバージョンは`hex_neighbor_h3_py_version`として`pack_meta`に
+記録するのみでハッシュには含めない）。
+
+**ただし「入力データが同じでもロジックだけを変えた場合」は`input_pbf_sha256`では
+捕捉できない**（advisor 2026-09-13指摘。`hex_geometry.py`は Issue #105 以来、
+`hex_neighbors.py`は Issue #152 で新たに同じ穴を持つ）。そのため
+**`terrain_rules.py`・`H3_RESOLUTION`・`CELL_SIZE_M`に加えて、`hex_geometry.py`
+（`boundary_geojson`の算出）・`hex_neighbors.py`（隣接関係の算出。例:
+隣接距離kを2に変える等）を変更したときも、必ず`config.PACK_SCHEMA_VERSION`を
+インクリメントすること**（さもないとロジックが変わったのに同じ`pack_version`になり、
+plan.md §3.3の不変性ルールの前提が壊れる。`config.py`の`PACK_SCHEMA_VERSION`
+コメントにも同内容を記載した）。
 
 ## 各ヘクスFeature直下の整数`id`（T043）
 
@@ -459,10 +596,11 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
 （`bash -lc "..."`のような非対話シェル経由では、この分岐自体に到達せずシステムの
 JDK 21がそのまま使われる。この罠は対話シェルで代表が実行する場合にのみ関係する。）
 
-## バーティカルスライス対象エリアの同梱（T044）
+## バーティカルスライス対象エリアの同梱（T044・Issue #94/#152で拡張）
 
-`bundle_region_pack.sh`が上記のパイプライン全体（地形属性事前計算 → 軽量化 →
-ベクタタイル生成）を実行し、`app/assets/pack/`に同梱する。
+`bundle_region_pack.sh`が上記のパイプライン全体（地形属性事前計算 → N03取得 →
+行政区域・POI抽出 → ヘクス隣接関係計算 → 統合・軽量化 → ベクタタイル生成）を実行し、
+`app/assets/pack/`に同梱する。
 
 ```bash
 cd tools/pack-builder
@@ -478,16 +616,27 @@ bash bundle_region_pack.sh
 状態で`flutter pub get`・`flutter analyze`（No issues found）・`flutter test -j 1`
 （13件全PASS）を確認済み。CIの`ci.yml`「Test app」ステップもこの状態で走る）。
 
-**実測（2026-09-10・狭山湖周辺エリア）**:
+**実測（2026-09-13・狭山湖周辺エリア・Issue #94/#152統合後）**:
 
 | 項目 | 値 |
 |---|---|
 | ヘクス数 | **13,106**（plan.md §3.5 の暫定上限30,000の44%） |
-| `pack_version` | `sayamako-v1-9a66e066b0d4` |
-| `region_pack.sqlite`（同梱分） | 約3.16MB（Issue #105で`boundary_geojson`列を追加する前は約750KB。詳細は「ヘクス境界」節参照） |
-| `tiles.mbtiles`（同梱分） | 約680KB |
-| 地形属性の事前計算（`classify_terrain.py`） | 約6.7秒 |
-| ベクタタイル生成（`build_vector_tiles.sh`） | 約39秒〜1分20秒 |
+| 行政区域数（`district`） | 5（埼玉県狭山市・入間市、東京都東大和市・武蔵村山市・西多摩郡瑞穂町） |
+| 名所POI数（`poi`） | 16 |
+| ヘクス隣接関係（`hex_neighbor`） | 13,106行（全ヘクス）。隣接数 最小2・最大6、6件未満（縁）469件 |
+| `pack_version`（統合後・`region_pack.sqlite`の値） | `sayamako-v1-2671a8f4ea2c`（統合前の`sayamako-v1-9a66e066b0d4`から変化。「`pack_version`」節参照） |
+| `region_pack.sqlite`（同梱分） | 約5.5MB（内訳: Issue #105で`boundary_geojson`追加前は約750KB → 追加後（Issue #105）約3.16MB → 行政区域・POI・ヘクス隣接関係を統合（Issue #94/#152）で約5.5MB。詳細は「ヘクス境界」「ヘクス隣接関係」節参照） |
+| `tiles.mbtiles`（同梱分） | 約680KB（変化なし。行政区域・POI・隣接関係はベクタタイルに含まれないため） |
+| 地形属性の事前計算（`classify_terrain.py`） | 約5.3秒 |
+| 行政区域の取り込み（`extract_districts.py`） | 約1.4秒 |
+| 名所POIの抽出（`extract_poi.py`） | 約2.3秒 |
+| ヘクス隣接関係の計算（`compute_hex_neighbors.py`） | 約0.15秒 |
+| 統合・軽量化（`slim_pack_for_bundle.py`） | 約0.1秒 |
+| ベクタタイル生成（`build_vector_tiles.sh`） | 約34秒 |
+
+**旧実測（2026-09-10・行政区域/POI/隣接関係を統合する前）**: ヘクス数13,106・
+`pack_version`=`sayamako-v1-9a66e066b0d4`・`region_pack.sqlite`約3.16MB・
+`tiles.mbtiles`約680KB・地形属性事前計算約6.7秒・ベクタタイル生成約39秒〜1分20秒。
 
 ## 実機での地図表示確認手順（代表向け）
 
@@ -512,15 +661,18 @@ bash bundle_region_pack.sh
 - `download_kanto.sh` / `extract_area.sh` — OSM抽出のダウンロード・bbox切り出し
 - `build_vector_tiles.sh` — Planetilerでベクタタイル MBTiles を生成（Issue #85・T039）
 - `verify_tiles_determinism.py` — ベクタタイル生成の決定論検証（Issue #85・T045）
-- `slim_pack_for_bundle.py` — 同梱用に`cell_terrain`を除いた軽量SQLiteを作る（Issue #85・T044）
 - `export_hex_geojson.py` — 各ヘクスFeature直下の整数`id`要件（T043）の検証・参照実装
-- `bundle_region_pack.sh` — 上記を一括実行し`app/assets/pack/`へ同梱する（Issue #85・T044）
+- `bundle_region_pack.sh` — 上記を一括実行し`app/assets/pack/`へ同梱する（Issue #85・T044・Issue #94/#152で拡張）
 - `download_n03.sh` — 国土数値情報N03（行政区域データ）のダウンロード（Issue #86・T041）
-- `extract_districts.py` — 行政区域ポリゴンの取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041）
+- `extract_districts.py` — 行政区域ポリゴンの取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041。Issue #94で帰属表示メタを追加）
 - `verify_districts_determinism.py` — 行政区域データの決定論検証（Issue #86・T041）
 - `poi_rules.py` — `docs/landmark_objects.md` §2.1 の名所POI抽出ルール（Tier 1のみ）の実装（Issue #86・T042）
 - `extract_poi.py` — 名所POI抽出パイプライン本体（Issue #86・T042）
 - `verify_poi_determinism.py` — 名所POIデータの決定論検証（Issue #86・T042）
+- `hex_neighbors.py` — ヘクス隣接関係の計算ロジック（Issue #152。h3呼び出しと純粋関数を分離しテスト容易性を確保）
+- `compute_hex_neighbors.py` — ヘクス隣接関係の事前計算パイプライン本体（Issue #152）
+- `verify_hex_neighbor_determinism.py` — ヘクス隣接関係の決定論検証（Issue #152）
+- `slim_pack_for_bundle.py` — `pack.sqlite`・`districts.sqlite`・`poi.sqlite`・`hex_neighbor.sqlite`の4出力を統合し、`cell_terrain`を除いた同梱用`region_pack.sqlite`を作る（Issue #85・T044が新設・Issue #94/#152で統合窓口として拡張。整合性チェック・`pack_version`の組み直しを行う）
 
 ## 既知の簡略化・未解決事項
 
@@ -550,32 +702,41 @@ bash bundle_region_pack.sh
   「実測に基づかないオーダー感の判断」であり、代表確認事項として残す
   （実測: `leisure=park`のArea 27件中24件がこのしきい値未満で除外され、
   面積条件を満たした3件のうち名称ありは2件だった）。
-- **`pack_version`の対象範囲**: `config.PACK_SCHEMA_VERSION`は「地形判定ルール・
-  グリッド解像度・feature_id方式」の変更時にインクリメントする値であり（`config.py`の
-  コメント参照）、N03・POI入力の変更はこの定義に含めていない（`PACK_SCHEMA_VERSION`は
-  1のまま据え置いた）。`district_progress.district_id`・`collection.poi_id`が参照する
-  識別子はいずれもN03の`N03_007`・OSMの`node/way/relation`id由来の**安定した外部ID**
-  であるため、N03/POIの入力データが更新されても`pack_version`を変えるか否かに関わらず
-  plan.md §3.3の不変性ルール（過去の獲得履歴の同一性）は保たれるという整理である。
-  この整理が妥当か、あるいは`pack_version`にN03のedition・POI入力のsha256等も
-  含めるべきかは代表確認事項として残す。
-- **国土数値情報N03の複製承認表示**: 配布ページに「測量法に基づく国土地理院長承認
-  （複製）R 4JHf 430」「本製品を複製する場合には、国土地理院の長の承認を得なければ
-  ならない。」という原典表示の注記がある。この対応要否の判断は本Issueでは行わず、
-  代表確認事項として残す（詳細な適合検証・`docs/licenses.md`への反映はIssue #37）。
-- **`district`/`hex_district`/`poi`テーブルは`region_pack.sqlite`（`app/assets/pack/`への
-  同梱物）に統合されていない**: `slim_pack_for_bundle.py`・`bundle_region_pack.sh`・
-  `.github/workflows/pack-build.yml`はいずれも`hex_terrain`/`pack_meta`のみを対象に
-  ハードコードされており（Issue #85・T044・T045で完了済み）、本Issueではこれらを
-  変更していない（「ベクタタイルMBTilesの生成・パック同梱はIssue #85完了済みで
-  作り直さない」というIssue #86のスコープ制約に従った）。したがって
-  `out/districts.sqlite`・`out/poi.sqlite`は現時点では`app/assets/pack/`に
-  同梱されず、アプリの`RegionPack`実装（`location/`側のT069）から参照できない。
-  **同梱への統合は別途フォローアップIssueが必要**（代表確認事項）。
+- **【Issue #94（2026-09-13）で解決済み】`pack_version`の対象範囲**: 当初
+  `config.PACK_SCHEMA_VERSION`はN03・POI入力の変更を含めていなかったが、
+  「版番号はパックの中身を一意に表す指紋であるべき」という代表決定により、
+  `slim_pack_for_bundle.py`の統合時に`input_pbf_sha256`・`n03_sha256_11`・
+  `n03_sha256_13`・`poi_rules_sha256`を含めて組み直すよう変更した
+  （詳細は「`pack_version`」節参照）。
+- **【Issue #94（2026-09-13）で解決済み】国土数値情報N03の複製承認表示**:
+  配布ページの承認番号は「R 4JHf 430」ではなく**「R 5JHf 357」**であることを
+  秘書が一次資料で確認・訂正した（「データソースとライセンス」節参照）。
+  出典・CC BY 4.0・加工した旨・承認番号を`pack_meta`に記録した。
+  **⚠️ ただし画面上での常時表示（T108）は未実装のまま**であり、一般公開前に
+  代表が国土地理院へ確認することを推奨する、という論点自体は解決していない
+  （引き続きIssue #37・T108で扱う）。
+- **【Issue #94（2026-09-13）で解決済み】`district`/`hex_district`/`poi`/`hex_neighbor`
+  テーブルの`region_pack.sqlite`への統合**: `slim_pack_for_bundle.py`が4つの出力を
+  統合し、`app/assets/pack/`に同梱されるようになった（`bundle_region_pack.sh`・
+  `.github/workflows/pack-build.yml`もあわせて更新）。アプリの`RegionPack`実装
+  （`location/`側の`RegionPackRepository`）はforward-compat設計により
+  コード変更なしに実データを返すようになった。
 - **`hex_district`の帰属判定は簡略化前の原本ポリゴンで行っている**が、`district`テーブルに
   格納するのは簡略化後のポリゴンであるため、両者の間に厳密な対応はない（表示用途と
   判定用途を分離する設計判断。詳細は「出力（`out/districts.sqlite`）のテーブル構成」参照）。
-  この分離が許容できるかは代表確認事項として残す。
-- **CI（`.github/workflows/pack-build.yml`）は本Issueの新スクリプト
-  （`download_n03.sh`・`extract_districts.py`・`extract_poi.py`とその検証スクリプト）を
-  呼び出していない**: 上記の同梱未統合と同じ理由でワークフローを変更していない。
+  この分離が許容できるかは代表確認事項として残す（未解決のまま）。
+- **Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）・
+  `leisure=park`の面積しきい値の妥当性**: 上記の同梱統合はデータの受け渡し経路の問題
+  であり、これらの抽出ルール自体の当否（密度・しきい値が妥当か）とは別の論点のため、
+  Issue #94では判断していない（未解決のまま。上記2項目参照）。
+
+### Issue #152（ヘクス隣接関係）で新たに生じた既知の簡略化・要確認事項
+
+- **ペンタゴンセルは考慮していない**: H3の基準グリッドには12個のペンタゴンセル
+  （通常5隣接）が存在するが、対象エリア（狭山湖周辺・解像度11）にはいずれも
+  出現しないため、`hex_neighbors.py`はこれを特別扱いしていない。将来別エリアの
+  パックを作る際、ペンタゴンセルが混入する場合は動作未検証（`grid_ring`自体は
+  ペンタゴンでも正しく5隣接を返すため、実害は無いと推測されるが未確認）。
+- **保存形式の実測差（約6%）**: 「ヘクス隣接関係」節に記載のとおり、関係テーブル方式の
+  ほうが実測で約6%小さいが、単純さ・既存パターン（`boundary_geojson`）との一貫性を
+  優先してJSON配列列を採用した。この判断が妥当かは代表確認事項として残す。

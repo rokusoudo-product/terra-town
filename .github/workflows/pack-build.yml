@@ -48,10 +48,11 @@ jobs:
           python3 -m venv .venv
           ./.venv/bin/pip install -r requirements.txt
 
-      # OSM抽出・Planetiler補助データセット（合計約1.9GB）をキャッシュする。
+      # OSM抽出・Planetiler補助データセット・N03（合計約1.9GB＋N03約50MB）をキャッシュする。
       # キーはconfig.pyの内容（bbox変更時に別キャッシュへ切り替える）と
-      # Planetilerバージョンに紐付ける。
-      - name: Cache data_cache (OSM extract + Planetiler aux datasets)
+      # Planetilerバージョンに紐付ける。data_cache/n03/もこのパス配下のため
+      # 同じキャッシュエントリでカバーされる。
+      - name: Cache data_cache (OSM extract + Planetiler aux datasets + N03)
         uses: actions/cache@v4
         with:
           path: tools/pack-builder/data_cache
@@ -76,7 +77,41 @@ jobs:
       - name: Verify feature_id bridging
         run: ./.venv/bin/python verify_feature_id.py
 
-      - name: Slim pack for bundling
+      # 国土数値情報N03（行政区域データ）のダウンロード（Issue #86・T041・
+      # Issue #94でCIに組み込み）。download_n03.shはgeojson展開済みならスキップする
+      # （data_cacheキャッシュがヒットした場合はここで何もダウンロードしない）。
+      # 【CIでダウンロードする方針にした理由（Issue #94本文の指示に対する回答）】
+      # - N03は`.gitignore`済みでコミットできない（data_cache全般の方針。Issue #85）。
+      #   Kanto OSM抽出（約477MiB）を既にCIでダウンロードしている前例と同じ扱いにする。
+      # - サイズは埼玉県・東京都の2県分で約50MBと軽量（Kanto OSM抽出の1/10未満）。
+      # - N03のGMLzipのsha256が`pack_version`の入力になる（「pack_version」節参照）ため、
+      #   固定URLから取得することで「配布元が更新したら次のCI実行でpack_versionが
+      #   自動的に変わる」形になり、静かなデータドリフトを防げる。
+      # - `download_n03.sh`が取得するURLはIssue #86で検証済みの固定版
+      #   （`N03-20230101_{11,13}_GML.zip`）にピン留めされており、`latest`のような
+      #   移動するURLではない。
+      - name: Download N03 administrative boundary data (skip if cached)
+        run: bash download_n03.sh
+
+      - name: Extract administrative districts (with determinism check)
+        run: |
+          ./.venv/bin/python extract_districts.py
+          ./.venv/bin/python verify_districts_determinism.py
+
+      - name: Extract points of interest (with determinism check)
+        run: |
+          ./.venv/bin/python extract_poi.py
+          ./.venv/bin/python verify_poi_determinism.py
+
+      # ヘクス隣接関係の事前計算（Issue #152）。
+      - name: Compute hex neighbors (with determinism check)
+        run: |
+          ./.venv/bin/python compute_hex_neighbors.py
+          ./.venv/bin/python verify_hex_neighbor_determinism.py
+
+      # 4つの出力（pack.sqlite・districts.sqlite・poi.sqlite・hex_neighbor.sqlite）を
+      # 統合し、同梱用に軽量化する（Issue #94・#152）。
+      - name: Slim pack for bundling (merge terrain + districts + poi + hex_neighbor)
         run: ./.venv/bin/python slim_pack_for_bundle.py
 
       - name: Export hex GeoJSON (T043 feature id check)
@@ -96,8 +131,14 @@ jobs:
           cp out/region_pack.sqlite out/bundle/region_pack.sqlite
           cp out/tiles.mbtiles out/bundle/tiles.mbtiles
           echo "hex_count=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute('SELECT COUNT(*) FROM hex_terrain').fetchone()[0])")"
-          # Issue #105: hex_terrain.boundary_geojson（事前計算済みヘクス境界）を
-          # 追加したため、同梱サイズをCIログにも残す（README.md「ヘクス境界」節参照）。
+          echo "district_count=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute('SELECT COUNT(*) FROM district').fetchone()[0])")"
+          echo "poi_count=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute('SELECT COUNT(*) FROM poi').fetchone()[0])")"
+          echo "hex_neighbor_count=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute('SELECT COUNT(*) FROM hex_neighbor').fetchone()[0])")"
+          echo "pack_version=$(./.venv/bin/python -c "import sqlite3; print(sqlite3.connect('out/region_pack.sqlite').execute(\"SELECT value FROM pack_meta WHERE key='pack_version'\").fetchone()[0])")"
+          # Issue #105: hex_terrain.boundary_geojson（事前計算済みヘクス境界）、
+          # Issue #94/#152: district/hex_district/poi/hex_neighborの統合により
+          # 同梱サイズが変化したため、CIログにも残す
+          # （README.md「ヘクス境界」「ヘクス隣接関係」節参照）。
           ls -l out/bundle/region_pack.sqlite out/bundle/tiles.mbtiles
 
       # 生成物はリポジトリにコミットしない方針（Issue #85）のため、確認用に

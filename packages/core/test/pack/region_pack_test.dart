@@ -10,6 +10,7 @@ class FakeRegionPack implements RegionPack {
     this.districtByHex = const {},
     this.districts = const [],
     this.pointsOfInterest = const [],
+    this.neighborsByHex = const {},
   });
 
   @override
@@ -23,11 +24,17 @@ class FakeRegionPack implements RegionPack {
   @override
   final List<PointOfInterest> pointsOfInterest;
 
+  /// ヘクスごとの隣接ヘクス一覧（Issue #152）。
+  final Map<HexId, List<HexId>> neighborsByHex;
+
   @override
   TerrainType? terrainOf(HexId hexId) => terrainByHex[hexId];
 
   @override
   DistrictId? districtOf(HexId hexId) => districtByHex[hexId];
+
+  @override
+  Iterable<HexId> neighborsOf(HexId hexId) => neighborsByHex[hexId] ?? const [];
 }
 
 void main() {
@@ -62,6 +69,26 @@ void main() {
 
       expect(pack.terrainOf(const HexId(999)), isNull);
       expect(pack.districtOf(const HexId(999)), isNull);
+    });
+
+    test('隣接ヘクスの一覧を読み取れる（Issue #152）', () {
+      const hex = HexId(1);
+      const neighborA = HexId(2);
+      const neighborB = HexId(3);
+      final RegionPack pack = FakeRegionPack(
+        version: const PackVersion('2026-09-09-01'),
+        neighborsByHex: {
+          hex: [neighborA, neighborB],
+        },
+      );
+
+      expect(pack.neighborsOf(hex), [neighborA, neighborB]);
+    });
+
+    test('隣接関係が無いヘクス（同梱されていない・パック範囲外）は空のイテラブル', () {
+      final RegionPack pack = FakeRegionPack(version: const PackVersion('2026-09-09-01'));
+
+      expect(pack.neighborsOf(const HexId(999)), isEmpty);
     });
   });
 }

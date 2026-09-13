@@ -323,19 +323,63 @@ def main() -> None:
 
     elapsed = time.perf_counter() - t0
 
-    n03_sha256 = {}
+    # n03_sha256（Issue #94・2026-09-13代表決定）: 各都道府県のN03 GMLzipのsha256。
+    # 統合後の pack_version（slim_pack_for_bundle.py・Issue #94）がこの値を入力の
+    # 一部として使うため、設定済みの全都道府県分が揃っていることを fail-loud で検証する。
+    # download_n03.sh は geojson が既に展開済みならダウンロードをスキップするため、
+    # zip 自体は残っている前提（同スクリプトはzipを削除しない）。それでも見つからない
+    # 場合は、統合後の pack_version が一部の入力を欠いたまま計算されてしまう
+    # （＝「中身が変わったのに版が変わらない」silent driftになる）ことを防ぐため、
+    # ここで停止する。
+    n03_sha256: dict[str, str] = {}
+    missing_zip_prefs: list[str] = []
     for pref in config.N03_PREFECTURE_CODES:
         zip_paths = sorted((n03_dir).glob(f"N03-{config.N03_EDITION}_{pref}_GML.zip"))
         if zip_paths:
             n03_sha256[pref] = sha256_of_file(zip_paths[0])
+        else:
+            missing_zip_prefs.append(pref)
+    if missing_zip_prefs:
+        log(
+            f"ERROR: N03 GML zipが見つかりません（pref={missing_zip_prefs}）。"
+            f"pack_version の算出に必要です。download_n03.sh を再実行し、"
+            f"data_cache/n03/N03-{config.N03_EDITION}_<pref>_GML.zip を復元してください。"
+        )
+        sys.exit(1)
 
     meta = {
         "district_source": "国土数値情報 行政区域データ（N03）",
         "district_source_publisher": "国土交通省",
+        # 出典表示（Issue #94・2026-09-13代表決定）: 出典URL・CC BY 4.0・加工した旨・
+        # 測量法に基づく国土地理院長承認（複製）番号を、それぞれ独立したキーで持つ
+        # （T108が画面表示を実装する際にそのまま読める形にするため）。
+        #
+        # district_source_site_url: 国土数値情報 利用規約が示す表示例
+        # 「出典：国土交通省 国土数値情報ダウンロードサイト（URL）」のURLに対応する、
+        # **クリック可能な実在のURL**（サイトトップ）。T108の画面表示はこちらを使うこと。
+        "district_source_site_url": "https://nlftp.mlit.go.jp/ksj/",
+        # district_source_url: 実際に取得した個別ファイルの記録用（advisor 2026-09-13指摘:
+        # ブレース展開`{11,13}`はURLではなくシェルのパターン表記であり、これ単体では
+        # クリック・表示に使えない）。監査目的でのみ保持する。
+        "district_source_url": (
+            "https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2023/"
+            f"N03-{config.N03_EDITION}_{{"
+            + ",".join(config.N03_PREFECTURE_CODES)
+            + "}_GML.zip（都道府県コードごとに実在するURLに展開: "
+            + ", ".join(
+                f"N03-{config.N03_EDITION}_{pref}_GML.zip" for pref in config.N03_PREFECTURE_CODES
+            )
+            + "）"
+        ),
         "district_edition": f"N03-{config.N03_EDITION}（第3.1版・データ基準年 令和5年）",
         "district_prefecture_codes": ",".join(config.N03_PREFECTURE_CODES),
-        "district_license": "国土数値情報 利用規約（令和元年以降オープンデータ）。"
-        "測量法に基づく国土地理院長承認（複製）が必要な原典表示あり（README参照）",
+        "district_license": "国土数値情報 利用規約（令和元年以降オープンデータ）",
+        "district_license_cc": "CC BY 4.0（Creative Commons Attribution 4.0 International）",
+        "district_processing_note": "国土数値情報（国土交通省）「行政区域データ（N03）」を加工して作成",
+        # 承認番号は README.md「データソースとライセンス」節参照。本リポジトリが使用する
+        # N03-20230101（令和5年版）に対応する番号（2026-09-13・秘書が一次資料で確認済み。
+        # Issue #94 決定コメント）。旧README記載の「R 4JHf 430」は誤りだったため訂正した。
+        "district_survey_approval": "測量法に基づく国土地理院長承認（複製）R 5JHf 357",
         "district_simplify_tolerance_m": str(config.DISTRICT_SIMPLIFY_TOLERANCE_M),
         "district_count": str(len(districts)),
         "hex_district_assigned_count": str(len(hex_district)),

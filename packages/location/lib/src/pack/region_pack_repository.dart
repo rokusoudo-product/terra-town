@@ -3,6 +3,8 @@
 // 使っており、フィールド名（アンダースコア付き）をそのまま外部引数ラベルにする
 // initializing formal は採用しない（呼び出し側 `load` ファクトリの可読性のため）。
 
+import 'dart:convert';
+
 import 'package:terra_town_core/terra_town_core.dart';
 
 import '../db/region_pack_connection.dart';
@@ -27,20 +29,20 @@ import '../db/region_pack_connection.dart';
 /// 依存しない値・識別子のみを返す）。ヘクス境界の組み立ては T056 側
 /// （`fog_hex_source.dart`・`buildFogHexFeatureCollectionFromRegionPack`）が担う。
 ///
-/// ## 区画・POI テーブルが同梱パックにまだ存在しないことへの対応（forward-compat）
-/// 2026-09-11 時点で同梱パック（`app/assets/pack/region_pack.sqlite`。
-/// `tools/pack-builder/slim_pack_for_bundle.py` が生成）には `hex_terrain` と
-/// `pack_meta` の2テーブルしかなく、区画（`district`/`hex_district`）・POI（`poi`）の
-/// テーブルは含まれていない（Issue #86「pack districts poi」が本 Issue 時点で
-/// main に未マージのため）。しかし `RegionPack` は Dart の `abstract interface class`
-/// であり `districtOf`/`districts`/`pointsOfInterest` を実装せずに済ませることは
-/// できない。そのため本クラスは、読み込み時に `sqlite_master` でテーブルの存在を
-/// 確認し、**存在しなければ「該当なし」（null・空リスト）として振る舞う**。
-/// Issue #86 がマージされ同梱パックに実データが入れば、本クラスはコード変更なしに
-/// 実データを返すようになる（スキーマは Issue #86 のブランチの出力
-/// `tools/pack-builder/out/districts.sqlite`・`poi.sqlite` で実測済み:
+/// ## 区画・POI・隣接テーブルが同梱パックに存在しない場合への対応（forward-compat）
+/// `RegionPack` は Dart の `abstract interface class` であり
+/// `districtOf`/`districts`/`pointsOfInterest`/`neighborsOf` を実装せずに済ませる
+/// ことはできない。そのため本クラスは、読み込み時に `sqlite_master` でテーブルの
+/// 存在を確認し、**存在しなければ「該当なし」（null・空リスト・空イテラブル）として
+/// 振る舞う**（古いテストフィクスチャや、生成し直していない同梱パックに対しても
+/// 壊れずに動くようにするため）。
+///
+/// 2026-09-13 時点（Issue #94・#152）で `tools/pack-builder/slim_pack_for_bundle.py`
+/// が生成する `region_pack.sqlite` には次の6テーブルが揃っている:
+/// `hex_terrain(hex_id, terrain_type, feature_id, cell_count, boundary_geojson)`・
 /// `district(district_id, name, prefecture_name, county_name, geometry_geojson)`・
-/// `hex_district(hex_id, district_id)`・`poi(id, lat, lon, kind, name)`）。
+/// `hex_district(hex_id, district_id)`・`poi(id, lat, lon, kind, name)`・
+/// `hex_neighbor(hex_id, neighbor_count, neighbor_hex_ids)`・`pack_meta(key, value)`。
 ///
 /// ## `terrain_type` の文字列表現（snake_case → enum）
 /// `tools/pack-builder/terrain_rules.py` は `core` の [TerrainType] enum値
@@ -67,17 +69,23 @@ class RegionPackRepository implements RegionPack {
     required Map<int, DistrictId> districtByHexId,
     required List<District> districts,
     required List<PointOfInterest> pointsOfInterest,
+    required Map<int, List<HexId>> neighborHexIdsByHexId,
   })  : _version = version,
         _terrainByHexId = terrainByHexId,
         _districtByHexId = districtByHexId,
         _districts = List.unmodifiable(districts),
-        _pointsOfInterest = List.unmodifiable(pointsOfInterest);
+        _pointsOfInterest = List.unmodifiable(pointsOfInterest),
+        _neighborHexIdsByHexId = neighborHexIdsByHexId;
 
   final PackVersion _version;
   final Map<int, TerrainType> _terrainByHexId;
   final Map<int, DistrictId> _districtByHexId;
   final List<District> _districts;
   final List<PointOfInterest> _pointsOfInterest;
+
+  /// ヘクスごとの隣接ヘクス一覧（Issue #152）。[load] の時点で
+  /// `List.unmodifiable` 済みの値を格納する（`_loadHexNeighbors` 参照）。
+  final Map<int, List<HexId>> _neighborHexIdsByHexId;
 
   /// [connection] から地域パックを読み込み、[RegionPackRepository] を組み立てる。
   ///
@@ -98,6 +106,9 @@ class RegionPackRepository implements RegionPack {
     final pointsOfInterest = tableNames.contains('poi')
         ? _loadPointsOfInterest(connection)
         : const <PointOfInterest>[];
+    final neighborHexIdsByHexId = tableNames.contains('hex_neighbor')
+        ? _loadHexNeighbors(connection)
+        : const <int, List<HexId>>{};
 
     return RegionPackRepository._(
       version: version,
@@ -105,6 +116,7 @@ class RegionPackRepository implements RegionPack {
       districtByHexId: districtByHexId,
       districts: districts,
       pointsOfInterest: pointsOfInterest,
+      neighborHexIdsByHexId: neighborHexIdsByHexId,
     );
   }
 
@@ -122,6 +134,10 @@ class RegionPackRepository implements RegionPack {
 
   @override
   Iterable<PointOfInterest> get pointsOfInterest => _pointsOfInterest;
+
+  @override
+  Iterable<HexId> neighborsOf(HexId hexId) =>
+      _neighborHexIdsByHexId[hexId.value] ?? const <HexId>[];
 
   static Set<String> _existingTableNames(RegionPackConnection connection) {
     final rows = connection.rawSelect(
@@ -165,6 +181,31 @@ class RegionPackRepository implements RegionPack {
       final hexId = row['hex_id'] as int;
       final districtId = row['district_id'] as String;
       result[hexId] = DistrictId(districtId);
+    }
+    return result;
+  }
+
+  /// `hex_neighbor` テーブル（Issue #152・`tools/pack-builder/compute_hex_neighbors.py`）
+  /// から、ヘクスごとの隣接ヘクス一覧を読み込む。
+  ///
+  /// `neighbor_hex_ids` 列はJSON整数配列のテキスト（例: `[123, 456]`）。
+  /// SQLiteのINTEGERは64bitであり、`sqlite3`パッケージ・`jsonDecode`（Dart VM上）は
+  /// いずれもDartの`int`（64bit）で値を返すため、`(row['neighbor_hex_ids'] as String)`
+  /// を`jsonDecode`した各要素を`int`へキャストするだけで精度は失われない
+  /// （H3 indexは2^63未満・`hex_bridge.py`参照。`num`経由の`toInt()`は使わない —
+  /// もし将来何らかの理由で`double`が混入した場合、`toInt()`は黙って丸めてしまうが
+  /// `as int`は`TypeError`でfail-loudになる。これは`terrainOf`の未知`terrain_type`と
+  /// 同じ「不整合はfail-loudにする」方針）。
+  static Map<int, List<HexId>> _loadHexNeighbors(RegionPackConnection connection) {
+    final rows = connection.rawSelect(
+      'SELECT hex_id, neighbor_hex_ids FROM hex_neighbor',
+    );
+    final result = <int, List<HexId>>{};
+    for (final row in rows) {
+      final hexId = row['hex_id'] as int;
+      final raw = row['neighbor_hex_ids'] as String;
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      result[hexId] = List.unmodifiable(decoded.map((e) => HexId(e as int)));
     }
     return result;
   }

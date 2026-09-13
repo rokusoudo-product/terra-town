@@ -58,19 +58,30 @@ CELL_SIZE_M = 5.0
 # 50mに最も近い解像度を実測して選定した結果。research.md §8.2 参照。
 H3_RESOLUTION = 11
 
-# --- pack_version（Issue #85・T043）------------------------------------------
+# --- pack_version（Issue #85・T043。Issue #94/#152で統合時の組み直しに拡張）--------
 # パックの生成ロジック（地形判定ルール・グリッド解像度・feature_id方式等）自体の
 # バージョン。terrain_rules.py の判定ルールや H3_RESOLUTION・CELL_SIZE_M を変更した
 # ときは、**必ずこの値をインクリメントすること**。
 #
 # 理由: pack_version は classify_terrain.py 内で
 # f"{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{input_pbf_sha256の先頭12桁}" として組み立てる
-# （tools/pack-builder/README.md 参照）。これは「同じOSM入力なら同じpack_versionになる」
-# という決定論を持たせるためだが、逆に言うと「OSM入力が同じでも判定ルールを変えた場合」に
+# （tools/pack-builder/README.md 参照。これは中間生成物out/pack.sqliteの値であり、
+# 同梱物region_pack.sqliteの値はslim_pack_for_bundle.pyが統合時にさらに組み直す
+# ——詳細はREADMEの「pack_version」節）。これは「同じOSM入力なら同じpack_versionになる」
+# という決定論を持たせるためだが、逆に言うと「OSM入力が同じでもロジックを変えた場合」に
 # 本値を上げ忘れると、ロジックが変わったのに同じpack_versionになってしまい、
 # plan.md §3.3「一度開示したヘクスの資材分類は、パック更新後も過去分は不変
 # （獲得履歴は当時のpack_versionで確定）」という不変性ルールの前提（＝同じpack_versionなら
 # 同じ分類結果）を壊す。
+#
+# **インクリメント対象は terrain_rules.py・H3_RESOLUTION・CELL_SIZE_M だけではない**
+# （Issue #152で判明した抜け穴）。同じ理由で、次を変更した場合も本値を上げること:
+# - `hex_geometry.py`（ヘクス境界`boundary_geojson`の算出ロジック。Issue #105）
+# - `hex_neighbors.py`（ヘクス隣接関係`hex_neighbor`の算出ロジック。Issue #152。
+#   例: 隣接距離kを2に変えた・除外条件を変えた等）
+# これらは`input_pbf_sha256`等の既存ハッシュ入力では捕捉できない
+# （＝入力データが同じでもロジックだけが変わりうる）ため、`terrain_rules.py`と
+# 同じ「手動インクリメント」の対象とする。
 PACK_SCHEMA_VERSION = 1
 
 # --- OSM抽出データのキャッシュ -----------------------------------------------

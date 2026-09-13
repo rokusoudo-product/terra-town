@@ -69,6 +69,9 @@ class _CountingFakeRegionPack implements RegionPack {
 
   @override
   List<PointOfInterest> get pointsOfInterest => const [];
+
+  @override
+  Iterable<HexId> neighborsOf(HexId hexId) => const [];
 }
 
 /// [Repository]<[DisclosedHex], [HexId]> のオンメモリフェイク
