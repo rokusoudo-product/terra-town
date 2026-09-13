@@ -198,6 +198,20 @@ class OpeningPointAccrualCoordinator {
   /// 今回の記録で歩数センサーの値を一度でも観測できたか（HUD 用・Issue #149）。
   bool get sessionHasStepData => _sessionHasStepData;
 
+  /// [ledger] を経由しない外部の書き込み（ヘクス開放によるポイント消費・
+  /// `kDebugMode` のデバッグ付与）が確定した直後に、その**書き込み後の実残高**で
+  /// [_points] キャッシュを同期する（Issue #151）。
+  ///
+  /// 【なぜ必要か】本コーディネーターは [accrue] のたびに [_points] を更新するが、
+  /// それは「自分が書いた量」しか知らない。`opening_point.points` への2人目の
+  /// 書き手（ヘクス開放）が現れたため、その書き込みが確定した直後に呼び出し側
+  /// （`TerrainYieldPipeline`）からこのメソッドを呼んでもらい、キャッシュを
+  /// 実際のDBの値へ追随させる。**`+=` ではなく代入**であることに注意
+  /// （`OpeningPointLedgerStore.applyAccrual` クラスdoc「戻り値」と同じ理由）。
+  void syncPointsAfterExternalChange(int points) {
+    _points = points;
+  }
+
   /// [ledger] から直近の状態（ウォーターマーク・端数・所持ポイント数）を読み込み、
   /// [rewardSettings] が渡されていれば歩数判定オプトアウト設定を [rewardPolicy] へ
   /// 反映する（クラスdoc「歩数判定オプトアウト設定との配線」参照）。
@@ -278,16 +292,22 @@ class OpeningPointAccrualCoordinator {
     // （[_window]・セッション統計のコミットを含む）は一切行わない
     // （クラスdoc「失敗時の挙動」参照。リトライ時に [sessionDistanceMeters] 等が
     // 二重加算されないのはこのためである）。
-    await ledger.applyAccrual(
+    // 戻り値（書き込み後の実残高）をそのまま _points へ**代入**する（`+=` で
+    // 加算しない）。Issue #151 でヘクス開放（`HexOpeningSpendService`）が
+    // `opening_point.points` への2人目の書き手になったため、このキャッシュを
+    // 常にDBの値と一致させる必要がある（`OpeningPointLedgerStore.applyAccrual`
+    // クラスdoc「戻り値」参照）。
+    final resultingPoints = await ledger.applyAccrual(
       grantedPoints: grantedPoints,
       remainderMillimeters: newRemainderMillimeters,
       watermarkRowId: record.rowId,
+      cap: cap,
     );
 
     // ここに到達するのは applyAccrual が成功した場合のみ。
     _window = candidateWindow;
     _remainderMillimeters = newRemainderMillimeters;
-    _points += grantedPoints;
+    _points = resultingPoints;
     _watermarkRowId = record.rowId;
     if (isNewSession) {
       _resetSessionStatsForNewSession();

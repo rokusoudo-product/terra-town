@@ -1,12 +1,42 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 
-import 'package:flutter/foundation.dart' show ValueNotifier, ValueListenable, debugPrint;
+import 'package:flutter/foundation.dart'
+    show ValueNotifier, ValueListenable, debugPrint, kDebugMode;
 import 'package:terra_town_core/terra_town_core.dart';
-import 'package:terra_town_location/terra_town_location.dart' show LocationPointRecord, hexIdToFeatureId;
+import 'package:terra_town_location/terra_town_location.dart'
+    show
+        HexOpeningSpendOutcome,
+        HexOpeningSpendResult,
+        HexOpeningSpendService,
+        LocationPointRecord,
+        hexIdToFeatureId;
 
 import 'opening_point_accrual_coordinator.dart';
 import 'terrain_yield_accrual_coordinator.dart';
+
+/// [TerrainYieldPipeline.openHexWithPoints] の結果（Issue #151・T064）。
+class HexOpeningAttemptResult {
+  const HexOpeningAttemptResult._({
+    required this.success,
+    this.denialReason,
+    this.disclosedHex,
+  });
+
+  factory HexOpeningAttemptResult.success(DisclosedHex disclosedHex) =>
+      HexOpeningAttemptResult._(success: true, disclosedHex: disclosedHex);
+
+  factory HexOpeningAttemptResult.denied(HexOpeningDenialReason reason) =>
+      HexOpeningAttemptResult._(success: false, denialReason: reason);
+
+  final bool success;
+
+  /// [success] が false の場合の拒否理由。
+  final HexOpeningDenialReason? denialReason;
+
+  /// [success] が true の場合に新規開示された [DisclosedHex]。
+  final DisclosedHex? disclosedHex;
+}
 
 /// [TerrainYieldPipeline] が処理済みの位置について保持する観測用スナップショット
 /// （`kDebugMode` のデバッグパネル表示専用。Issue #138）。
@@ -162,6 +192,7 @@ class TerrainYieldPipeline {
     required this.terrainHexCounter,
     required this.disclosedHexRepository,
     required this.recordedPositionUpdates,
+    required this.hexOpeningSpendService,
   });
 
   final DisclosureService disclosureService;
@@ -173,6 +204,10 @@ class TerrainYieldPipeline {
   final TerrainHexCounter terrainHexCounter;
   final Repository<DisclosedHex, HexId> disclosedHexRepository;
   final Stream<LocationPointRecord> recordedPositionUpdates;
+
+  /// ポイント消費による未踏破ヘクスの開放（[openHexWithPoints]）で使う
+  /// トランザクション本体（Issue #151・T064）。
+  final HexOpeningSpendService hexOpeningSpendService;
 
   final ValueNotifier<TerrainYieldPipelineStats> _stats =
       ValueNotifier(TerrainYieldPipelineStats.initial());
@@ -281,17 +316,7 @@ class TerrainYieldPipeline {
             lastProcessedTimestamp: record.position.timestamp,
             lastProcessedSessionId: record.position.trackingSessionId,
           );
-          _openingPointStats.value = OpeningPointPipelineStats(
-            points: openingPointCoordinator.points,
-            remainderMillimeters: openingPointCoordinator.remainderMillimeters,
-            watermarkRowId: openingPointCoordinator.watermarkRowId,
-            lastSegmentDistanceMeters: openingPointCoordinator.lastSegmentDistanceMeters,
-            lastAppliedMultiplier: openingPointCoordinator.lastAppliedMultiplier,
-            lastReason: openingPointCoordinator.lastReason,
-            sessionDistanceMeters: openingPointCoordinator.sessionDistanceMeters,
-            sessionStepCount: openingPointCoordinator.sessionStepCount,
-            sessionHasStepData: openingPointCoordinator.sessionHasStepData,
-          );
+          _publishOpeningPointStatsFromCoordinator();
         } catch (e, stackTrace) {
           _log('位置の処理中にエラーが発生しました（この位置はスキップして次に進みます）: $e');
           developer.log(
@@ -327,6 +352,87 @@ class TerrainYieldPipeline {
     return disclosed;
   }
 
+  /// ポイント消費による未踏破ヘクスの開放（Issue #151・T064）。
+  ///
+  /// ## composition root（`map_screen.dart`）からの呼び出し方
+  /// 地図タップ（`MapView.onFogHexTapped`）で得た `featureId` を、composition
+  /// root が既に持つ `fogHexFeatureCollection` から [HexId] に変換したうえで
+  /// 本メソッドを呼ぶ（`app/lib/map/hex_feature_lookup.dart` 参照）。
+  ///
+  /// ## 判定と実処理の分担
+  /// 隣接・地域パック範囲内かどうか（[HexOpeningDenialReason.notAdjacentToDisclosed]・
+  /// [HexOpeningDenialReason.outsidePack]）は本メソッドが `evaluateHexOpening`
+  /// （`packages/core`）で判定する。ポイント残高・既に開示済みでないかの
+  /// **最終確認**とDB書き込みは [hexOpeningSpendService]（`packages/location`）に
+  /// 委ねる（`HexOpeningSpendService` クラスdoc「責務の境界」参照。隣接制約は
+  /// 単調に真になるだけなのでトランザクション内での再確認は不要）。
+  ///
+  /// ## 開放成功時に更新する派生状態（`recordManualPosition` と同じ一式）
+  /// 歩行による開示（[disclosureService.recordPosition]）が更新するのと同じ
+  /// 派生状態——[disclosureService.known]・[terrainHexCounter]・fog の描画
+  /// （[reveal]）——をここでも更新する。**[disclosureService.known] への追加を
+  /// 忘れると**、後で同じヘクスへ歩いて到達した際に
+  /// `DisclosureService.recordPosition` が「未知」と誤認して二重に
+  /// `terrainHexCounter.increment` してしまう（advisor指摘）。
+  ///
+  /// 所持ポイントのキャッシュ（[openingPointCoordinator]）と HUD 表示
+  /// （[openingPointStats]）は、成功・失敗（残高不足・既に開示済みの競合）の
+  /// いずれの場合も [HexOpeningSpendResult.remainingPoints] で同期する
+  /// （`OpeningPointAccrualCoordinator.syncPointsAfterExternalChange`
+  /// クラスdoc参照）。
+  Future<HexOpeningAttemptResult> openHexWithPoints(HexId hexId) async {
+    final evaluation = evaluateHexOpening(
+      hexId: hexId,
+      regionPack: disclosureService.regionPack,
+      known: disclosureService.known,
+      currentPoints: openingPointCoordinator.points,
+    );
+    if (!evaluation.canOpen) {
+      return HexOpeningAttemptResult.denied(evaluation.denialReason!);
+    }
+
+    final result = await hexOpeningSpendService.spend(
+      hexId: hexId,
+      terrainType: evaluation.terrainType!,
+      packVersion: disclosureService.regionPack.version,
+    );
+
+    switch (result.outcome) {
+      case HexOpeningSpendOutcome.alreadyDisclosed:
+        openingPointCoordinator.syncPointsAfterExternalChange(result.remainingPoints);
+        _publishOpeningPointStatsFromCoordinator();
+        return HexOpeningAttemptResult.denied(HexOpeningDenialReason.alreadyDisclosed);
+      case HexOpeningSpendOutcome.insufficientPoints:
+        openingPointCoordinator.syncPointsAfterExternalChange(result.remainingPoints);
+        _publishOpeningPointStatsFromCoordinator();
+        return HexOpeningAttemptResult.denied(HexOpeningDenialReason.insufficientPoints);
+      case HexOpeningSpendOutcome.opened:
+        final disclosedHex = result.disclosedHex!;
+        disclosureService.known.add(disclosedHex.hexId);
+        terrainHexCounter.increment(disclosedHex.terrainType);
+        await reveal(hexIdToFeatureId(disclosedHex.hexId.value));
+        openingPointCoordinator.syncPointsAfterExternalChange(result.remainingPoints);
+        _publishOpeningPointStatsFromCoordinator();
+        return HexOpeningAttemptResult.success(disclosedHex);
+    }
+  }
+
+  /// `kDebugMode` 限定のデバッグ付与（Issue #151「秘書の実機の現在の状態:
+  /// 所持0Pでは開放を試せない」への対応）。呼び出し元は `OpeningPointDebugPanel`
+  /// （`kDebugMode` 限定のパネル）のみに限ること。**release ビルドの製品UIに
+  /// 絶対に出さない**——本メソッド自体も冒頭で `kDebugMode` を確認し、万一
+  /// release ビルドから誤って呼ばれても何もしない（多重の安全策）。
+  Future<void> grantOpeningPointsForDebug(int amount) async {
+    if (!kDebugMode) return;
+    final newBalance = await openingPointCoordinator.ledger.applyAccrual(
+      grantedPoints: amount,
+      remainderMillimeters: openingPointCoordinator.remainderMillimeters,
+      watermarkRowId: openingPointCoordinator.watermarkRowId,
+    );
+    openingPointCoordinator.syncPointsAfterExternalChange(newBalance);
+    _publishOpeningPointStatsFromCoordinator();
+  }
+
   /// 購読を止める（画面破棄時に呼ぶ）。
   Future<void> stop() async {
     final iterator = _iterator;
@@ -335,6 +441,23 @@ class TerrainYieldPipeline {
     if (iterator != null) {
       await iterator.cancel();
     }
+  }
+
+  /// [openingPointCoordinator] の現在値から [openingPointStats] を再構築して
+  /// 公開する（`_run` の通常経路・[openHexWithPoints]・
+  /// [grantOpeningPointsForDebug] のいずれからも同じロジックを使う）。
+  void _publishOpeningPointStatsFromCoordinator() {
+    _openingPointStats.value = OpeningPointPipelineStats(
+      points: openingPointCoordinator.points,
+      remainderMillimeters: openingPointCoordinator.remainderMillimeters,
+      watermarkRowId: openingPointCoordinator.watermarkRowId,
+      lastSegmentDistanceMeters: openingPointCoordinator.lastSegmentDistanceMeters,
+      lastAppliedMultiplier: openingPointCoordinator.lastAppliedMultiplier,
+      lastReason: openingPointCoordinator.lastReason,
+      sessionDistanceMeters: openingPointCoordinator.sessionDistanceMeters,
+      sessionStepCount: openingPointCoordinator.sessionStepCount,
+      sessionHasStepData: openingPointCoordinator.sessionHasStepData,
+    );
   }
 
   void _log(String message) {

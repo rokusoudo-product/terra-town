@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:math' show Point;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
@@ -126,6 +127,7 @@ class MapView extends StatefulWidget {
     this.currentLocationLayerId = _defaultCurrentLocationLayerId,
     this.followCurrentLocation = false,
     this.onFollowDismissedByUser,
+    this.onFogHexTapped,
   });
 
   /// [resolveBundledMbtilesPath] 等で解決済みの、書き込み可能な領域にある
@@ -241,6 +243,37 @@ class MapView extends StatefulWidget {
   /// オフにすること（[MapView] 自身は自分の [followCurrentLocation] を
   /// 書き換えられないため）。
   final VoidCallback? onFollowDismissedByUser;
+
+  /// 地図タップでヘクスを選ぶ操作の窓口（Issue #151・T064「ポイント消費による
+  /// 未踏破ヘクスの開放」）。
+  ///
+  /// 【tapされた場所のヘクスをどう特定するか】`core`・`location` のいずれにも
+  /// 「緯度経度→ヘクスID」の変換手段が実行時には無い（`hex_locator.dart`
+  /// クラスdoc参照。歩行時は Kotlin 側 `H3HexIndexer` が記録時点で確定済みの
+  /// 値を渡すだけ）。タップは記録された位置ではなく任意の画面座標に対して
+  /// 起こるため、この経路では使えない。代わりに、fog of war レイヤー
+  /// （[fogLayerId]。全ヘクスがソースに追加済み・`fog_of_war_layer.dart`）に
+  /// 対して `queryRenderedFeatures` でタップ地点の地物を問い合わせ、その
+  /// 地物の整数 `id`（＝ `feature_id`。`hex_bridge.py`/`hex_feature_bridge.dart`
+  /// の下位52bitマスク方式）をそのまま呼び出し側へ渡す。fog レイヤーは
+  /// 開示済みヘクスも透明（`fill-opacity: 0`）になっているだけでソース自体は
+  /// 残り続けるため、開示済み・未開示のどちらのヘクスをタップしても地物は
+  /// 見つかる想定だが、**実機では未検証**（`fill-opacity: 0` の地物が
+  /// `queryRenderedFeatures` で返るかどうかは MapLibre のドキュメント上は
+  /// 問題ないはずだが、実際の挙動は代表の実機確認が必要）。
+  ///
+  /// [featureId] から実際の [core] `HexId`（H3 index）への変換は本パッケージの
+  /// 責務ではない（`hex_id.dart`「地図Featureのidへの変換はlocation/表示レイヤーの
+  /// 責務」の逆方向にあたり、こちらは composition root（`app`）が既に読み込み済みの
+  /// `fogHexFeatureCollection`〔各Featureの `properties.hex_id_str` に文字列化した
+  /// H3 indexを保持済み・`fog_hex_source.dart` 参照〕から引く）。本コールバックは
+  /// 「タップ地点にどの `feature_id` の地物があったか」を伝えるところまでに
+  /// 責務を限定する。
+  ///
+  /// null（未指定）の場合、地図タップの購読自体を行わない（`onMapClick` を
+  /// 一切登録しない。他の任意パラメータと同じ「両方揃ったら有効になる」
+  /// 方式ではなく、本パラメータ単体の有無で決まる）。
+  final void Function(int featureId)? onFogHexTapped;
 
   static const _defaultCurrentLocationSourceId = 'terra_town_current_location';
   static const _defaultCurrentLocationLayerId = 'terra_town_current_location_layer';
@@ -410,7 +443,41 @@ class _MapViewState extends State<MapView> {
       // 追従中に利用者が地図を動かしたら追従を解除する（Issue #141 提案2）ための
       // 検知経路。[CameraFollowTracker] のドキュメント「なぜ必要か」参照。
       onCameraIdle: _handleCameraIdle,
+      // ヘクスをタップして選ぶ操作の窓口（Issue #151・T064）。[onFogHexTapped]
+      // が指定された場合のみ購読する（[onFogHexTapped] クラスdoc参照）。
+      onMapClick: widget.onFogHexTapped == null ? null : _handleMapClick,
     );
+  }
+
+  /// [MapLibreMap.onMapClick] から呼ぶ（[widget.onFogHexTapped] が非nullの場合のみ
+  /// 登録される。[onFogHexTapped] クラスdoc「tapされた場所のヘクスをどう特定するか」
+  /// 参照）。
+  Future<void> _handleMapClick(Point<double> point, LatLng coordinates) async {
+    final controller = _controller;
+    final onFogHexTapped = widget.onFogHexTapped;
+    if (controller == null || onFogHexTapped == null) return;
+    try {
+      final features = await controller.queryRenderedFeatures(
+        point,
+        [widget.fogLayerId],
+        null,
+      );
+      if (features.isEmpty) return;
+      final feature = features.first;
+      if (feature is! Map) return;
+      final rawId = feature['id'];
+      if (rawId is! num) return;
+      onFogHexTapped(rawId.toInt());
+    } catch (e, stackTrace) {
+      _log('失敗: タップ地点のfog地物の問い合わせでエラー: $e');
+      developer.log(
+        'タップ地点のfog地物の問い合わせに失敗しました',
+        name: 'terra_town_location.map_view',
+        error: e,
+        stackTrace: stackTrace,
+        level: 1000,
+      );
+    }
   }
 
   /// 【ログの二重出力について】`developer.log` は Dart VM Service の

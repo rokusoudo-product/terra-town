@@ -22,6 +22,9 @@
 ///                     MVPでは未実装。理由は opening_point_accrual_service.dart 参照）
 ///   - src/disclosure/ HexLocator 抽象・DisclosureService（開示判定ロジック）
 ///                     （T054・実装済み。Issue #101）
+///   - src/opening/    開放ポイントを消費した未踏破ヘクスの開放可否判定
+///                     （T064・実装済み。Issue #151。立入禁止エリアの判定は
+///                     未実装。opening_point_service.dart 参照）
 ///   - src/antispoof/  SpeedFilter（移動平均平滑化後の速度による偽装対策判定）
 ///                     （T100・実装済み。Issue #125）・RewardPolicy（モック検出・
 ///                     速度・歩数の段階的ペナルティを1か所に集約する判定。
@@ -42,6 +45,7 @@ export 'src/geo/distance.dart';
 export 'src/geo/hex_geometry.dart';
 export 'src/geo/hex_id.dart';
 export 'src/geo/tile_id.dart';
+export 'src/opening/opening_point_service.dart';
 export 'src/pack/disclosed_hex.dart';
 export 'src/pack/disclosed_hex_set.dart';
 export 'src/pack/district.dart';

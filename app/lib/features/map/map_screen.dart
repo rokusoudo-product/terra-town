@@ -18,10 +18,12 @@ import '../../map/economy/opening_point_accrual_coordinator.dart';
 import '../../map/economy/terrain_yield_accrual_coordinator.dart';
 import '../../map/economy/terrain_yield_pipeline.dart';
 import '../../map/fog_of_war_layer_factory.dart';
+import '../../map/hex_feature_lookup.dart';
 import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
 import '../permissions/tracking_control_button.dart';
+import 'widgets/hex_opening_sheet.dart';
 import 'widgets/walk_stats_hud.dart';
 
 /// マップ（ホーム）画面（tasks.md T057・T058・T060・T066・T068・T069・
@@ -320,6 +322,10 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
 
   RegionPackConnection? _regionPackConnection;
   Map<String, dynamic>? _fogHexFeatureCollection;
+
+  /// タップされた fog 地物の `feature_id` → `core` の [HexId] への逆引き表
+  /// （Issue #151・T064）。`hex_feature_lookup.dart` 参照。
+  Map<int, HexId>? _hexIdByFeatureId;
   DisclosedHexRepository? _disclosedHexRepository;
   DisclosedHexSet? _known;
   NativePositionProvider? _positionProvider;
@@ -364,6 +370,10 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       _regionPackConnection = connection;
       _fogHexFeatureCollection = buildFogHexFeatureCollectionFromRegionPack(connection);
       final regionPack = RegionPackRepository.load(connection);
+      // タップされた fog 地物の featureId → HexId の逆引き表（Issue #151・T064）。
+      // 起動時に一度だけ組み立て、地域パックへの追加のDBアクセスなしにタップの
+      // たびの変換を完結させる（hex_feature_lookup.dart クラスdoc参照）。
+      _hexIdByFeatureId = buildHexIdByFeatureId(_fogHexFeatureCollection!);
 
       final disclosedHexRepository = DisclosedHexRepository(widget.paths.gameDatabase);
       final known = DisclosedHexSet();
@@ -414,6 +424,12 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
           ledger: OpeningPointLedger(widget.paths.gameDatabase),
           rewardSettings: RewardSettingsRepository(widget.paths.gameDatabase),
         ),
+        // ポイント消費による未踏破ヘクスの開放（Issue #151・T064）。既定の
+        // OpeningPointBalanceRepository・DisclosedHexRepository を使うため、
+        // 上記 openingPointCoordinator（入手側）・disclosedHexRepository（開示の
+        // 保存先）と同じ opening_point.points・disclosed_hex を読み書きする
+        // （二重管理しない。`HexOpeningSpendService` クラスdoc参照）。
+        hexOpeningSpendService: HexOpeningSpendService(widget.paths.gameDatabase),
         terrainHexCounter: terrainHexCounter,
         disclosedHexRepository: disclosedHexRepository,
         recordedPositionUpdates: positionProvider.recordedPositionUpdates,
@@ -462,6 +478,36 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   void _onFollowDismissedByUser() {
     if (!mounted) return;
     setState(() => _isFollowing = false);
+  }
+
+  /// [MapView.onFogHexTapped] から呼ぶ（Issue #151・T064「ポイント消費による
+  /// 未踏破ヘクスの開放」）。タップされた fog 地物の `featureId` を
+  /// [_hexIdByFeatureId]（起動時に一度だけ組み立て済み）で `core` の [HexId] に
+  /// 変換し、[HexOpeningSheet]（モーダルボトムシート・「配置」については
+  /// 同ファイルのクラスdoc参照）を開く。
+  void _handleFogHexTapped(int featureId) {
+    final hexId = _hexIdByFeatureId?[featureId];
+    final pipeline = _pipeline;
+    if (hexId == null || pipeline == null) return;
+
+    // シート表示用のプレビュー判定（確定はシート内の onConfirm が
+    // `pipeline.openHexWithPoints` を通じてトランザクション内で再確認する。
+    // `HexOpeningSheet` クラスdoc「判定の二段構え」参照）。
+    final evaluation = evaluateHexOpening(
+      hexId: hexId,
+      regionPack: pipeline.disclosureService.regionPack,
+      known: pipeline.disclosureService.known,
+      currentPoints: pipeline.openingPointCoordinator.points,
+    );
+
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => HexOpeningSheet(
+        evaluation: evaluation,
+        currentPoints: pipeline.openingPointCoordinator.points,
+        onConfirm: () => pipeline.openHexWithPoints(hexId),
+      ),
+    );
   }
 
   @override
@@ -516,6 +562,8 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       currentLocationMarkerStyle: buildCurrentLocationMarkerStyle(),
       followCurrentLocation: _isFollowing,
       onFollowDismissedByUser: _onFollowDismissedByUser,
+      // ヘクスをタップしてポイントで開放する操作（Issue #151・T064）。
+      onFogHexTapped: _handleFogHexTapped,
     );
 
     // 追従トグルボタン（release ビルドでも常に表示する製品UI）。
@@ -714,6 +762,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
                     ),
                     OpeningPointDebugPanel(
                       stats: pipeline.openingPointStats,
+                      grantPointsForDebug: pipeline.grantOpeningPointsForDebug,
                     ),
                   ],
                 ),
