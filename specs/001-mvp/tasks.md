@@ -194,7 +194,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - [ ] T073 [US2] ボーナスオブジェクト（著名スポット）の効果を実装（**コレクション＋軽い産出/ポイントボーナス**・歩行優位を崩さない範囲）
 - [ ] T074 [P] [US2] 著名スポットの**独自キュレーション**データを `tools/pack-builder/data/curated_landmarks.*` として定義し、パック生成に取り込む
 - [ ] T075 [US2] `app/lib/features/collection/collection_screen.dart` に**名所図鑑**を実装（**個別POI単位**で記録＋カテゴリ集計表示 — #12 代表回答）
-- [ ] T076 [P] [US2] 資材インベントリ画面を実装（`app/lib/features/inventory/inventory_screen.dart`）
+- [x] T076 [P] [US2] 資材インベントリ画面を実装（`app/lib/features/inventory/inventory_screen.dart`）
 - [ ] T077 [US2] **近接通知**（フォアグラウンドのみ・未開放の名所/レア地形が近いと通知・自前距離計算で判定し OS geofence は使わない — plan.md §10）を実装
 - [ ] T078 [P] [US2] 通知のオプトイン設定と頻度制御を実装（`app/lib/features/settings/`）
 

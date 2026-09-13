@@ -153,6 +153,24 @@ void main() {
     expect(find.textContaining('pushed the button'), findsNothing);
   });
 
+  testWidgets('建設タブに切り替えると資材インベントリ画面（Issue #150）が表示される', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MyApp(
+        mapPathResolver: _missingPackResolver,
+        gameDatabaseBuilder: GameDatabase.forTesting,
+      ),
+    );
+
+    await tester.tap(find.text('建設'));
+    await tester.pumpAndSettle();
+
+    // 新規ゲームDB（インメモリ）は所持資材が0件のため空状態になる
+    // （InventoryScreen クラスdoc「所持数が0の資材の扱い」参照）。
+    expect(find.text('まだ資材がありません'), findsOneWidget);
+  });
+
   testWidgets('設定タブに切り替えるとスイッチ（歩数判定オプトアウト・Issue #135）が表示される', (
     tester,
   ) async {

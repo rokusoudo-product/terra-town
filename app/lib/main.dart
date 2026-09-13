@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import 'design/app_theme.dart';
+import 'features/inventory/inventory_screen.dart';
 import 'features/map/map_screen.dart';
 import 'features/settings/settings_screen.dart';
 
@@ -60,8 +61,14 @@ class MyApp extends StatelessWidget {
 
 /// 下部ナビ4タブ（地図 / 建設 / 図鑑 / 設定）の骨組み（DESIGN.md「余白・レイアウト」）。
 ///
-/// 地図タブ（T057・Issue #99）以外の中身（4状態の実装）は Issue #25 のスコープ外。
-/// tasks.md の各画面タスク（T075・T076・T089・T093・T103）に委ねる。
+/// 地図タブ（T057・Issue #99）・建設タブの資材インベントリ表示（T076・Issue #150）
+/// 以外の中身（4状態の実装）は Issue #25 のスコープ外。tasks.md の各画面タスク
+/// （T075・T089・T093・T103）に委ねる。
+///
+/// ## 建設タブ（2026-09-13・Issue #150）
+/// 建設UI本体（建物を建てる操作・T089）はまだ無いため、現時点では
+/// [InventoryScreen]（所持資材の一覧）のみを表示する。T089 実装時に
+/// 本タブの中身を差し替える。
 class RootScaffold extends StatefulWidget {
   const RootScaffold({super.key, this.mapPathResolver, this.gameDatabaseBuilder});
 
@@ -81,13 +88,20 @@ class _RootScaffoldState extends State<RootScaffold> {
 
   /// ゲーム状態DB（Issue #135 で `app` から初めて開く）。設定タブ（[SettingsScreen]）
   /// が [RewardSettingsRepository] 経由で読み書きするほか、地図タブ（[MapScreen]）が
-  /// 開示済みヘクスの永続化（`disclosed_hex`・T060・Issue #137）に使う、
+  /// 開示済みヘクスの永続化（`disclosed_hex`・T060・Issue #137）に、建設タブ
+  /// （[InventoryScreen]）が [InventoryRepository] 経由で所持資材の読み取りに使う、
   /// 単一の共有インスタンス。`LazyDatabase` のためこのフィールド初期化自体は
   /// ディスクI/Oを起こさない（[MyApp.gameDatabaseBuilder] のドキュメント参照）。
   late final GameDatabase _gameDatabase =
       (widget.gameDatabaseBuilder ?? GameDatabase.defaultConnection)();
   late final RewardSettingsRepository _rewardSettingsRepository =
       RewardSettingsRepository(_gameDatabase);
+
+  /// 建設タブ（[InventoryScreen]）が所持資材を読み出すためのリポジトリ。
+  /// `InventoryRepository` は Issue #143 で追加済みの既存クラスをそのまま使う
+  /// （新しい Repository は作らない・Issue #150 提案内容3）。
+  late final InventoryRepository _inventoryRepository =
+      InventoryRepository(_gameDatabase);
 
   @override
   void dispose() {
@@ -121,6 +135,7 @@ class _RootScaffoldState extends State<RootScaffold> {
           resolveMbtilesPath: widget.mapPathResolver,
           gameDatabase: _gameDatabase,
         ),
+      1 => InventoryScreen(inventoryRepository: _inventoryRepository),
       3 => SettingsScreen(store: _rewardSettingsRepository),
       _ => _PlaceholderScreen(label: _tabs[_selectedIndex].label),
     };
