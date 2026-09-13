@@ -13,6 +13,13 @@ class _FakeLocationTrackingHostApi extends LocationTrackingHostApi {
   bool isRunning = false;
   int startCallCount = 0;
   int stopCallCount = 0;
+  int statusCallCount = 0;
+
+  /// `startTracking()` 後、この回数だけ `getTrackingStatus()` が「停止中」を返す
+  /// （実機の挙動の再現。`TrackingStartOutcome.started` は
+  /// `startForegroundService()` を呼んだという意味でしかなく、サービスが
+  /// `session_id` を発行するまで `isRunning=false` が返る）。
+  int statusFalseRepliesAfterStart = 0;
 
   @override
   Future<TrackingStartResult> startTracking() async {
@@ -31,6 +38,11 @@ class _FakeLocationTrackingHostApi extends LocationTrackingHostApi {
 
   @override
   Future<TrackingStatus> getTrackingStatus() async {
+    statusCallCount++;
+    if (isRunning && statusFalseRepliesAfterStart > 0) {
+      statusFalseRepliesAfterStart--;
+      return TrackingStatus(isRunning: false, sessionId: null);
+    }
     return TrackingStatus(
       isRunning: isRunning,
       sessionId: isRunning ? 'session-1' : null,
@@ -135,6 +147,68 @@ void main() {
     // 通知権限はベストエフォートでリクエストする（結果は待たない）。
     expect(notificationRequestCount, 1);
   });
+
+  testWidgets(
+    '開始直後に稼働状態が「停止中」と返っても、確認し直して「記録中」になる（2026-09-13 実機で再現した不具合）',
+    (tester) async {
+      // 実機では、記録は始まっているのに開始直後の getTrackingStatus() が
+      // isRunning=false を返し、UI が「記録開始」のまま残った（アプリを背面に
+      // 回して戻すと正しくなった）。利用者が「始まっていない」と誤解して
+      // もう一度押すと記録セッションが分割される（= 産出・開放ポイントの取りこぼし）。
+      final hostApi = _FakeLocationTrackingHostApi()
+        ..statusFalseRepliesAfterStart = 3;
+      final gateway = _FakePermissionGateway(LocationPermissionState.granted);
+      final recording = ValueNotifier<bool>(false);
+      addTearDown(recording.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          TrackingControlButton(
+            control: NativeLocationTrackingControl(api: hostApi),
+            permissionGateway: gateway,
+            requestNotificationPermission: () async {},
+            recordingNotifier: recording,
+            startStatusPollInterval: Duration.zero,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      expect(hostApi.startCallCount, 1, reason: '開始要求は1回だけ');
+      expect(find.text('記録中'), findsOneWidget);
+      expect(recording.value, isTrue, reason: 'HUD へ渡す記録中フラグも true になる');
+    },
+  );
+
+  testWidgets(
+    '開始しても稼働が確認できないままなら「記録開始」のまま（楽観的に稼働中と表示しない）',
+    (tester) async {
+      final hostApi = _FakeLocationTrackingHostApi()
+        ..statusFalseRepliesAfterStart = 1000;
+      final gateway = _FakePermissionGateway(LocationPermissionState.granted);
+
+      await tester.pumpWidget(
+        _wrap(
+          TrackingControlButton(
+            control: NativeLocationTrackingControl(api: hostApi),
+            permissionGateway: gateway,
+            requestNotificationPermission: () async {},
+            startStatusPollInterval: Duration.zero,
+            startStatusPollAttempts: 3,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      expect(find.text('記録開始'), findsOneWidget);
+    },
+  );
 
   testWidgets('稼働中: タップすると停止し「記録開始」に戻る', (tester) async {
     final hostApi = _FakeLocationTrackingHostApi()..isRunning = true;

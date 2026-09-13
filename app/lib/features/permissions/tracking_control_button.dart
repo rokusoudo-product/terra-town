@@ -52,6 +52,8 @@ class TrackingControlButton extends StatefulWidget {
     this.permissionGateway,
     this.requestNotificationPermission,
     this.recordingNotifier,
+    this.startStatusPollInterval = const Duration(milliseconds: 300),
+    this.startStatusPollAttempts = 10,
   });
 
   /// テスト用の差し替えフック（既定 null では実際の Pigeon 経路を使う）。
@@ -80,6 +82,29 @@ class TrackingControlButton extends StatefulWidget {
   /// 省略時（既定 null）は内部専用の [ValueNotifier] を使い、外部には一切公開
   /// しない（既存の呼び出し元・テストとの後方互換）。
   final ValueNotifier<bool>? recordingNotifier;
+
+  /// 記録開始を要求した後、稼働状態を確認し直す間隔（2026-09-13・実機で判明）。
+  ///
+  /// `TrackingStartOutcome.started` は「`Context#startForegroundService()` を呼んだ」
+  /// という意味であり、**実際に `startForeground()` まで到達したかは分からない**
+  /// （`pigeons/location_api.dart` の同 enum のドキュメント）。そのため開始直後に
+  /// 1回だけ [NativeLocationTrackingControl.status] を読むと、サービスがまだ
+  /// `session_id` を発行していないタイミングでは `isRunning=false` が返り、
+  /// **記録は始まっているのにUIが「停止中」のままになる**（2026-09-13 実機で再現。
+  /// アプリを一度背面に回して戻すと正しい表示になった）。
+  ///
+  /// この状態が残ると、利用者が「開始されていない」と誤解してもう一度ボタンを押し、
+  /// 記録セッションが分割されるおそれがある（同一セッション内でしか時刻差分を
+  /// 取らない設計〔Issue #124〕のため、分割は産出・開放ポイントの取りこぼしになる）。
+  ///
+  /// そこで稼働状態が確認できるまで短い間隔で確認し直す。テストからは
+  /// [Duration.zero] を渡して待たずに検証できる。
+  final Duration startStatusPollInterval;
+
+  /// [startStatusPollInterval] の確認回数の上限。これを超えても稼働が確認できない
+  /// 場合は「停止中」として扱う（サービスの起動に失敗している可能性があるため、
+  /// 楽観的に「稼働中」と表示してしまわない）。
+  final int startStatusPollAttempts;
 
   @override
   State<TrackingControlButton> createState() => _TrackingControlButtonState();
@@ -214,13 +239,30 @@ class _TrackingControlButtonState extends State<TrackingControlButton>
       return;
     }
 
-    final trackingStatus = await _control.status();
+    // 稼働が確認できるまで短い間隔で確認し直す（[widget.startStatusPollInterval]
+    // のドキュメント参照。開始直後の1回だけでは false が返りうる）。
+    final isRunning = await _pollUntilRunning();
     if (!mounted) return;
     setState(() {
-      _isRunning = trackingStatus.isRunning;
+      _isRunning = isRunning;
       _busy = false;
     });
     _recordingNotifier.value = _isRunning;
+  }
+
+  /// 稼働状態が確認できるまで [TrackingControlButton.startStatusPollAttempts] 回まで
+  /// 確認し直す。確認できなければ false（停止中扱い）を返す。
+  Future<bool> _pollUntilRunning() async {
+    for (var attempt = 0; attempt < widget.startStatusPollAttempts; attempt++) {
+      final status = await _control.status();
+      if (!mounted) return false;
+      if (status.isRunning) return true;
+      if (attempt < widget.startStatusPollAttempts - 1) {
+        await Future<void>.delayed(widget.startStatusPollInterval);
+        if (!mounted) return false;
+      }
+    }
+    return false;
   }
 
   Future<void> _showGuidance(LocationPermissionState state) {
