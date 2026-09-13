@@ -83,9 +83,15 @@ def _hex_id_of(lat: float, lon: float) -> int:
 
 def extract_pois(
     pbf_path: Path, proj: LocalProjection, include_tier2: bool
-) -> tuple[list[dict], dict[tuple[str, str], int]]:
-    """POI レコードの一覧（`hex_id`計算済み・パック範囲外除外は未実施）と、
-    タグ別のヒット件数（除外前）を返す。"""
+) -> list[dict]:
+    """POI レコードの一覧を返す（`hex_id`計算済み・パック範囲外除外は未実施。
+    パック範囲外除外は `exclude_out_of_pack_hex` が呼び出し元で行う）。
+
+    タグ別・Tier別の件数は本関数内でログに出すのみで戻り値には含めない
+    （`pack_meta` に書くタグ別・Tier別件数は、パック範囲外除外**後**の
+    `records` から呼び出し元が集計する。本関数内の集計はまだ除外前であり、
+    そのまま`pack_meta`に書くと`poi_count`〔除外後〕と合計が食い違う
+    ―― advisor 2026-09-13指摘）。"""
     wkbfab = osmium.geom.WKBFactory()
     records: list[dict] = []
     per_kind_hits: dict[tuple[str, str], int] = {}
@@ -172,10 +178,14 @@ def extract_pois(
         "tag hits (before name filter; leisure=park is counted here only after "
         f"passing the area threshold): { {f'{k}={v}': c for (k, v), c in per_kind_hits.items()} }"
     )
-    log(f"kept per kind: { {f'{k}={v}': c for (k, v), c in per_kind_kept.items()} }")
+    log(
+        "kept per kind (before pack-hex exclusion — see poi_count_by_kind in "
+        f"pack_meta for the final, post-exclusion counts): "
+        f"{ {f'{k}={v}': c for (k, v), c in per_kind_kept.items()} }"
+    )
     log(f"excluded: no_name={n_no_name} park_too_small={n_park_too_small}")
 
-    return records, per_kind_kept
+    return records
 
 
 def read_pack_hex_id_set(pack_sqlite_path: Path) -> set[int]:
@@ -276,7 +286,7 @@ def main() -> None:
         f"scanning {input_path} for POI tags (Tier 1"
         f"{'+Tier 2' if include_tier2 else ' only'}) ..."
     )
-    records, per_kind_kept = extract_pois(input_path, proj, include_tier2=include_tier2)
+    records = extract_pois(input_path, proj, include_tier2=include_tier2)
 
     ids = [r["id"] for r in records]
     if len(ids) != len(set(ids)):
@@ -290,9 +300,14 @@ def main() -> None:
     records, n_excluded_out_of_pack_hex = exclude_out_of_pack_hex(records, pack_hex_ids)
     log(f"excluded out-of-pack-hex POIs: {n_excluded_out_of_pack_hex}")
 
+    # `pack_meta` に書くタグ別・Tier別件数は、パック範囲外除外**後**の `records` から
+    # 集計する（`poi_count`〔除外後〕と合計が一致するようにするため。`extract_pois`
+    # 内のログ出力はまだ除外前の集計であり、これとは別物 — advisor 2026-09-13指摘）。
     per_tier_kept: dict[int, int] = {1: 0, 2: 0}
+    per_kind_kept: dict[str, int] = {}
     for r in records:
         per_tier_kept[r["tier"]] = per_tier_kept.get(r["tier"], 0) + 1
+        per_kind_kept[r["kind"]] = per_kind_kept.get(r["kind"], 0) + 1
 
     elapsed = time.perf_counter() - t0
     input_pbf_sha256 = sha256_of_file(input_path)
@@ -307,9 +322,7 @@ def main() -> None:
         "poi_count_by_tier": json.dumps(
             {str(k): v for k, v in per_tier_kept.items()}, ensure_ascii=False
         ),
-        "poi_count_by_kind": json.dumps(
-            {f"{k}={v}": c for (k, v), c in per_kind_kept.items()}, ensure_ascii=False
-        ),
+        "poi_count_by_kind": json.dumps(per_kind_kept, ensure_ascii=False),
         "poi_excluded_out_of_pack_hex_count": str(n_excluded_out_of_pack_hex),
         "poi_hex_poi_count": str(len(records)),
         "input_pbf": str(input_path.name),
