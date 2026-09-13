@@ -434,5 +434,173 @@ void main() {
       expect(coordinator.points, 2);
       expect(ledger.calls.last.watermarkRowId, 3);
     });
+
+    // Issue #149・T062: HUD（`walk_stats_hud.dart`）が表示する
+    // 「今回の記録での歩行距離・歩数」の積算ロジック。
+    group('sessionDistanceMeters / sessionStepCount（HUD 用・Issue #149）', () {
+      test('倍率0（モック位置疑い）で計上されない区間でも、生の移動距離は積算される', () async {
+        final ledger = _FakeLedger();
+        final coordinator = OpeningPointAccrualCoordinator(ledger: ledger);
+        await coordinator.initialize();
+
+        await coordinator.accrue(_record(rowId: 1, northMeters: 0, timestamp: _baseTime));
+        await coordinator.accrue(
+          _record(
+            rowId: 2,
+            northMeters: 3000,
+            timestamp: _baseTime.add(const Duration(seconds: 2160)),
+            spoofSuspected: true,
+          ),
+        );
+
+        // ポイントは増えない（既存の「付与倍率0」テストと同じ）が、HUD 用の
+        // 「歩行距離」は付与倍率とは無関係に実際に移動した距離を積算する。
+        expect(coordinator.points, 0);
+        expect(coordinator.sessionDistanceMeters, closeTo(3000, 1));
+      });
+
+      test('セッションが変わると歩行距離・歩数が0に戻る', () async {
+        final ledger = _FakeLedger();
+        final coordinator = OpeningPointAccrualCoordinator(ledger: ledger);
+        await coordinator.initialize();
+
+        await coordinator.accrue(
+          _record(
+            rowId: 1,
+            northMeters: 0,
+            timestamp: _baseTime,
+            sessionId: 'session-a',
+            cumulativeStepCount: 100,
+          ),
+        );
+        await coordinator.accrue(
+          _record(
+            rowId: 2,
+            northMeters: 3200,
+            timestamp: _baseTime.add(const Duration(seconds: 2160)),
+            sessionId: 'session-a',
+            cumulativeStepCount: 4000,
+          ),
+        );
+        expect(coordinator.sessionDistanceMeters, closeTo(3200, 1));
+        expect(coordinator.sessionStepCount, 3900);
+        expect(coordinator.sessionHasStepData, isTrue);
+
+        // 新しいセッション（記録の再開）: 歩行距離・歩数・診断値が0/false/nullに戻る。
+        await coordinator.accrue(
+          _record(
+            rowId: 3,
+            northMeters: 0,
+            timestamp: _baseTime.add(const Duration(seconds: 5000)),
+            sessionId: 'session-b',
+          ),
+        );
+        expect(coordinator.sessionDistanceMeters, 0);
+        expect(coordinator.sessionStepCount, 0);
+        expect(coordinator.sessionHasStepData, isFalse);
+        expect(coordinator.lastReason, isNull);
+        expect(coordinator.lastSegmentDistanceMeters, isNull);
+      });
+
+      test('歩数センサーが無い（cumulativeStepCountが常にnull）間はsessionHasStepDataがfalseのまま', () async {
+        final ledger = _FakeLedger();
+        final coordinator = OpeningPointAccrualCoordinator(ledger: ledger);
+        await coordinator.initialize();
+
+        await coordinator.accrue(_record(rowId: 1, northMeters: 0, timestamp: _baseTime));
+        await coordinator.accrue(
+          _record(
+            rowId: 2,
+            northMeters: 100,
+            timestamp: _baseTime.add(const Duration(seconds: 90)),
+          ),
+        );
+
+        expect(coordinator.sessionHasStepData, isFalse);
+        expect(coordinator.sessionStepCount, 0);
+      });
+
+      test('歩数センサーの巻き戻り（端末再起動相当）は減算せず、新しい基準値から加算し直す', () async {
+        final ledger = _FakeLedger();
+        final coordinator = OpeningPointAccrualCoordinator(ledger: ledger);
+        await coordinator.initialize();
+
+        await coordinator.accrue(
+          _record(rowId: 1, northMeters: 0, timestamp: _baseTime, cumulativeStepCount: 5000),
+        );
+        await coordinator.accrue(
+          _record(
+            rowId: 2,
+            northMeters: 100,
+            timestamp: _baseTime.add(const Duration(seconds: 90)),
+            cumulativeStepCount: 5100,
+          ),
+        );
+        expect(coordinator.sessionStepCount, 100);
+
+        // センサー/端末の再起動で歩数が巻き戻る。
+        await coordinator.accrue(
+          _record(
+            rowId: 3,
+            northMeters: 200,
+            timestamp: _baseTime.add(const Duration(seconds: 180)),
+            cumulativeStepCount: 10,
+          ),
+        );
+        // 巻き戻り分は減算しない（既存の100歩のまま）。
+        expect(coordinator.sessionStepCount, 100);
+
+        await coordinator.accrue(
+          _record(
+            rowId: 4,
+            northMeters: 300,
+            timestamp: _baseTime.add(const Duration(seconds: 270)),
+            cumulativeStepCount: 60,
+          ),
+        );
+        // 巻き戻り後の新しい基準値（10）から加算される。
+        expect(coordinator.sessionStepCount, 150);
+      });
+
+      test('起動のたびに全件が流れ直しても、記録中セッションの歩行距離・歩数は失われない（アプリ再起動をまたぐ復元）', () async {
+        final ledger = _FakeLedger();
+        final coordinator = OpeningPointAccrualCoordinator(ledger: ledger);
+        await coordinator.initialize();
+
+        final r1 = _record(
+          rowId: 1,
+          northMeters: 0,
+          timestamp: _baseTime,
+          cumulativeStepCount: 0,
+        );
+        final r2 = _record(
+          rowId: 2,
+          northMeters: 3200,
+          timestamp: _baseTime.add(const Duration(seconds: 2160)),
+          cumulativeStepCount: 4000,
+        );
+        await coordinator.accrue(r1);
+        await coordinator.accrue(r2);
+        expect(coordinator.sessionDistanceMeters, closeTo(3200, 1));
+        expect(coordinator.sessionStepCount, 4000);
+
+        // 「アプリ再起動」を模す。同じ記録セッション（同一 sessionId）が
+        // 続いている状態で、ledger の watermark はそのまま新しいコーディネータへ
+        // 引き継がれる。NativePositionProvider は起動のたびに記録の先頭から
+        // 全件を再生するため、r1・r2 が再び届く。
+        final restarted = OpeningPointAccrualCoordinator(ledger: ledger);
+        await restarted.initialize();
+        expect(restarted.sessionDistanceMeters, 0); // 再起動直後はまだ0
+
+        await restarted.accrue(r1);
+        await restarted.accrue(r2);
+
+        // ledger への書き込みは増えない（二重計上防止は従来どおり）が、
+        // HUD 用の歩行距離・歩数は re-play によって正しく復元される。
+        expect(ledger.calls, hasLength(2));
+        expect(restarted.sessionDistanceMeters, closeTo(3200, 1));
+        expect(restarted.sessionStepCount, 4000);
+      });
+    });
   });
 }

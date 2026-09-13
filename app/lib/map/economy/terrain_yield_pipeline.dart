@@ -45,8 +45,16 @@ class TerrainYieldPipelineStats {
 }
 
 /// [TerrainYieldPipeline] が処理済みの位置について保持する、開放ポイント
-/// （歩行距離換算）の観測用スナップショット（`kDebugMode` のデバッグパネル表示専用。
-/// Issue #143）。
+/// （歩行距離換算）の観測用スナップショット（Issue #143）。
+///
+/// ## `kDebugMode` 専用ではなくなった（Issue #149・T062）
+/// 当初は `kDebugMode` のデバッグパネル（[OpeningPointDebugPanel]）表示専用
+/// だったが、[sessionDistanceMeters]・[sessionStepCount]・[sessionHasStepData] の
+/// 追加により、release ビルドでも常に表示する製品UIの HUD
+/// （`app/lib/features/map/widgets/walk_stats_hud.dart`）もこの型を読む。
+/// [points]・[remainderMillimeters]・[watermarkRowId]・[lastSegmentDistanceMeters]・
+/// [lastAppliedMultiplier]・[lastReason] は引き続きデバッグパネル向けの詳細診断値
+/// という位置づけのまま変更していない。
 class OpeningPointPipelineStats {
   const OpeningPointPipelineStats({
     required this.points,
@@ -55,6 +63,9 @@ class OpeningPointPipelineStats {
     this.lastSegmentDistanceMeters,
     this.lastAppliedMultiplier,
     this.lastReason,
+    this.sessionDistanceMeters = 0,
+    this.sessionStepCount = 0,
+    this.sessionHasStepData = false,
   });
 
   factory OpeningPointPipelineStats.initial() => const OpeningPointPipelineStats(
@@ -80,6 +91,18 @@ class OpeningPointPipelineStats {
 
   /// 直近の区間の [RewardSegmentReason]（倍率がその値になった理由）。
   final RewardSegmentReason? lastReason;
+
+  /// 今回の記録での歩行距離〔m〕の積算値（HUD 用・Issue #149）。
+  /// `OpeningPointAccrualCoordinator.sessionDistanceMeters` のドキュメント参照。
+  final double sessionDistanceMeters;
+
+  /// 今回の記録での歩数の積算値（HUD 用・Issue #149）。[sessionHasStepData] が
+  /// false の間は意味を持たない。
+  final int sessionStepCount;
+
+  /// 今回の記録で歩数センサーの値を一度でも観測できたか（HUD 用・Issue #149）。
+  /// false の間、HUD は歩数欄そのものを表示しない。
+  final bool sessionHasStepData;
 }
 
 /// 位置1件ごとに「地形産出の計上」→「開放ポイント（歩行距離換算）の計上」→
@@ -222,6 +245,9 @@ class TerrainYieldPipeline {
       points: openingPointCoordinator.points,
       remainderMillimeters: openingPointCoordinator.remainderMillimeters,
       watermarkRowId: openingPointCoordinator.watermarkRowId,
+      sessionDistanceMeters: openingPointCoordinator.sessionDistanceMeters,
+      sessionStepCount: openingPointCoordinator.sessionStepCount,
+      sessionHasStepData: openingPointCoordinator.sessionHasStepData,
     );
 
     final iterator = StreamIterator<LocationPointRecord>(recordedPositionUpdates);
@@ -262,6 +288,9 @@ class TerrainYieldPipeline {
             lastSegmentDistanceMeters: openingPointCoordinator.lastSegmentDistanceMeters,
             lastAppliedMultiplier: openingPointCoordinator.lastAppliedMultiplier,
             lastReason: openingPointCoordinator.lastReason,
+            sessionDistanceMeters: openingPointCoordinator.sessionDistanceMeters,
+            sessionStepCount: openingPointCoordinator.sessionStepCount,
+            sessionHasStepData: openingPointCoordinator.sessionHasStepData,
           );
         } catch (e, stackTrace) {
           _log('位置の処理中にエラーが発生しました（この位置はスキップして次に進みます）: $e');
