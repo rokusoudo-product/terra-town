@@ -158,10 +158,13 @@ related:
 **ポイント開放経路のSnackBar表示タイミングに注意**: `HexOpeningSheet`
 （モーダルボトムシート）が開いている間にSnackBarを表示すると、Scaffold上に
 表示されるSnackBarがモーダルの背面に隠れて利用者に見えない。そのため
-`HexOpeningSheet` は「閉じる」ボタンで `HexOpeningAttemptResult`（収集結果を
-含む）を `Navigator.pop` の戻り値として返すよう変更し、`map_screen.dart` の
-`_handleFogHexTapped` は `showModalBottomSheet` の `Future` が完了した
-（＝シートが完全に閉じた）後にSnackBarを表示する。
+`map_screen.dart` の `_handleFogHexTapped` は `onConfirm`
+（`TerrainYieldPipeline.openHexWithPoints`）の結果を自前で捕まえておき、
+`showModalBottomSheet` の `Future` が完了した（＝シートが完全に閉じた）後に
+SnackBarを表示する。**シート側の `Navigator.pop()` 戻り値には依存しない**
+（advisor指摘・2026-09-14）: 利用者が「閉じる」ボタンではなくスワイプ／
+バリアタップで閉じた場合、`pop()` は引数なしで呼ばれ戻り値が `null` になる
+ため、戻り値方式だとその経路だけSnackBarが出ない抜け漏れが生まれるため。
 
 SnackBarは `SnackBarBehavior.floating` ＋ `AppSpacing` トークンによる
 下マージン（`AppSpacing.xxxl + AppSpacing.sm`）で、画面下部の既存の製品UI
@@ -212,10 +215,12 @@ LIMIT 20;
 5. （余裕があれば）名所付きの別の未開示ヘクスへ実際に歩いて到達し、
    「名所『○○』を図鑑に登録しました（現地で発見）」のSnackBarが表示され、
    `collection.collect_method` が `walk` で記録されることを確認する。
-6. （余裕があれば）手順2または5で一度収集した名所と同じヘクスに対し、
-   デバッグパネルの「DBから復元」等でもう一度同じヘクスの開示処理を
-   走らせても、`collection` の行が増えない（`poi_id` 主キーで冪等）ことを
-   確認する。
+6. （余裕があれば）手順2でポイント開放した名所付きヘクスへ、後から実際に
+   歩いて到達してみる。`disclosed_hex` は既にそのヘクスを持っているため
+   `DisclosureService.recordPosition` は「既知」と判定し何も起きない
+   （`LandmarkAwareDisclosedHexRepository` は開示済みヘクスへの `save` 自体を
+   スキップする）。`collection` テーブルの行数が手順3から変わらないこと
+   （`poi_id` 主キーで冪等・遡及収集も発生しないこと）を確認する。
 
 **確認できないこと（実機で追加検証が必要な既知の未検証事項）**:
 

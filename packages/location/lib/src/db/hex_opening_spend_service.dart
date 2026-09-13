@@ -149,9 +149,10 @@ class HexOpeningSpendService {
   /// 呼び出し側は事前に `evaluateHexOpening` で `canOpen: true`（隣接・地域パック
   /// 範囲内であること）を確認していること。[terrainType]・[packVersion] は
   /// その判定で得られた値（[HexOpeningEvaluation.terrainType]・
-  /// `RegionPack.version`）をそのまま渡すこと——本クラスは `RegionPack` を
-  /// 保持せず、`RegionPack.terrainOf` を再度呼ばない
-  /// （`region_pack.dart`「呼んでよいのは新規開示の瞬間だけ」を、
+  /// `RegionPack.version`）をそのまま渡すこと——本クラスが `RegionPack` を
+  /// 保持している場合（[_regionPack]・Issue #159の名所収集用）でも
+  /// `RegionPack.terrainOf` は一切呼ばない（`pointsOfInterestIn` の呼び出しのみに
+  /// 使う。`region_pack.dart`「呼んでよいのは新規開示の瞬間だけ」を、
   /// `evaluateHexOpening` の呼び出し1回に集約する設計。クラスdoc参照）。
   Future<HexOpeningSpendResult> spend({
     required HexId hexId,

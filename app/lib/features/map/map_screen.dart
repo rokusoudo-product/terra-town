@@ -520,11 +520,17 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   /// 同ファイルのクラスdoc参照）を開く。
   ///
   /// ## シートが閉じた後にSnackBarを表示する（Issue #159・T070）
-  /// シートが返す [HexOpeningAttemptResult.collectedLandmarks] を
-  /// `showModalBottomSheet` の `Future` 完了後（＝シートが完全に閉じた後）に
-  /// 読み、新規収集があれば [_showLandmarkCollectedSnackBar] を呼ぶ
-  /// （`HexOpeningSheet` クラスdoc参照。モーダル表示中にSnackBarを出すと
-  /// 背面に隠れて見えないため）。
+  /// [onConfirm]（[TerrainYieldPipeline.openHexWithPoints]）の結果を
+  /// [_lastHexOpeningAttempt] に自前で捕まえておき、`showModalBottomSheet` の
+  /// `Future` 完了後（＝シートが完全に閉じた後）に読んで、新規収集があれば
+  /// [_showLandmarkCollectedSnackBar] を呼ぶ。
+  ///
+  /// **シート側の `Navigator.pop()` 戻り値には依存しない**（advisor指摘・
+  /// 2026-09-14）: 利用者がスワイプで閉じる・モーダルの外側をタップして
+  /// 閉じるといった `HexOpeningSheet` の「閉じる」ボタン以外の一般的な
+  /// dismiss操作では `pop()` が引数なしで呼ばれ、戻り値が `null` になる。
+  /// これに依存すると、その場合だけ収集していてもSnackBarが出ないという
+  /// 抜け漏れが生まれる（`HexOpeningSheet` クラスdoc参照）。
   void _handleFogHexTapped(int featureId) {
     final hexId = _hexIdByFeatureId?[featureId];
     final pipeline = _pipeline;
@@ -540,17 +546,23 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       currentPoints: pipeline.openingPointCoordinator.points,
     );
 
-    final sheetResult = showModalBottomSheet<HexOpeningAttemptResult?>(
+    HexOpeningAttemptResult? lastAttempt;
+    final sheetClosed = showModalBottomSheet<void>(
       context: context,
       builder: (context) => HexOpeningSheet(
         evaluation: evaluation,
         currentPoints: pipeline.openingPointCoordinator.points,
-        onConfirm: () => pipeline.openHexWithPoints(hexId),
+        onConfirm: () async {
+          final attempt = await pipeline.openHexWithPoints(hexId);
+          lastAttempt = attempt;
+          return attempt;
+        },
       ),
     );
-    unawaited(sheetResult.then((result) {
-      if (result == null) return;
-      _showLandmarkCollectedSnackBar(result.collectedLandmarks);
+    unawaited(sheetClosed.then((_) {
+      final attempt = lastAttempt;
+      if (attempt == null) return;
+      _showLandmarkCollectedSnackBar(attempt.collectedLandmarks);
     }));
   }
 
