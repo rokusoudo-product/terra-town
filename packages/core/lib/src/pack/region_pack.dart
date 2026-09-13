@@ -90,4 +90,18 @@ abstract interface class RegionPack {
   /// （`districtOf`/`pointsOfInterest` と同じ forward-compat 方針。
   /// `RegionPackRepository` 実装のクラスコメント参照）。
   Iterable<HexId> neighborsOf(HexId hexId);
+
+  /// [hexId] に属する名所POIの一覧（Issue #158）。
+  ///
+  /// 出典: `docs/landmark_objects.md` §3.2「未開示ヘクス上のオブジェクトの見せ方」
+  /// 「収集（開放）の2手段」に必要な「あるヘクスにどの名所が属するか」を提供する。
+  /// `tools/pack-builder/extract_poi.py` がパック生成時にH3で事前計算し、
+  /// `region_pack.sqlite` の `hex_poi` テーブルに格納したものを読み取るだけであり、
+  /// `core` は緯度経度→ヘクスの変換ロジックを持たない（GPS_ARCHITECTURE準拠。
+  /// [neighborsOf] と同じ設計）。
+  ///
+  /// **`hex_poi`が同梱されていない旧パック、[hexId]に対応するPOIが無い、または
+  /// このパックに収録されていない[hexId]に対しては空のイテラブルを返す**（[neighborsOf]
+  /// と同じ forward-compat 方針。`RegionPackRepository` 実装のクラスコメント参照）。
+  Iterable<PointOfInterest> pointsOfInterestIn(HexId hexId);
 }

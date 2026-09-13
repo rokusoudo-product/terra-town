@@ -31,6 +31,9 @@ class _FakeRegionPack implements RegionPack {
 
   @override
   Iterable<HexId> neighborsOf(HexId hexId) => const [];
+
+  @override
+  Iterable<PointOfInterest> pointsOfInterestIn(HexId hexId) => const [];
 }
 
 /// `Repository<DisclosedHex, HexId>` のオンメモリフェイク

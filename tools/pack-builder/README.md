@@ -35,7 +35,7 @@ hex_terrainのヘクス集合 → H3で距離1の隣接候補を計算 → パ�
 
 ## スコープ
 
-本ツールが実装するのはこれだけ（Issue #38・#85・#86・#94・#152）:
+本ツールが実装するのはこれだけ（Issue #38・#85・#86・#94・#152・#158）:
 
 - 対象エリア1つ分の OSM抽出 → 地形属性の事前計算 → SQLite出力（Issue #38・T040）
 - 分類結果の抜き取り検証・決定論の検証（Issue #38）
@@ -46,6 +46,8 @@ hex_terrainのヘクス集合 → H3で距離1の隣接候補を計算 → パ�
 - **パック生成のCI化（Issue #85・T045・`.github/workflows/pack-build.yml`）**
 - **行政区域ポリゴン（国土数値情報N03）の取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041）**
 - **名所POI（OSM観光POI・Tier 1）の抽出（Issue #86・T042）**
+- **名所POI Tier 2（補完層）の抽出・POI→ヘクス対応（`hex_poi`）の事前計算・パック範囲外
+  POIの除外（Issue #158。下記「出力（`out/poi.sqlite`）のテーブル構成」参照）**
 - **行政区域・名所POIを`region_pack.sqlite`へ統合し`app/assets/pack/`に同梱（Issue #94。
   下記「出力（`out/region_pack.sqlite`）の統合」参照）**
 - **ヘクス隣接関係の事前計算・同梱（Issue #152。下記「ヘクス隣接関係」参照）**
@@ -59,8 +61,11 @@ hex_terrainのヘクス集合 → H3で距離1の隣接候補を計算 → パ�
   本READMEにのみ記録した（下記「データソースとライセンス」参照）。画面上での常時表示は
   T108（未実装）の担当であり、本Issueでは実装していない
 - 名所オブジェクトのゲーム内仕様（`is_bonus`・収集判定・報酬計算等。Issue #6・`docs/landmark_objects.md`）
-- Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）の抽出（`poi_rules.py`のdocstring参照。
-  目標密度・allowlistとも仮値/未整備のため実装しない）
+- Tier 2 の**自動密度判定**（「地域内の主要層密度が目標密度を下回る場合のみ採用」）は
+  実装しない。Issue #158で`config.POI_INCLUDE_TIER2`による一律の有効/無効化に置き換えた
+  （下記「既知の簡略化・未解決事項」参照）
+- ボーナスオブジェクト（allowlist照合）の抽出（`poi_rules.py`のdocstring参照。
+  allowlist未整備のため実装しない）
 - 開放ポイント消費による隣接制約の実装そのもの（Issue #151。本ツールは`hex_neighbor`の
   データを用意するところまで）
 - 立入禁止エリアの判定（別Issue・MVP対象外）
@@ -242,9 +247,10 @@ bash download_n03.sh
 # 13. 行政区域の決定論検証（2回生成して district・hex_district が一致することを確認）
 ./.venv/bin/python verify_districts_determinism.py
 
-# 14. 名所POI（OSM観光POI・Tier 1）の抽出（約2〜3秒）
+# 14. 名所POI（OSM観光POI・Tier 1+2）の抽出とhex_poiの事前計算（Issue #158・約2〜3秒。
+#     out/pack.sqlite の hex_terrain を先に生成しておくこと＝1番を先に実行済みであること）
 ./.venv/bin/python extract_poi.py
-# out/poi.sqlite が生成される（テーブル: poi, pack_meta）
+# out/poi.sqlite が生成される（テーブル: poi, hex_poi, pack_meta）
 
 # 15. POI抽出の決定論検証
 ./.venv/bin/python verify_poi_determinism.py
@@ -261,7 +267,7 @@ bash download_n03.sh
 #     生成しておくこと。約0.1秒）
 ./.venv/bin/python slim_pack_for_bundle.py
 # out/region_pack.sqlite が生成される（テーブル: hex_terrain, district, hex_district,
-# poi, hex_neighbor, pack_meta。実測 約5.5MB）
+# poi, hex_poi, hex_neighbor, pack_meta）
 ```
 
 上記3（`classify_terrain.py`）・7（`build_vector_tiles.sh`）・18（`slim_pack_for_bundle.py`）
@@ -308,23 +314,39 @@ Feature id の検証（10）は含まれない**ため、それらは別途上�
 影響は軽微な一方、クリップは切断線上でのトポロジ再構築という別のリスクを持ち込むため、
 本Issueでは採用しなかった（`extract_districts.py`冒頭のdocstring参照）。
 
-## 出力（`out/poi.sqlite`）のテーブル構成（T042）
+## 出力（`out/poi.sqlite`）のテーブル構成（T042・`hex_poi`はIssue #158）
 
 | テーブル | 列 | 説明 |
 |---|---|---|
 | `poi` | `id, lat, lon, kind, name` | 名所POI 1件。`id`はOSMの型を含む文字列（`node/<id>`・`way/<id>`・`relation/<id>`）。`kind`はマッチしたOSMタグ（例: `tourism=viewpoint`）。plan.md §3.2の`poi(id, lat, lon, kind, name)`に一致 |
-| `pack_meta` | `key, value` | 生成条件（データソース・ライセンス・タグ層〔Tier 1のみ〕・面積しきい値・タグ別件数・入力ファイルのSHA256等） |
+| `hex_poi` | `poi_id, hex_id` | POI→ヘクス対応。`poi_id`が`poi.id`、`hex_id`が所属ヘクスのH3 index。`poi_id`にUNIQUE制約（`PRIMARY KEY`）・`hex_id`に非UNIQUEインデックス（1ヘクスに複数POIを許容） |
+| `pack_meta` | `key, value` | 生成条件（データソース・ライセンス・タグ層〔Tier 1のみ/Tier 1+2〕・面積しきい値・タグ別/Tier別件数・パック範囲外除外件数・入力ファイルのSHA256等） |
 
-**Tier 1のみを実装（`poi_rules.py`）**: `docs/landmark_objects.md` §2.1のTier 1
-（`tourism=attraction`/`viewpoint`/`artwork`/`museum`/`gallery`/`zoo`/`theme_park`、
-`historic=monument`/`memorial`/`castle`/`ruins`/`archaeological_site`、
-`leisure=park`〔面積`config.POI_PARK_MIN_AREA_M2`以上〕）のみを抽出する。
-Tier 2（補完層）・ボーナスオブジェクト（`is_bonus`・allowlist照合）は実装していない
-（理由は下記「既知の簡略化・未解決事項」）。
+**Tier 1 + Tier 2（`config.POI_INCLUDE_TIER2`で切り替え。既定で有効）**:
+`docs/landmark_objects.md` §2.1のTier 1（`tourism=attraction`/`viewpoint`/`artwork`/
+`museum`/`gallery`/`zoo`/`theme_park`、`historic=monument`/`memorial`/`castle`/`ruins`/
+`archaeological_site`、`leisure=park`〔面積`config.POI_PARK_MIN_AREA_M2`以上〕）を常に、
+Tier 2（`amenity=place_of_worship`、`historic=wayside_cross`/`milestone`、
+`man_made=tower`/`lighthouse`、`natural=tree`〔`denotation=natural_monument`のみ〕、
+`tourism=picnic_site`/`information`）をフラグが真のときに抽出する。1つの地物が両方に
+該当する場合はTier 1のkindを採用する（`poi_rules.matched_tag`がTier 1を先に判定）。
+自動密度判定（「地域内の主要層密度が目標密度を下回る場合のみTier 2採用」）は実装せず、
+一律の有効/無効フラグに簡略化した（理由は下記「既知の簡略化・未解決事項」）。
+ボーナスオブジェクト（`is_bonus`・allowlist照合）は引き続き実装していない。
 
 **名称のない地物は除外する**: `name`→`name:ja`の順でフォールバックし、いずれも
 持たない地物は`poi`に含めない（名所図鑑〔Issue #12〕上、名称のない地物は意味を
-持たないため）。
+持たないため。Tier 2にも同じ基準を適用する）。
+
+**POI→ヘクス対応（`hex_poi`）とパック範囲外POIの除外（Issue #158）**: 各POIの
+（丸め済みの）緯度経度から`h3.latlng_to_cell(..., config.H3_RESOLUTION)`でヘクスIDを
+求める（`classify_terrain.py`・`compute_hex_neighbors.py`と同一のアルゴリズム）。
+求めたヘクスIDが`<pack-sqlite>`（既定`out/pack.sqlite`）の`hex_terrain`に無い
+（＝パック範囲外）POIは`poi`・`hex_poi`の両方から除外し、除外件数を
+`pack_meta.poi_excluded_out_of_pack_hex_count`に記録する（開示できないヘクスの名所は
+収集不能なため。Issue #158受け入れ基準）。この依存により、**`extract_poi.py`は
+`classify_terrain.py`の後に実行する必要がある**（`bundle_region_pack.sh`・
+`.github/workflows/pack-build.yml`は元々この順序だったため変更不要）。
 
 ## 出力（`out/hex_neighbor.sqlite`）のテーブル構成・ヘクス隣接関係（Issue #152）
 
@@ -372,8 +394,10 @@ fail-loudで検証する。下記「出力（`out/region_pack.sqlite`）の統�
 `slim_pack_for_bundle.py`が、これまで別々の`out/*.sqlite`だった4つの出力
 （`pack.sqlite`・`districts.sqlite`・`poi.sqlite`・`hex_neighbor.sqlite`）を
 1つの`region_pack.sqlite`（テーブル: `hex_terrain, district, hex_district, poi,
-hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #94本文コメント）
+hex_poi, hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #94本文コメント）
 「#94と#152は同じパック作り直しにまとめること」に従い、両方の統合窓口を1本化した。**
+`hex_poi`（Issue #158で`poi.sqlite`に追加されたテーブル）も同じ`poi.sqlite`から
+取り込むため、統合窓口自体の追加変更は不要だった。
 
 **統合前の整合性チェック（fail-loud）**: 4つの入力は別々のスクリプト・別々の実行時刻で
 生成されうるため、黙って統合すると「古い`districts.sqlite`と新しい`pack.sqlite`を
@@ -384,6 +408,9 @@ hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #9
   **完全一致**すること
 - `districts.sqlite`の`hex_district`のhex_id集合が`hex_terrain`の**部分集合**であること
 - `districts.sqlite`の`pack_meta`に`n03_sha256_11`・`n03_sha256_13`が存在すること
+- `poi.sqlite`の`hex_poi`の`poi_id`集合が`poi`の`id`集合と**完全一致**すること（Issue #158）
+- `poi.sqlite`の`hex_poi`のhex_id集合が`hex_terrain`の**部分集合**であること（Issue #158。
+  `extract_poi.py`が既にパック範囲外を除外済みだが、`hex_district`と同じ理由で再検証する）
 
 **`pack_meta`のキー名前空間**: 4つの入力はそれぞれ独立したスクリプトが書いており、
 `generated_at_utc`・`generation_seconds`・`h3_py_version`・`shapely_version`・
@@ -463,13 +490,26 @@ hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #9
 1. `input_pbf_sha256`（`area.osm.pbf`。地形・POI抽出の入力）
 2. `n03_sha256_11`・`n03_sha256_13`（N03行政区域データ、都道府県別GMLzip。埼玉県・東京都）
 3. `poi_rules_sha256`（`poi_rules.py`のファイル内容のsha256。POI抽出ルールの変更を捕捉）
+4. `poi_tag_tier`（Issue #158で追加。`poi.sqlite`の`pack_meta.poi_tag_tier`＝
+   `config.POI_INCLUDE_TIER2`を反映した`"tier1_and_tier2"`/`"tier1_only"`。
+   `POI_INCLUDE_TIER2`だけを切り替えると`poi`の中身は変わるが`poi_rules.py`自体は
+   変わらないため、`poi_rules_sha256`だけでは捕捉できない抜け穴だった）
 
-`{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{上記4値を連結した文字列のsha256先頭12桁}`という形式
+`{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{上記5値を連結した文字列のsha256先頭12桁}`という形式
 （`classify_terrain.py`と同じ「生成時刻・生成順序に依存しない純関数」という設計方針を踏襲）。
 実際に使った各値は`region_pack.sqlite`の`pack_meta`に監査用キー
 （`pack_version_input_pbf_sha256`・`pack_version_n03_sha256_11`・
-`pack_version_n03_sha256_13`・`pack_version_poi_rules_sha256`）としてそのまま残るため、
-後から「何が版に効いたか」を追える。
+`pack_version_n03_sha256_13`・`pack_version_poi_rules_sha256`・
+`pack_version_poi_tag_tier`）としてそのまま残るため、後から「何が版に効いたか」を追える。
+
+**Issue #158では`PACK_SCHEMA_VERSION`を上げていない**: Issue #152の前例（`hex_neighbor`
+テーブル新設時も据え置き）に倣った。本Issueで変わる`poi`の中身は`poi_rules_sha256`・
+`poi_tag_tier`という既存の入力経由で`pack_version`に反映されるため、別途の手動
+インクリメントは不要と判断した。ただし`extract_poi.py`のPOI→ヘクス対応（`hex_poi`）の
+算出ロジック自体（緯度経度の丸め桁数・パック範囲外の除外条件等）を将来変更する場合は、
+`hex_geometry.py`・`hex_neighbors.py`と同じく`input_pbf_sha256`等の既存ハッシュでは
+捕捉できないため、`config.PACK_SCHEMA_VERSION`を手動でインクリメントすること
+（`config.py`の`PACK_SCHEMA_VERSION`コメントに追記済み）。
 
 **`hex_neighbor`（ヘクス隣接関係・Issue #152）は`pack_version`のハッシュ入力に
 含めていない**: `hex_terrain`のヘクス集合とH3ライブラリのみに依存する純関数であり、
@@ -616,23 +656,27 @@ bash bundle_region_pack.sh
 状態で`flutter pub get`・`flutter analyze`（No issues found）・`flutter test -j 1`
 （13件全PASS）を確認済み。CIの`ci.yml`「Test app」ステップもこの状態で走る）。
 
-**実測（2026-09-13・狭山湖周辺エリア・Issue #94/#152統合後）**:
+**実測（2026-09-13・狭山湖周辺エリア・Issue #158でTier 2/`hex_poi`追加後）**:
 
 | 項目 | 値 |
 |---|---|
 | ヘクス数 | **13,106**（plan.md §3.5 の暫定上限30,000の44%） |
 | 行政区域数（`district`） | 5（埼玉県狭山市・入間市、東京都東大和市・武蔵村山市・西多摩郡瑞穂町） |
-| 名所POI数（`poi`） | 16 |
+| 名所POI数（`poi`） | **51**（Tier 1: 16件・Tier 2: 35件。内訳: `amenity=place_of_worship`34・`tourism=viewpoint`2・`museum`4・`leisure=park`2・`attraction`1・`historic=memorial`5・`artwork`2・`tourism=information`1。旧実測〔Tier 1のみ〕16件から増加） |
+| POI→ヘクス対応（`hex_poi`） | 51行（全POI）。パック範囲外ヘクスに落ちるPOIの除外は0件（実測） |
 | ヘクス隣接関係（`hex_neighbor`） | 13,106行（全ヘクス）。隣接数 最小2・最大6、6件未満（縁）469件 |
-| `pack_version`（統合後・`region_pack.sqlite`の値） | `sayamako-v1-2671a8f4ea2c`（統合前の`sayamako-v1-9a66e066b0d4`から変化。「`pack_version`」節参照） |
-| `region_pack.sqlite`（同梱分） | 約5.5MB（内訳: Issue #105で`boundary_geojson`追加前は約750KB → 追加後（Issue #105）約3.16MB → 行政区域・POI・ヘクス隣接関係を統合（Issue #94/#152）で約5.5MB。詳細は「ヘクス境界」「ヘクス隣接関係」節参照） |
-| `tiles.mbtiles`（同梱分） | 約680KB（変化なし。行政区域・POI・隣接関係はベクタタイルに含まれないため） |
-| 地形属性の事前計算（`classify_terrain.py`） | 約5.3秒 |
-| 行政区域の取り込み（`extract_districts.py`） | 約1.4秒 |
-| 名所POIの抽出（`extract_poi.py`） | 約2.3秒 |
-| ヘクス隣接関係の計算（`compute_hex_neighbors.py`） | 約0.15秒 |
+| `pack_version`（統合後・`region_pack.sqlite`の値） | `sayamako-v1-c1c59b1edb71`（Issue #94/#152統合後の`sayamako-v1-2671a8f4ea2c`から変化。`poi_rules_sha256`・`poi_tag_tier`の変更を反映。「`pack_version`」節参照） |
+| `region_pack.sqlite`（同梱分） | 約5.76MB（内訳: Issue #105で`boundary_geojson`追加前は約750KB → 追加後（Issue #105）約3.16MB → 行政区域・POI・ヘクス隣接関係を統合（Issue #94/#152）で約5.5MB → Tier 2/`hex_poi`追加（Issue #158）で約5.76MB。詳細は「ヘクス境界」「ヘクス隣接関係」節参照） |
+| `tiles.mbtiles`（同梱分） | 約680KB（変化なし。POI等はベクタタイルに含まれないため今回リビルドしていない） |
+| 地形属性の事前計算（`classify_terrain.py`） | 約5.3秒（今回リビルドせず、Issue #94/#152時点の出力を再利用） |
+| 行政区域の取り込み（`extract_districts.py`） | 約1.4秒（今回リビルドせず、Issue #94/#152時点の出力を再利用） |
+| 名所POIの抽出・`hex_poi`計算（`extract_poi.py`） | 約2.5秒 |
+| ヘクス隣接関係の計算（`compute_hex_neighbors.py`） | 約0.15秒（今回リビルドせず、Issue #152時点の出力を再利用） |
 | 統合・軽量化（`slim_pack_for_bundle.py`） | 約0.1秒 |
-| ベクタタイル生成（`build_vector_tiles.sh`） | 約34秒 |
+| ベクタタイル生成（`build_vector_tiles.sh`） | 約34秒（今回リビルドせず、既存の`tiles.mbtiles`を再利用。POI等はベクタタイルの生成元データに含まれないため） |
+
+**旧実測（2026-09-13・Issue #94/#152統合後・Tier 2追加前）**: 名所POI16件・
+`pack_version`=`sayamako-v1-2671a8f4ea2c`・`region_pack.sqlite`約5.5MB。
 
 **旧実測（2026-09-10・行政区域/POI/隣接関係を統合する前）**: ヘクス数13,106・
 `pack_version`=`sayamako-v1-9a66e066b0d4`・`region_pack.sqlite`約3.16MB・
@@ -666,13 +710,13 @@ bash bundle_region_pack.sh
 - `download_n03.sh` — 国土数値情報N03（行政区域データ）のダウンロード（Issue #86・T041）
 - `extract_districts.py` — 行政区域ポリゴンの取り込み・トポロジ保持簡略化・ヘクス帰属判定（Issue #86・T041。Issue #94で帰属表示メタを追加）
 - `verify_districts_determinism.py` — 行政区域データの決定論検証（Issue #86・T041）
-- `poi_rules.py` — `docs/landmark_objects.md` §2.1 の名所POI抽出ルール（Tier 1のみ）の実装（Issue #86・T042）
-- `extract_poi.py` — 名所POI抽出パイプライン本体（Issue #86・T042）
-- `verify_poi_determinism.py` — 名所POIデータの決定論検証（Issue #86・T042）
+- `poi_rules.py` — `docs/landmark_objects.md` §2.1 の名所POI抽出ルール（Tier 1・Tier 2）の実装（Issue #86・T042。Tier 2はIssue #158）
+- `extract_poi.py` — 名所POI抽出パイプライン本体・POI→ヘクス対応（`hex_poi`）の事前計算・パック範囲外POIの除外（Issue #86・T042・Issue #158）
+- `verify_poi_determinism.py` — 名所POI・`hex_poi`データの決定論検証（Issue #86・T042・Issue #158）
 - `hex_neighbors.py` — ヘクス隣接関係の計算ロジック（Issue #152。h3呼び出しと純粋関数を分離しテスト容易性を確保）
 - `compute_hex_neighbors.py` — ヘクス隣接関係の事前計算パイプライン本体（Issue #152）
 - `verify_hex_neighbor_determinism.py` — ヘクス隣接関係の決定論検証（Issue #152）
-- `slim_pack_for_bundle.py` — `pack.sqlite`・`districts.sqlite`・`poi.sqlite`・`hex_neighbor.sqlite`の4出力を統合し、`cell_terrain`を除いた同梱用`region_pack.sqlite`を作る（Issue #85・T044が新設・Issue #94/#152で統合窓口として拡張。整合性チェック・`pack_version`の組み直しを行う）
+- `slim_pack_for_bundle.py` — `pack.sqlite`・`districts.sqlite`・`poi.sqlite`（`hex_poi`込み）・`hex_neighbor.sqlite`の4出力を統合し、`cell_terrain`を除いた同梱用`region_pack.sqlite`を作る（Issue #85・T044が新設・Issue #94/#152/#158で統合窓口として拡張。整合性チェック・`pack_version`の組み直しを行う）
 
 ## 既知の簡略化・未解決事項
 
@@ -685,17 +729,18 @@ bash bundle_region_pack.sh
 
 ### Issue #86（行政区域・名所POI）で新たに生じた既知の簡略化・要確認事項
 
-- **Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）は未実装**:
-  `docs/landmark_objects.md` §2.1のTier 2は「地域内の主要層密度が目標密度を下回る
-  場合のみ採用」という条件付き仕様だが、目標密度自体が§3.1で「目標値・仮」と
-  明記されている仮値であり、密度判定の実装は本Issueのスコープを超えると判断した。
-  ボーナスオブジェクト（§2.2）も同様にallowlist（`bonus_landmarks.csv`相当）の
-  整備自体がplan/tasks工程の宿題として明記されている（§7）。実測: 狭山湖周辺の
-  Tier 1抽出結果は16件（`tourism=viewpoint`×2・`museum`×4・`artwork`×2・
-  `attraction`×1・`historic=memorial`×5・`leisure=park`×2）。§3.1の目標密度
-  （都市部で150〜250m四方に1件）と比較すると、25.3km²に16件は疎らであり、
-  **V-B（土地の固有性）の動機づけとして十分な密度かは要確認事項として残す**
-  （Tier 2導入の要否を含め代表確認事項）。
+- **【Issue #158（2026-09-13）で一部解決】Tier 2（補完層）POIタグは実装済み・ただし
+  自動密度判定ではなく一律フラグ**: `docs/landmark_objects.md` §2.1のTier 2は
+  「地域内の主要層密度が目標密度を下回る場合のみ採用」という条件付き仕様だが、
+  目標密度自体が§3.1で「目標値・仮」と明記されている仮値であり、**自動密度判定は
+  Issue #158でも実装しないと代表決定した**（2026-09-13）。代わりに
+  `config.POI_INCLUDE_TIER2`という一律の有効/無効フラグに簡略化し、本パックでは
+  有効にした（Tier 1のみだった旧実測16件→Tier 1+2実測は下記「バーティカルスライス
+  対象エリアの同梱」節参照）。§3.1の目標密度（都市部で150〜250m四方に1件、
+  25.3km²なら約100〜700件相当）と比較した際の妥当性は、Tier 1+2を採用してもなお
+  **要確認事項として残る**（バランス検討はIssue #158でも扱わないと代表決定済み）。
+  ボーナスオブジェクト（§2.2）はallowlist（`bonus_landmarks.csv`相当）の整備自体が
+  plan/tasks工程の宿題として明記されており（§7）、引き続き未実装。
 - **`leisure=park`の面積しきい値（`config.POI_PARK_MIN_AREA_M2` = 10,000m²＝1ha）は仮値**:
   `docs/landmark_objects.md`上「一定面積以上」としか定義されておらず具体的な
   しきい値がない。`terrain_rules.MOUNTAIN_SMALL_FEATURE_BUFFER_M`と同種の
@@ -725,10 +770,31 @@ bash bundle_region_pack.sh
   格納するのは簡略化後のポリゴンであるため、両者の間に厳密な対応はない（表示用途と
   判定用途を分離する設計判断。詳細は「出力（`out/districts.sqlite`）のテーブル構成」参照）。
   この分離が許容できるかは代表確認事項として残す（未解決のまま）。
-- **Tier 2（補完層）POIタグ・ボーナスオブジェクト（allowlist照合）・
+- **Tier 1+2 POIタグ・ボーナスオブジェクト（allowlist照合）・
   `leisure=park`の面積しきい値の妥当性**: 上記の同梱統合はデータの受け渡し経路の問題
   であり、これらの抽出ルール自体の当否（密度・しきい値が妥当か）とは別の論点のため、
-  Issue #94では判断していない（未解決のまま。上記2項目参照）。
+  Issue #94では判断していない（未解決のまま。上記2項目参照。Tier 2の採用自体は
+  Issue #158で行った）。
+
+### Issue #158（Tier 2・POI→ヘクス対応の事前計算）で新たに生じた既知の簡略化・要確認事項
+
+- **`natural=tree`の名木指定は`denotation=natural_monument`のみを対象とした**:
+  `docs/landmark_objects.md` §2.1は「`denotation=natural_monument`等の名木指定のみ」と
+  「等」を含む表現だが、他にどのようなOSMタグ慣習が名木指定に該当しうるか本文からは
+  特定できず、推測で追加すると「実在の地物に限定」（§2.1）という制約に対して過剰抽出の
+  リスクがあるため、本文が明示する`denotation=natural_monument`のみを対象とした
+  （`poi_rules.TIER2_COMPOUND_REQUIREMENTS`）。他の名木指定タグの要否は代表確認事項。
+- **`config.PACK_SCHEMA_VERSION`を上げていない判断**: 「`pack_version`」節参照。
+  Issue #152の前例（`hex_neighbor`新設時も据え置き）に倣い、本Issueで変わる`poi`の
+  中身は`poi_rules_sha256`・`poi_tag_tier`という既存の入力経由で`pack_version`に
+  反映されるため据え置いた。この判断が妥当かは代表確認事項として残す。
+- **Kotlin側の追加コード変更なし**: `extract_poi.py`のヘクスID計算は
+  `classify_terrain.py`・`compute_hex_neighbors.py`と同一の
+  `h3.latlng_to_cell(..., config.H3_RESOLUTION)`呼び出しであり、Kotlin側
+  `H3HexIndexer`との一致は既存の`generate_hex_locator_fixture.py`/
+  `H3HexIndexerTest.kt`で機械的に検証済みの経路をそのまま使う（同スクリプトに
+  実POI座標を追加する変更のみ行った）。POI→ヘクス対応そのもの（`hex_poi`テーブルの
+  読み取り）はDart側`RegionPackRepository`のみで完結し、Kotlin側の変更は無い。
 
 ### Issue #152（ヘクス隣接関係）で新たに生じた既知の簡略化・要確認事項
 

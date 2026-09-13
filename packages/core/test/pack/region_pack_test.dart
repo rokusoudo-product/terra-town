@@ -11,6 +11,7 @@ class FakeRegionPack implements RegionPack {
     this.districts = const [],
     this.pointsOfInterest = const [],
     this.neighborsByHex = const {},
+    this.pointsOfInterestByHex = const {},
   });
 
   @override
@@ -27,6 +28,9 @@ class FakeRegionPack implements RegionPack {
   /// ヘクスごとの隣接ヘクス一覧（Issue #152）。
   final Map<HexId, List<HexId>> neighborsByHex;
 
+  /// ヘクスごとの名所POI一覧（Issue #158）。
+  final Map<HexId, List<PointOfInterest>> pointsOfInterestByHex;
+
   @override
   TerrainType? terrainOf(HexId hexId) => terrainByHex[hexId];
 
@@ -35,6 +39,10 @@ class FakeRegionPack implements RegionPack {
 
   @override
   Iterable<HexId> neighborsOf(HexId hexId) => neighborsByHex[hexId] ?? const [];
+
+  @override
+  Iterable<PointOfInterest> pointsOfInterestIn(HexId hexId) =>
+      pointsOfInterestByHex[hexId] ?? const [];
 }
 
 void main() {
@@ -89,6 +97,32 @@ void main() {
       final RegionPack pack = FakeRegionPack(version: const PackVersion('2026-09-09-01'));
 
       expect(pack.neighborsOf(const HexId(999)), isEmpty);
+    });
+
+    test('ヘクスに属する名所POIの一覧を読み取れる（Issue #158）', () {
+      const hex = HexId(1);
+      const poi = PointOfInterest(
+        id: PointOfInterestId('node/1'),
+        name: '六創堂神社',
+        kind: 'amenity=place_of_worship',
+        latitude: 35.0,
+        longitude: 135.0,
+        hexId: hex,
+      );
+      final RegionPack pack = FakeRegionPack(
+        version: const PackVersion('2026-09-09-01'),
+        pointsOfInterestByHex: {
+          hex: [poi],
+        },
+      );
+
+      expect(pack.pointsOfInterestIn(hex), [poi]);
+    });
+
+    test('名所POIが無いヘクス（同梱されていない・パック範囲外）は空のイテラブル', () {
+      final RegionPack pack = FakeRegionPack(version: const PackVersion('2026-09-09-01'));
+
+      expect(pack.pointsOfInterestIn(const HexId(999)), isEmpty);
     });
   });
 }

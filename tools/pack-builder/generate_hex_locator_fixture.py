@@ -31,6 +31,16 @@ Kotlin側（`H3HexIndexer`）に移行したことに伴い、出力先を
    座標での変換の健全性チェックを兼ねる）。
 3. `specs/001-mvp/research.md` §8.5 で実際に目視検証済みの座標（狭山湖の水面）も
    1点含める。既存の実測記録との整合を兼ねた重複確認。
+4. **（Issue #158）`--poi-sqlite`（既定 `out/poi.sqlite`。`extract_poi.py` の出力）が
+   存在すれば、実際の名所POIの座標を全件追加する。** Issue #158の受け入れ基準
+   「同じPOIについてPythonとKotlinで同じヘクスIDになることをテストで確認している」は、
+   POIのヘクスID計算（`extract_poi.py`の`_hex_id_of`）が本フィクスチャの生成に使う
+   `h3.latlng_to_cell(..., config.H3_RESOLUTION)`と全く同じ呼び出しであることを根拠に、
+   新規のフィクスチャ機構を別途作らず本フィクスチャへ実POI座標を合流させる形で満たす
+   （汎用の座標での一致を確認済みの機構に、対象を「実際のPOI座標」へ広げるだけでよい
+   という判断。advisor 2026-09-13指摘）。既定パスが無い場合は0件として無視するが
+   （フィクスチャ単体の再現手順の独立性を保つため）、明示的に`--poi-sqlite`を指定した
+   場合はファイルが無ければエラーで停止する（黙って0件にすると気付かないため）。
 
 ## hex_id を文字列で出力する理由
 
@@ -49,7 +59,10 @@ H3 index は JSON の安全整数の上限（2^53-1 ≒ 9.007×10^15）を超え
     ./.venv/bin/python generate_hex_locator_fixture.py \
         --out ../../app/android/app/src/test/resources/h3_py_reference.json
 
-`--out` を省略した場合もこのパスが既定値として使われる。
+`--out` を省略した場合もこのパスが既定値として使われる。実POI座標も含めて
+再現する場合は、先に `extract_poi.py` を実行して `out/poi.sqlite` を作ってから
+本スクリプトを実行すること（`--poi-sqlite` も既定で `out/poi.sqlite` を見るため
+追加のオプション指定は不要）。
 
 出力ファイルは十分に小さい（点数は本スクリプトの `N_BBOX_POINTS` + `EXTRA_GLOBAL_POINTS`
 の合計のみ。1点あたり数十バイト）。
@@ -60,6 +73,8 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sqlite3
+import sys
 from pathlib import Path
 
 import h3
@@ -103,7 +118,36 @@ def generate_points() -> list[tuple[float, float]]:
     return points
 
 
+def load_poi_points(poi_sqlite_path: Path, explicitly_requested: bool) -> list[tuple[float, float]]:
+    """`extract_poi.py`の出力（`out/poi.sqlite`）から実際のPOI座標を読み込む（Issue #158）。
+
+    既定パスが存在しない場合は0件（本フィクスチャ単体の再現手順が`out/poi.sqlite`の
+    存在に依存しないようにするため）。`--poi-sqlite`を明示的に指定したのに存在しない
+    場合は、黙って0件にすると気付かないためエラーで停止する（本ファイルdocstring
+    「座標セットの選び方」4項参照）。
+    """
+    if not poi_sqlite_path.exists():
+        if explicitly_requested:
+            print(
+                f"[generate_hex_locator_fixture] --poi-sqlite に指定された "
+                f"{poi_sqlite_path} が見つかりません。先に extract_poi.py を実行してください。",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return []
+
+    conn = sqlite3.connect(str(poi_sqlite_path))
+    try:
+        return [
+            (float(lat), float(lon))
+            for (lat, lon) in conn.execute("SELECT lat, lon FROM poi ORDER BY id")
+        ]
+    finally:
+        conn.close()
+
+
 DEFAULT_OUT = "../../app/android/app/src/test/resources/h3_py_reference.json"
+DEFAULT_POI_SQLITE = "out/poi.sqlite"
 
 
 def main() -> None:
@@ -113,10 +157,24 @@ def main() -> None:
         default=DEFAULT_OUT,
         help=f"出力先JSONパス（既定: {DEFAULT_OUT}）",
     )
+    parser.add_argument(
+        "--poi-sqlite",
+        default=DEFAULT_POI_SQLITE,
+        help=(
+            f"実POI座標を追加で取り込む extract_poi.py の出力（既定: {DEFAULT_POI_SQLITE}。"
+            "無指定で既定パスが無い場合は0件として無視。明示指定して無い場合はエラー）"
+        ),
+    )
     args = parser.parse_args()
 
+    poi_sqlite_path = Path(args.poi_sqlite)
+    explicitly_requested = args.poi_sqlite != DEFAULT_POI_SQLITE
+    poi_points = load_poi_points(poi_sqlite_path, explicitly_requested)
+
+    points = generate_points() + poi_points
+
     rows = []
-    for lat, lon in generate_points():
+    for lat, lon in points:
         hex_str = h3.latlng_to_cell(lat, lon, RESOLUTION)
         hex_int = h3.str_to_int(hex_str)
         rows.append({"lat": lat, "lon": lon, "hex_id": str(hex_int)})
@@ -133,7 +191,8 @@ def main() -> None:
     print(
         f"[generate_hex_locator_fixture] h3=={h3.__version__} "
         f"resolution={RESOLUTION} seed={SEED} bbox_points={N_BBOX_POINTS} "
-        f"global_points={len(EXTRA_GLOBAL_POINTS)}"
+        f"global_points={len(EXTRA_GLOBAL_POINTS)} poi_points={len(poi_points)}"
+        f"（{poi_sqlite_path if poi_points else '未使用'}）"
     )
 
 

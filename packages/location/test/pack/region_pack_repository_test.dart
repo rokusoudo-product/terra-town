@@ -17,6 +17,8 @@ void main() {
       List<Map<String, Object?>> hexRows = const [],
       bool withDistrictTables = false,
       bool withPoiTable = false,
+      bool withHexPoiTable = false,
+      List<Map<String, Object?>> hexPoiRows = const [],
       bool withHexNeighborTable = false,
       List<Map<String, Object?>> hexNeighborRows = const [],
     }) {
@@ -71,6 +73,17 @@ void main() {
             db.execute(
               "INSERT INTO poi VALUES ('node/1', 35.0, 135.0, 'shrine', '六創堂神社')",
             );
+          }
+          if (withHexPoiTable) {
+            db.execute(
+              'CREATE TABLE hex_poi (poi_id TEXT PRIMARY KEY, hex_id INTEGER NOT NULL)',
+            );
+            for (final row in hexPoiRows) {
+              db.execute(
+                'INSERT INTO hex_poi (poi_id, hex_id) VALUES (?, ?)',
+                [row['poi_id'], row['hex_id']],
+              );
+            }
           }
           if (withHexNeighborTable) {
             db.execute(
@@ -203,12 +216,43 @@ void main() {
       expect(repo.pointsOfInterest, isEmpty);
     });
 
-    test('poi テーブルがある場合は実データを返す（forward-compat・Issue #86）', () {
+    test(
+      'poi テーブルはあるが hex_poi が無い場合は hexId が null（forward-compat・Issue #158）',
+      () {
+        final connection = openSeeded(
+          hexRows: [
+            {'hex_id': 1, 'terrain_type': 'forest'},
+          ],
+          withPoiTable: true,
+        );
+        addTearDown(connection.close);
+
+        final repo = RegionPackRepository.load(connection);
+
+        expect(repo.pointsOfInterest, [
+          const PointOfInterest(
+            id: PointOfInterestId('node/1'),
+            name: '六創堂神社',
+            kind: 'shrine',
+            latitude: 35.0,
+            longitude: 135.0,
+          ),
+        ]);
+        expect(repo.pointsOfInterest.single.hexId, isNull);
+        expect(repo.pointsOfInterestIn(const HexId(1)), isEmpty);
+      },
+    );
+
+    test('poi・hex_poi の両方がある場合は hexId を含む実データを返す（Issue #158）', () {
       final connection = openSeeded(
         hexRows: [
           {'hex_id': 1, 'terrain_type': 'forest'},
         ],
         withPoiTable: true,
+        withHexPoiTable: true,
+        hexPoiRows: [
+          {'poi_id': 'node/1', 'hex_id': 1},
+        ],
       );
       addTearDown(connection.close);
 
@@ -221,8 +265,55 @@ void main() {
           kind: 'shrine',
           latitude: 35.0,
           longitude: 135.0,
+          hexId: HexId(1),
         ),
       ]);
+    });
+
+    test('pointsOfInterestIn: hex_poi がある場合はヘクスに属するPOIを返す（Issue #158）', () {
+      final connection = openSeeded(
+        hexRows: [
+          {'hex_id': 1, 'terrain_type': 'forest'},
+          {'hex_id': 2, 'terrain_type': 'forest'},
+        ],
+        withPoiTable: true,
+        withHexPoiTable: true,
+        hexPoiRows: [
+          {'poi_id': 'node/1', 'hex_id': 2},
+        ],
+      );
+      addTearDown(connection.close);
+
+      final repo = RegionPackRepository.load(connection);
+
+      expect(repo.pointsOfInterestIn(const HexId(2)), [
+        const PointOfInterest(
+          id: PointOfInterestId('node/1'),
+          name: '六創堂神社',
+          kind: 'shrine',
+          latitude: 35.0,
+          longitude: 135.0,
+          hexId: HexId(2),
+        ),
+      ]);
+      expect(repo.pointsOfInterestIn(const HexId(1)), isEmpty);
+      expect(repo.pointsOfInterestIn(const HexId(999)), isEmpty);
+    });
+
+    test('hex_poi に poi と対応しない poi_id があればStateError（fail-loud・Issue #158）', () {
+      final connection = openSeeded(
+        hexRows: [
+          {'hex_id': 1, 'terrain_type': 'forest'},
+        ],
+        withPoiTable: true,
+        withHexPoiTable: true,
+        hexPoiRows: [
+          {'poi_id': 'node/999-does-not-exist', 'hex_id': 1},
+        ],
+      );
+      addTearDown(connection.close);
+
+      expect(() => RegionPackRepository.load(connection), throwsStateError);
     });
 
     test('hex_neighbor テーブルが無い場合は neighborsOf が常に空（Issue #152）', () {
@@ -350,6 +441,43 @@ void main() {
           reason: '$neighbor はパック範囲外のはずがない（hex_neighborの受け入れ基準）',
         );
       }
+    });
+
+    test('実データで名所POIが所属ヘクスから引ける（Tier 2追加後・Issue #158）', () {
+      if (!File(packPath).existsSync()) {
+        markTestSkipped(
+          '$packPath が存在しません（tools/pack-builder/bundle_region_pack.sh '
+          '未実行の環境。Issue #85の方針により生成物はコミットしない）。',
+        );
+        return;
+      }
+
+      final connection = RegionPackConnection.open(packPath);
+      addTearDown(connection.close);
+
+      final repo = RegionPackRepository.load(connection);
+
+      // 実測（2026-09-13・Tier 2追加後）: 願誓寺（amenity=place_of_worship）が
+      // 属するヘクス。`tools/pack-builder/README.md`「バーティカルスライス対象
+      // エリアの同梱」節の実測値と対応する。
+      const knownPoiHex = HexId(626833456760725503);
+      final poisInHex = repo.pointsOfInterestIn(knownPoiHex).toList();
+
+      expect(poisInHex, isNotEmpty);
+      expect(poisInHex.every((poi) => poi.hexId == knownPoiHex), isTrue);
+      expect(
+        poisInHex.map((poi) => poi.id),
+        contains(const PointOfInterestId('node/10221367722')),
+      );
+
+      // Tier 1のみだった旧パックには存在しなかった Tier 2 の kind
+      // （amenity=place_of_worship）が実際に読み取れることを確認する。
+      expect(
+        repo.pointsOfInterest.map((poi) => poi.kind),
+        contains('amenity=place_of_worship'),
+      );
+      // 全POIが何らかのヘクスに対応付けられている（hex_poiが同梱されているため）。
+      expect(repo.pointsOfInterest.every((poi) => poi.hexId != null), isTrue);
     });
   });
 }
