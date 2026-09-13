@@ -376,17 +376,40 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       _hexIdByFeatureId = buildHexIdByFeatureId(_fogHexFeatureCollection!);
 
       final disclosedHexRepository = DisclosedHexRepository(widget.paths.gameDatabase);
+      // 徒歩経路（LandmarkAwareDisclosedHexRepository）・ポイント開放経路
+      // （HexOpeningSpendService）の両方が同じインスタンスを共有する
+      // （二重管理しない。`HexOpeningSpendService` クラスdocと同じ方針）。
+      // 図鑑画面（Issue #12・T075）等の将来の読み出し口はこのクラス自体
+      // （`CollectionRepository`）が担う想定で、本ウィジェットの状態としては
+      // 保持しない（Issue #159「読み出し口を用意する」はクラスの存在で満たす）。
+      final collectionRepository = CollectionRepository(widget.paths.gameDatabase);
       final known = DisclosedHexSet();
       final positionProvider = NativePositionProvider();
       _disclosedHexRepository = disclosedHexRepository;
       _known = known;
       _positionProvider = positionProvider;
 
+      // 徒歩経路: disclosed_hex への保存と名所の収集記録を同一トランザクションで
+      // 行うデコレータ（Issue #159・T070）。`DisclosureService` 自体
+      // （`core`）は変更せず、`repository`（`Repository<DisclosedHex, HexId>`）の
+      // 実装だけをこれに差し替える（`LandmarkAwareDisclosedHexRepository`
+      // クラスdoc参照）。復元（`restoreDisclosedHexes`）・デバッグパネル・
+      // `TerrainYieldPipeline.disclosedHexRepository`（地形カウンタ初期化用）は
+      // 引き続きプレーンな [disclosedHexRepository] を使う（`save` 以外の
+      // 操作には名所判定は不要なため）。
+      final landmarkAwareDisclosedHexRepository = LandmarkAwareDisclosedHexRepository(
+        widget.paths.gameDatabase,
+        regionPack: regionPack,
+        disclosedHexRepository: disclosedHexRepository,
+        collectionRepository: collectionRepository,
+        onCollected: _showLandmarkCollectedSnackBar,
+      );
+
       final service = DisclosureService(
         hexLocator: const RecordedHexLocator(),
         regionPack: regionPack,
         known: known,
-        repository: disclosedHexRepository,
+        repository: landmarkAwareDisclosedHexRepository,
       );
       // _fogController は onFogLayerReady が発火するまで null。
       // 呼び出し側は「新規開示イベントが来た時点の _fogController」を
@@ -429,7 +452,17 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         // 上記 openingPointCoordinator（入手側）・disclosedHexRepository（開示の
         // 保存先）と同じ opening_point.points・disclosed_hex を読み書きする
         // （二重管理しない。`HexOpeningSpendService` クラスdoc参照）。
-        hexOpeningSpendService: HexOpeningSpendService(widget.paths.gameDatabase),
+        // regionPack・collectionRepository を渡すことで、開放と同一トランザクション
+        // で名所の収集記録（collect_method=point）も行う（Issue #159・T070）。
+        // 収集結果の通知は `onCollected` ではなく `HexOpeningSpendResult.
+        // collectedLandmarks` → `HexOpeningAttemptResult` 経由で
+        // `_handleFogHexTapped` に渡す（`HexOpeningSheet` が閉じた後に
+        // SnackBar を出すため。`HexOpeningSheet` クラスdoc参照）。
+        hexOpeningSpendService: HexOpeningSpendService(
+          widget.paths.gameDatabase,
+          regionPack: regionPack,
+          collectionRepository: collectionRepository,
+        ),
         terrainHexCounter: terrainHexCounter,
         disclosedHexRepository: disclosedHexRepository,
         recordedPositionUpdates: positionProvider.recordedPositionUpdates,
@@ -485,6 +518,13 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   /// [_hexIdByFeatureId]（起動時に一度だけ組み立て済み）で `core` の [HexId] に
   /// 変換し、[HexOpeningSheet]（モーダルボトムシート・「配置」については
   /// 同ファイルのクラスdoc参照）を開く。
+  ///
+  /// ## シートが閉じた後にSnackBarを表示する（Issue #159・T070）
+  /// シートが返す [HexOpeningAttemptResult.collectedLandmarks] を
+  /// `showModalBottomSheet` の `Future` 完了後（＝シートが完全に閉じた後）に
+  /// 読み、新規収集があれば [_showLandmarkCollectedSnackBar] を呼ぶ
+  /// （`HexOpeningSheet` クラスdoc参照。モーダル表示中にSnackBarを出すと
+  /// 背面に隠れて見えないため）。
   void _handleFogHexTapped(int featureId) {
     final hexId = _hexIdByFeatureId?[featureId];
     final pipeline = _pipeline;
@@ -500,12 +540,52 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       currentPoints: pipeline.openingPointCoordinator.points,
     );
 
-    showModalBottomSheet<void>(
+    final sheetResult = showModalBottomSheet<HexOpeningAttemptResult?>(
       context: context,
       builder: (context) => HexOpeningSheet(
         evaluation: evaluation,
         currentPoints: pipeline.openingPointCoordinator.points,
         onConfirm: () => pipeline.openHexWithPoints(hexId),
+      ),
+    );
+    unawaited(sheetResult.then((result) {
+      if (result == null) return;
+      _showLandmarkCollectedSnackBar(result.collectedLandmarks);
+    }));
+  }
+
+  /// 新規に収集された名所を地図画面に簡易表示する（Issue #159「地図画面で
+  /// 収集時に名所名が表示される」）。徒歩経路
+  /// （[LandmarkAwareDisclosedHexRepository.onCollected]）・ポイント開放経路
+  /// （[_handleFogHexTapped] がシートを閉じた後）の両方から呼ばれる。
+  ///
+  /// 本格的な通知UI（T077/T078）は対象外（Issue #159「対象外」）のため、
+  /// 最小限の [SnackBar] のみ。既存の製品UI（下中央の記録開始ボタン・
+  /// 右下の追従ボタン）と重ならないよう、`SnackBarBehavior.floating` ＋
+  /// 下マージンでボタン列より上に浮かせる（`docs/opening-points-spend-impl.md`
+  /// §6「配置についての判断」と同じ、固定位置UIを覆わせない方針）。
+  /// 色・サイズは DESIGN.md のトークン（[AppSpacing]）のみを使い、直書きしない。
+  void _showLandmarkCollectedSnackBar(List<LandmarkCollectionRecord> records) {
+    if (records.isEmpty || !mounted) return;
+
+    final names = records.map((record) => '「${record.name}」').join();
+    final methodLabel = switch (records.first.collectMethod) {
+      CollectMethod.walk => '現地で発見',
+      CollectMethod.point => 'ポイントで開放',
+    };
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('名所$namesを図鑑に登録しました（$methodLabel）'),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(
+          left: AppSpacing.md,
+          right: AppSpacing.md,
+          // 下中央の記録開始ボタン・右下の追従ボタン（いずれも画面下部に
+          // AppSpacing.md のオフセットで配置・`AppSpacing.minTapTarget` の
+          // タップ領域を持つ）より上に浮かせる。
+          bottom: AppSpacing.xxxl + AppSpacing.sm,
+        ),
       ),
     );
   }

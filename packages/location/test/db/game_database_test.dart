@@ -182,6 +182,50 @@ void main() {
         expect(row.poiId, 'poi-1');
       });
 
+      test(
+          'collection（schemaVersion 3・Issue #159）: kind・name・is_bonus・'
+          'collect_method・bonus_granted を保存・復元できる', () async {
+        final collectedAt = DateTime(2026, 9, 14, 12, 0);
+        await database.into(database.collections).insert(
+              CollectionsCompanion.insert(
+                poiId: 'poi-2',
+                kind: const Value('amenity=place_of_worship'),
+                name: const Value('六創堂神社'),
+                isBonus: const Value(false),
+                collectMethod: const Value(CollectMethod.walk),
+                bonusGranted: const Value(null),
+                discoveredAt: Value(collectedAt),
+              ),
+            );
+
+        final row = await (database.select(database.collections)
+              ..where((t) => t.poiId.equals('poi-2')))
+            .getSingle();
+
+        expect(row.kind, 'amenity=place_of_worship');
+        expect(row.name, '六創堂神社');
+        expect(row.isBonus, isFalse);
+        expect(row.collectMethod, CollectMethod.walk);
+        expect(row.bonusGranted, isNull);
+        expect(row.discoveredAt, collectedAt);
+      });
+
+      test('collection: is_bonus は既定で false（列を省略しても false になる）', () async {
+        await database.into(database.collections).insert(
+              CollectionsCompanion.insert(poiId: 'poi-3'),
+            );
+
+        final row = await (database.select(database.collections)
+              ..where((t) => t.poiId.equals('poi-3')))
+            .getSingle();
+
+        expect(row.isBonus, isFalse);
+        expect(row.kind, isNull);
+        expect(row.name, isNull);
+        expect(row.collectMethod, isNull);
+        expect(row.bonusGranted, isNull);
+      });
+
       test('quest_daily: 進捗・達成状況を保存・復元できる', () async {
         final today = DateTime(2026, 9, 10);
         await database.into(database.questDailies).insert(
@@ -214,8 +258,10 @@ void main() {
       });
     });
 
-    test('schemaVersion は 2（disclosed_hex.terrain_type 追加・Issue #96）', () {
-      expect(database.schemaVersion, 2);
+    test(
+        'schemaVersion は 3（collection への kind・name・is_bonus・collect_method・'
+        'bonus_granted 追加・Issue #159）', () {
+      expect(database.schemaVersion, 3);
     });
   });
 
@@ -240,6 +286,16 @@ void main() {
           discovered_at INTEGER NOT NULL
         );
       ''');
+      // v1 時点でも collection テーブル自体は存在した（T034）。schemaVersion が
+      // 3になった今、v1→v3への一括アップグレードは disclosed_hex（from<2）に加えて
+      // collection への ADD COLUMN（from<3・Issue #159）も実行するため、
+      // このテーブルが無いと「no such table: collection」で失敗する。
+      rawDatabase.execute('''
+        CREATE TABLE collection (
+          poi_id TEXT NOT NULL PRIMARY KEY,
+          discovered_at INTEGER NOT NULL
+        );
+      ''');
       rawDatabase.execute('PRAGMA user_version = 1;');
 
       final migratedDb = GameDatabase(NativeDatabase.opened(rawDatabase));
@@ -260,6 +316,78 @@ void main() {
       final afterInsert = await migratedDb.select(migratedDb.disclosedHexes).get();
       expect(afterInsert, hasLength(1));
       expect(afterInsert.single.terrainType, TerrainType.mountain);
+    });
+  });
+
+  // 【別グループにする理由】上記2グループと同じ（database の生存期間を重ねない）。
+  group('collection マイグレーション（v2 → v3・Issue #159）', () {
+    test(
+        'v2（kind・name・is_bonus・collect_method・bonus_granted 列が無いスキーマ）'
+        'から v3 への自動マイグレーションが機能し、既存データが残る'
+        '（受け入れ基準「v2 の DB から起動して既存データが残る」）', () async {
+      // v2 相当の collection（poi_id・discovered_at のみ）を持つ生の SQLite DB を
+      // 手作りし、PRAGMA user_version を 2 に設定しておく。
+      // disclosed_hex 等の他のテーブルは本テストで一切クエリしないため作らない
+      // （上の v1→v2 テストと同じ方針。onUpgrade は from<3 のブロックで
+      // collection のみを触るため、他テーブル未作成でも問題ない）。
+      final rawDatabase = sqlite3.sqlite3.openInMemory();
+      rawDatabase.execute('''
+        CREATE TABLE collection (
+          poi_id TEXT NOT NULL PRIMARY KEY,
+          discovered_at INTEGER NOT NULL
+        );
+      ''');
+      final existingDiscoveredAt =
+          DateTime(2026, 8, 1, 9, 0).millisecondsSinceEpoch ~/ 1000;
+      rawDatabase.execute(
+        'INSERT INTO collection (poi_id, discovered_at) VALUES (?, ?);',
+        ['poi-v2-existing', existingDiscoveredAt],
+      );
+      rawDatabase.execute('PRAGMA user_version = 2;');
+
+      final migratedDb = GameDatabase(NativeDatabase.opened(rawDatabase));
+      addTearDown(migratedDb.close);
+
+      // マイグレーションは遅延実行されるため、実際にクエリを発行して発火させる。
+      final rows = await migratedDb.select(migratedDb.collections).get();
+      expect(rows, hasLength(1), reason: 'ADD COLUMN方式のため既存行は失われない');
+      final existingRow = rows.single;
+      expect(existingRow.poiId, 'poi-v2-existing');
+      // v2以前の行には値が無いため、新列は「架空の既定値を捏造しない」方針どおり
+      // null / false のまま（[Collections] クラスdoc参照）。
+      expect(existingRow.kind, isNull);
+      expect(existingRow.name, isNull);
+      expect(existingRow.isBonus, isFalse);
+      expect(existingRow.collectMethod, isNull);
+      expect(existingRow.bonusGranted, isNull);
+
+      // 新しいスキーマ（全列あり）へ実際に insert できることを確認する。
+      await migratedDb.into(migratedDb.collections).insert(
+            CollectionsCompanion.insert(
+              poiId: 'poi-v3-new',
+              kind: const Value('tourism=attraction'),
+              name: const Value('新しい名所'),
+              isBonus: const Value(false),
+              collectMethod: const Value(CollectMethod.point),
+              bonusGranted: const Value(null),
+              // 手作りの生SQLiteテーブルには discovered_at の SQL レベル DEFAULT
+              // （drift が createAll() 時に埋め込む currentDateAndTime）が
+              // 存在しないため、ここでは明示的に値を渡す（実際の v2→v3 移行
+              // 〔drift の createAll() で作られた本物のv2 DB〕ではこの列は
+              // 元々 DEFAULT 付きで作成されているため問題にならない）。
+              discoveredAt: Value(DateTime(2026, 9, 14)),
+            ),
+          );
+      final afterInsert = await (migratedDb.select(migratedDb.collections)
+            ..where((t) => t.poiId.equals('poi-v3-new')))
+          .getSingle();
+      expect(afterInsert.kind, 'tourism=attraction');
+      expect(afterInsert.name, '新しい名所');
+      expect(afterInsert.collectMethod, CollectMethod.point);
+
+      // 移行前の行もそのまま残っていること（2件になっている）を再確認する。
+      final allRows = await migratedDb.select(migratedDb.collections).get();
+      expect(allRows, hasLength(2));
     });
   });
 }

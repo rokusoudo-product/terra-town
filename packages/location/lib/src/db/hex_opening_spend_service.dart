@@ -1,7 +1,15 @@
+// ignore_for_file: prefer_initializing_formals
+// 公開の名前付き引数（regionPack・now）をプライベートフィールド（_regionPack・
+// _now）へそのまま代入する箇所があり、initializing formal（this._regionPack 等）
+// にすると外部呼び出し側の引数名がプライベート名になってしまうため使えない
+// （`region_pack_repository.dart` と同じ判断）。
+
 import 'package:terra_town_core/terra_town_core.dart';
 
+import 'collection_repository.dart';
 import 'disclosed_hex_repository.dart';
 import 'game_database.dart';
+import 'landmark_collection_support.dart';
 import 'opening_point_ledger.dart';
 
 /// [HexOpeningSpendService.spend] の結果種別（Issue #151・T064）。
@@ -26,6 +34,7 @@ class HexOpeningSpendResult {
     required this.outcome,
     required this.remainingPoints,
     this.disclosedHex,
+    this.collectedLandmarks = const [],
   });
 
   final HexOpeningSpendOutcome outcome;
@@ -37,6 +46,15 @@ class HexOpeningSpendResult {
 
   /// [outcome] が [HexOpeningSpendOutcome.opened] の場合のみ非null。
   final DisclosedHex? disclosedHex;
+
+  /// 開放と同時に新規収集された名所（Issue #159・T070）。
+  ///
+  /// [outcome] が [HexOpeningSpendOutcome.opened] でない場合、または
+  /// [HexOpeningSpendService] に `regionPack`（`collectionRepository`）が
+  /// 渡されていない場合は常に空リスト。名所の無いヘクスを開放した場合も
+  /// 空リストになる（`collectMethod: point` で記録される。
+  /// `docs/landmark_objects.md` §3.2）。
+  final List<LandmarkCollectionRecord> collectedLandmarks;
 }
 
 /// 開放ポイントを消費して未踏破ヘクスを開放する、DBトランザクションを伴う実処理
@@ -95,13 +113,36 @@ class HexOpeningSpendService {
     this._database, {
     OpeningPointBalanceStore? balanceStore,
     DisclosedHexRepository? disclosedHexRepository,
+    RegionPack? regionPack,
+    CollectionRepository? collectionRepository,
+    this.onCollected,
+    DateTime Function() now = DateTime.now,
   })  : _balanceStore = balanceStore ?? OpeningPointBalanceRepository(_database),
         _disclosedHexRepository =
-            disclosedHexRepository ?? DisclosedHexRepository(_database);
+            disclosedHexRepository ?? DisclosedHexRepository(_database),
+        _regionPack = regionPack,
+        _collectionRepository = collectionRepository ?? CollectionRepository(_database),
+        _now = now;
 
   final GameDatabase _database;
   final OpeningPointBalanceStore _balanceStore;
   final DisclosedHexRepository _disclosedHexRepository;
+
+  /// 名所の収集記録（Issue #159・T070）に使う地域パック。**`terrainOf` は
+  /// 一切呼ばない**（本クラスは `RegionPack.terrainOf` を再度呼ばない設計を
+  /// 保つ。クラスdoc参照）。`pointsOfInterestIn` の呼び出しのみに使う。
+  ///
+  /// null の場合（既存の呼び出し元・テストとの後方互換のため既定は null）は
+  /// 名所の収集判定を一切行わない（[HexOpeningSpendResult.collectedLandmarks]
+  /// は常に空リスト）。
+  final RegionPack? _regionPack;
+  final CollectionRepository _collectionRepository;
+  final DateTime Function() _now;
+
+  /// 開放と同時に新規収集された名所がある場合に、トランザクションのコミット後に
+  /// 呼ばれる（Issue #159。`LandmarkAwareDisclosedHexRepository.onCollected` と
+  /// 同じ方針——DBトランザクションの最中にUI更新の副作用を持ち込まない）。
+  final void Function(List<LandmarkCollectionRecord> records)? onCollected;
 
   /// [hexId] を開放ポイントで開放する。
   ///
@@ -121,6 +162,7 @@ class HexOpeningSpendService {
     var outcome = HexOpeningSpendOutcome.opened;
     DisclosedHex? disclosedHex;
     var remainingPoints = 0;
+    var collectedLandmarks = const <LandmarkCollectionRecord>[];
 
     await _database.transaction(() async {
       final existing = await _disclosedHexRepository.findById(hexId);
@@ -148,12 +190,33 @@ class HexOpeningSpendService {
       await _disclosedHexRepository.save(hex);
       disclosedHex = hex;
       outcome = HexOpeningSpendOutcome.opened;
+
+      // 名所の収集記録（Issue #159・T070）。`disclosed_hex` の保存・ポイント
+      // 減算と**同一トランザクション**（クラスdoc「消費と開示は同一
+      // トランザクション」と同じ理由。途中で失敗すればポイント・開示状態
+      // どちらも変化しない）。`_regionPack` が渡されていない呼び出し元
+      // （既存テスト等）との後方互換のため、null なら何もしない。
+      final regionPack = _regionPack;
+      if (regionPack != null) {
+        collectedLandmarks = await collectLandmarksForDisclosedHex(
+          disclosedHex: hex,
+          regionPack: regionPack,
+          collectionRepository: _collectionRepository,
+          collectMethod: CollectMethod.point,
+          now: _now,
+        );
+      }
     });
+
+    if (collectedLandmarks.isNotEmpty) {
+      onCollected?.call(collectedLandmarks);
+    }
 
     return HexOpeningSpendResult._(
       outcome: outcome,
       remainingPoints: remainingPoints,
       disclosedHex: disclosedHex,
+      collectedLandmarks: collectedLandmarks,
     );
   }
 }

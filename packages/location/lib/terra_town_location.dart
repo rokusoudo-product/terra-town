@@ -25,13 +25,19 @@
 ///     `settings` テーブルへの読み書き・`RewardPolicy` への橋渡し）もここに置く。
 ///     DisclosedHexRepository（`core` の `Repository<DisclosedHex, HexId>` の
 ///     Drift 実装。T060・実装済み。Issue #137）も同様にここに置く。
+///     CollectionRepository・LandmarkAwareDisclosedHexRepository（`collection`
+///     テーブルの読み書き・徒歩経路での名所収集記録の同一トランザクション化。
+///     T070・実装済み。Issue #159）もここに置く。
 library;
 
 import 'package:terra_town_core/terra_town_core.dart';
 
 export 'src/db/building_type.dart';
+export 'src/db/collection_repository.dart';
 export 'src/db/disclosed_hex_repository.dart';
 export 'src/db/game_database.dart';
+export 'src/db/landmark_aware_disclosed_hex_repository.dart';
+export 'src/db/landmark_collection_support.dart';
 export 'src/db/region_pack_connection.dart';
 export 'src/db/reward_settings_repository.dart';
 export 'src/map/current_location_marker.dart';

@@ -4,7 +4,8 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:terra_town_core/terra_town_core.dart' show TerrainType;
+import 'package:terra_town_core/terra_town_core.dart'
+    show CollectMethod, TerrainType;
 
 import 'building_type.dart';
 
@@ -195,12 +196,33 @@ class DistrictProgresses extends Table {
   Set<Column> get primaryKey => {districtId};
 }
 
-/// `collection` テーブル（T034・名所図鑑 #6/#12 統合）。
+/// `collection` テーブル（T034・T067・T070・名所図鑑 #6/#12 統合・
+/// schemaVersion 3・Issue #159 で列を拡張）。
 ///
-/// 出典: plan.md §6「`collection`（名所図鑑・#6/#12統合）」。
-/// POI 1件の発見につき1行（[poiId] が主キー）。POI のメタデータ（名称・種別・
-/// 緯度経度）自体は地域パック側（読み取り専用）が正であり、本テーブルは
-/// 「いつ発見したか」という**プレイヤーの進捗**だけを保持する。
+/// 出典: plan.md §6「`collection`（名所図鑑・#6/#12統合）」・
+/// `docs/landmark_objects.md` §5（`collection` レコードの必須項目）。
+/// POI 1件の発見につき1行（[poiId] が主キー）。
+///
+/// ## 収集時点のスナップショット（[kind]・[name]）
+/// POI のメタデータ（名称・種別）は本来 `RegionPack.pointsOfInterest` 系が正だが、
+/// `region_pack.dart`・`disclosed_hex.dart` のスナップショット方針と同じ理由
+/// （POI が将来 OSM から消えても図鑑記録自体は失われないようにするため）で、
+/// **収集した瞬間の値をこのテーブル自身にコピーして保持する**。
+///
+/// ## v2→v3 マイグレーションでの nullable 化（Issue #159・advisor指摘）
+/// [kind]・[name]・[collectMethod]・[bonusGranted] は v2 時点では存在しなかった
+/// 列であり、`ALTER TABLE ... ADD COLUMN` で NOT NULL 列を追加するには
+/// 意味のある既定値が必要（SQLite の制約。`game_database.dart` v1→v2 の
+/// コメント参照）。v2 時点の既存行（もしあれば）にはこれらの値を復元する
+/// 手段が無い（`collect_method` は本Issueで初めて記録され始める値であり、
+/// 過去に遡って「歩いたか／ポイントで開けたか」を知る術がない）ため、
+/// `walk` 等の**架空の既定値を捏造せず**、正直に nullable として追加する
+/// （[isBonus] だけは「本Issueでは全件false固定」という確定した既定値が
+/// あるため NOT NULL DEFAULT false のままで問題ない）。ドメイン層
+/// （`LandmarkCollectionRecord`）はこれらを non-null として扱う——
+/// nullable なのはあくまで移行期の既存行を表現できるようにするための
+/// スキーマ上の配慮であり、本Issue以降に新規保存される行は必ず全列を埋める
+/// （[CollectionRepository.save] 参照）。
 @DataClassName('CollectionRow')
 class Collections extends Table {
   @override
@@ -209,6 +231,35 @@ class Collections extends Table {
   /// `PointOfInterestId.value` と対応。
   TextColumn get poiId => text()();
 
+  /// 収集時点のPOI種別（OSMタグ由来。例: `tourism=attraction`）のスナップショット。
+  /// v2以前の行には存在しないため nullable（クラスdoc参照）。
+  TextColumn get kind => text().nullable()();
+
+  /// 収集時点のPOI名称のスナップショット。[kind] と同じ理由で nullable。
+  TextColumn get name => text().nullable()();
+
+  /// ボーナスオブジェクトか否か（`docs/landmark_objects.md` §2.2）。
+  /// 本Issue（#159）では全件 false 固定（ボーナス判定は `future` Issue #162）。
+  BoolColumn get isBonus => boolean().withDefault(const Constant(false))();
+
+  /// 収集手段（`walk`=現地開示 / `point`=ポイント開放。
+  /// `docs/landmark_objects.md` §3.2・§5）。v2以前の行には存在しないため
+  /// nullable（クラスdoc参照）。
+  TextColumn get collectMethod => textEnum<CollectMethod>().nullable()();
+
+  /// 収集時に付与された副次ボーナス値（`docs/landmark_objects.md` §4）。
+  /// 本Issue（#159）では全件 null 固定（ボーナス効果は `future` Issue #162）。
+  IntColumn get bonusGranted => integer().nullable()();
+
+  /// 収集日時（`docs/landmark_objects.md` §5 の `collected_at` に相当）。
+  ///
+  /// 【列名を `discovered_at` のまま据え置いた理由（Issue #159・PR本文にも記載）】
+  /// 列のリネーム（`discovered_at` → `collected_at`）は意味的にはより正確だが、
+  /// SQLite の列リネームは `ALTER TABLE ... RENAME COLUMN`（3.25+）が必要で
+  /// あり、本Issueの他の変更（列追加5本）と比べて移行のリスク・レビューコストが
+  /// 見合わないと判断し見送った。ドメイン層（[CollectionRepository]・
+  /// `LandmarkCollectionRecord`）ではこの列を `collectedAt` として読み書きし、
+  /// スキーマ上の列名とドメイン上の意味の対応はコード上のコメントで明示する。
   DateTimeColumn get discoveredAt =>
       dateTime().withDefault(currentDateAndTime)();
 
@@ -316,7 +367,7 @@ class GameDatabase extends _$GameDatabase {
   factory GameDatabase.forTesting() => GameDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   /// 【v1 → v2 マイグレーション（Issue #96）で `disclosed_hex.terrain_type` を
   /// テーブルの再作成で追加している理由】
@@ -352,6 +403,20 @@ class GameDatabase extends _$GameDatabase {
           if (from < 2) {
             await m.deleteTable(disclosedHexes.actualTableName);
             await m.createTable(disclosedHexes);
+          }
+          // v2 → v3（Issue #159）: collection テーブルに §5 の必須項目
+          // （kind・name・is_bonus・collect_method・bonus_granted）を追加する。
+          // すべて ADD COLUMN で既存行（poi_id・discovered_at）を保持したまま
+          // 追加できる（[Collections] クラスdoc「v2→v3マイグレーションでの
+          // nullable化」参照。is_bonus のみ NOT NULL DEFAULT false、他は nullable）。
+          // テーブル再作成方式は使わない（disclosed_hex の v1→v2 と異なり、
+          // 既存の poi_id・discovered_at を保持する必要があるため）。
+          if (from < 3) {
+            await m.addColumn(collections, collections.kind);
+            await m.addColumn(collections, collections.name);
+            await m.addColumn(collections, collections.isBonus);
+            await m.addColumn(collections, collections.collectMethod);
+            await m.addColumn(collections, collections.bonusGranted);
           }
         },
         // 将来のスキーマ変更（列追加・テーブル追加等）はさらに schemaVersion を
