@@ -266,4 +266,35 @@ void main() {
     expect(gateway.statusCallCount, greaterThan(statusCallsAfterInit));
     expect(find.text('記録開始'), findsOneWidget);
   });
+
+  // Issue #149・T062: HUD（`walk_stats_hud.dart`）が「記録は停止中です」を
+  // 表示できるように、記録中フラグを外部の ValueNotifier へ公開する。
+  testWidgets('recordingNotifier に記録中フラグを反映する（HUD 用・Issue #149）',
+      (tester) async {
+    final hostApi = _FakeLocationTrackingHostApi();
+    final gateway = _FakePermissionGateway(LocationPermissionState.granted);
+    final recordingNotifier = ValueNotifier<bool>(false);
+    addTearDown(recordingNotifier.dispose);
+
+    await tester.pumpWidget(
+      _wrap(
+        TrackingControlButton(
+          control: NativeLocationTrackingControl(api: hostApi),
+          permissionGateway: gateway,
+          requestNotificationPermission: () async {},
+          recordingNotifier: recordingNotifier,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(recordingNotifier.value, isFalse);
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    expect(recordingNotifier.value, isTrue, reason: '記録開始で true になる');
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    expect(recordingNotifier.value, isFalse, reason: '記録停止で false に戻る');
+  });
 }

@@ -51,6 +51,7 @@ class TrackingControlButton extends StatefulWidget {
     this.control,
     this.permissionGateway,
     this.requestNotificationPermission,
+    this.recordingNotifier,
   });
 
   /// テスト用の差し替えフック（既定 null では実際の Pigeon 経路を使う）。
@@ -62,6 +63,23 @@ class TrackingControlButton extends StatefulWidget {
   /// テスト用の差し替えフック（既定 null では [requestNotificationPermissionBestEffort]）。
   /// 結果はUIの状態遷移に影響しない（ベストエフォート）。
   final Future<void> Function()? requestNotificationPermission;
+
+  /// 記録中かどうかを他のウィジェットへ公開するための通知先（Issue #149・T062）。
+  ///
+  /// ## なぜ必要か
+  /// マップ画面の HUD（`walk_stats_hud.dart`）は「記録が停止中であることが
+  /// 利用者に分かる表示」（Issue #149 受け入れ基準）を出す必要があるが、本ウィジェット
+  /// の記録中フラグ（[_TrackingControlButtonState._isRunning]）はこれまで
+  /// ウィジェット内部の `State` にしか無く、外部から読めなかった。位置ストリーム
+  /// （`NativePositionProvider.recordedPositionUpdates`）の購読を増やす話ではない
+  /// （記録の起動/停止状態は Pigeon 経由の別の値であり、本 Issue が禁じる
+  /// 「2つ目のリスナー」には当たらない）ため、単純に `composition root`
+  /// （`map_screen.dart`）が保持する [ValueNotifier] をここへ渡し、状態が変わる
+  /// たびに書き込むだけにした。
+  ///
+  /// 省略時（既定 null）は内部専用の [ValueNotifier] を使い、外部には一切公開
+  /// しない（既存の呼び出し元・テストとの後方互換）。
+  final ValueNotifier<bool>? recordingNotifier;
 
   @override
   State<TrackingControlButton> createState() => _TrackingControlButtonState();
@@ -77,6 +95,12 @@ class _TrackingControlButtonState extends State<TrackingControlButton>
       widget.requestNotificationPermission ??
           requestNotificationPermissionBestEffort;
 
+  /// [widget.recordingNotifier] のドキュメント参照。外部から渡されなかった場合は
+  /// 内部専用のインスタンスを作り、[dispose] で破棄する（渡された場合は所有者が
+  /// 呼び出し側〔`map_screen.dart`〕のため、本ウィジェットでは破棄しない）。
+  late final ValueNotifier<bool> _recordingNotifier =
+      widget.recordingNotifier ?? ValueNotifier<bool>(false);
+
   bool _isRunning = false;
   LocationPermissionState _permissionState = LocationPermissionState.denied;
   bool _busy = false;
@@ -91,6 +115,9 @@ class _TrackingControlButtonState extends State<TrackingControlButton>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (widget.recordingNotifier == null) {
+      _recordingNotifier.dispose();
+    }
     super.dispose();
   }
 
@@ -111,6 +138,7 @@ class _TrackingControlButtonState extends State<TrackingControlButton>
       _isRunning = trackingStatus.isRunning;
       _permissionState = permissionState;
     });
+    _recordingNotifier.value = _isRunning;
   }
 
   Future<void> _onPressed() async {
@@ -131,6 +159,7 @@ class _TrackingControlButtonState extends State<TrackingControlButton>
       _isRunning = trackingStatus.isRunning;
       _busy = false;
     });
+    _recordingNotifier.value = _isRunning;
   }
 
   Future<void> _startFlow() async {
@@ -191,6 +220,7 @@ class _TrackingControlButtonState extends State<TrackingControlButton>
       _isRunning = trackingStatus.isRunning;
       _busy = false;
     });
+    _recordingNotifier.value = _isRunning;
   }
 
   Future<void> _showGuidance(LocationPermissionState state) {

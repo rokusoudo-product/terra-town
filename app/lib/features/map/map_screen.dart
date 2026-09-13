@@ -22,6 +22,7 @@ import '../../map/initial_camera.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
 import '../permissions/tracking_control_button.dart';
+import 'widgets/walk_stats_hud.dart';
 
 /// マップ（ホーム）画面（tasks.md T057・T058・T060・T066・T068・T069・
 /// Issue #100・#101・#102・#137・#138・#141）。
@@ -331,6 +332,12 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   /// 驚きが大きいと判断した実装判断）。
   bool _isFollowing = false;
 
+  /// 記録中かどうか（HUD 用・Issue #149）。[TrackingControlButton] へ渡し、
+  /// 状態が変わるたびに書き込んでもらう（`tracking_control_button.dart`
+  /// クラスdoc「なぜ必要か」参照）。位置ストリームとは別経路のため、
+  /// 「2つ目のリスナー」を追加したことにはならない。
+  final ValueNotifier<bool> _isRecording = ValueNotifier<bool>(false);
+
   /// デバッグパネル群（`kDebugMode` 限定）を表示するか。
   ///
   /// パネルが増えるたびに地図と製品UIのボタンが覆われ、実機確認が行えなくなる
@@ -462,6 +469,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     unawaited(_pipeline?.stop() ?? Future<void>.value());
     unawaited(_positionProvider?.close() ?? Future<void>.value());
     unawaited(_regionPackConnection?.close() ?? Future<void>.value());
+    _isRecording.dispose();
     super.dispose();
   }
 
@@ -550,13 +558,36 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       bottom: kDebugMode && _debugPanelsVisible
           ? MediaQuery.sizeOf(context).height / 2 + AppSpacing.md
           : AppSpacing.md,
-      child: const SafeArea(
-        child: Center(child: TrackingControlButton()),
+      child: SafeArea(
+        child: Center(
+          child: TrackingControlButton(recordingNotifier: _isRecording),
+        ),
+      ),
+    );
+
+    // 歩行距離・歩数・開放ポイントの HUD（release ビルドでも常に表示する製品UI・
+    // Issue #149・T062）。画面**上部**に置き、下中央の [trackingControlButton]・
+    // 右下の [followButton] とは重ならない（`walk_stats_hud.dart` クラスdoc
+    // 「配置」参照）。`kDebugMode` 限定のデバッグパネル一括切替ボタン（右上・小さな
+    // FAB）とは、右側にその分の余白を確保することで重ならないようにする。
+    final walkStatsHud = Positioned(
+      left: 0,
+      top: 0,
+      right: kDebugMode ? AppSpacing.xxl + AppSpacing.sm : 0,
+      child: SafeArea(
+        bottom: false,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: WalkStatsHud(
+            openingPointStats: pipeline.openingPointStats,
+            isRecording: _isRecording,
+          ),
+        ),
       ),
     );
 
     if (!kDebugMode) {
-      return Stack(children: [mapView, followButton, trackingControlButton]);
+      return Stack(children: [mapView, followButton, trackingControlButton, walkStatsHud]);
     }
 
     final fogController = _fogController;
@@ -573,6 +604,13 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         mapView,
         followButton,
         trackingControlButton,
+        // walkStatsHud は kDebugMode 配下の画面上部デバッグパネル列（下記
+        // `_debugPanelsVisible` 配下の Positioned）より前（背面）に置く。デバッグ
+        // パネルを開いている間は詳細診断（`OpeningPointDebugPanel` 等）で同等以上の
+        // 情報が見えるため、意図的にそちらを手前にしている（両者を重ねて表示する
+        // 精緻な配置調整はスコープ外・Issue #149 本文）。デバッグパネルを閉じた
+        // 既定状態（release ビルドと同じ見た目）では walkStatsHud がそのまま見える。
+        walkStatsHud,
         // 画面上部: レイヤー追加エラー（あれば）＋ 位置記録デバッグパネル
         // （Issue #124・T049・T050）を縦に並べる。位置記録パネルは fog レイヤーの
         // 準備完了を待つ必要が無いため常に表示する。
