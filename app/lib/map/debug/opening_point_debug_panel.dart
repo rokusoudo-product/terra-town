@@ -27,10 +27,23 @@ import '../economy/terrain_yield_pipeline.dart';
 /// 減る」ことを代表・秘書が実機で確認できるよう、直近区間に適用された
 /// 倍率・理由（[RewardSegmentReason]）を表示する。
 class OpeningPointDebugPanel extends StatelessWidget {
-  const OpeningPointDebugPanel({super.key, required this.stats});
+  const OpeningPointDebugPanel({
+    super.key,
+    required this.stats,
+    required this.grantPointsForDebug,
+  });
 
   /// composition root（`TerrainYieldPipeline`）が公開する観測データ。
   final ValueListenable<OpeningPointPipelineStats> stats;
+
+  /// ポイント消費（ヘクス開放・Issue #151・T064）を実機で試すためのデバッグ付与。
+  /// `TerrainYieldPipeline.grantOpeningPointsForDebug` をそのまま渡す想定。
+  ///
+  /// 【release ビルドに絶対出さない】本パネル自体が `kDebugMode` 限定でしか
+  /// 組み込まれない（`map_screen.dart` 参照）ことに加え、
+  /// `grantOpeningPointsForDebug` 自身も冒頭で `kDebugMode` を確認する
+  /// 多重の安全策（クラスdoc参照）。
+  final Future<void> Function(int amount) grantPointsForDebug;
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +86,13 @@ class OpeningPointDebugPanel extends StatelessWidget {
                     '倍率 ${_multiplierLabel(value.lastAppliedMultiplier)} / '
                     '理由 ${_reasonLabel(value.lastReason)}',
                     style: textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  // ヘクス開放（Issue #151・T064）の実機確認用。歩かずにポイントを
+                  // 用意できるようにする（release ビルドには出ない。クラスdoc参照）。
+                  OutlinedButton(
+                    onPressed: () => grantPointsForDebug(10),
+                    child: const Text('デバッグ付与: +10P（実機確認用）'),
                   ),
                 ],
               );

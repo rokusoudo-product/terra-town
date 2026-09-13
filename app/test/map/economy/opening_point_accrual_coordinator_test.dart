@@ -27,10 +27,11 @@ class _FakeLedger implements OpeningPointLedgerStore {
   }
 
   @override
-  Future<void> applyAccrual({
+  Future<int> applyAccrual({
     required int grantedPoints,
     required int remainderMillimeters,
     required int watermarkRowId,
+    int cap = openingPointStockCap,
   }) async {
     if (throwOnNextApply) {
       throwOnNextApply = false;
@@ -41,9 +42,11 @@ class _FakeLedger implements OpeningPointLedgerStore {
       remainderMillimeters: remainderMillimeters,
       watermarkRowId: watermarkRowId,
     ));
-    points += grantedPoints;
+    final uncapped = points + grantedPoints;
+    points = uncapped > cap ? cap : uncapped;
     this.remainderMillimeters = remainderMillimeters;
     this.watermarkRowId = watermarkRowId;
+    return points;
   }
 }
 

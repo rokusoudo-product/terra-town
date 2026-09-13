@@ -41,10 +41,28 @@ abstract interface class OpeningPointLedgerStore {
 
   /// ポイントの加算・端数・ウォーターマークの更新を**1つのトランザクション**で行う
   /// （二重計上防止の核心。`TerrainYieldLedgerStore.applyAccrual` と同じ方針）。
-  Future<void> applyAccrual({
+  ///
+  /// ## 戻り値（書き込み後の実残高。Issue #151で追加）
+  /// トランザクション内で確定した**書き込み後の所持ポイント数**（[cap] でクランプ
+  /// 済み）を返す。呼び出し側（`OpeningPointAccrualCoordinator`）はこの値を
+  /// キャッシュ（`_points`）へ**代入**すること（`+=` で加算しないこと）。
+  ///
+  /// 【なぜ必要か（Issue #151・開放ポイントの消費が2人目の書き手になったこと）】
+  /// Issue #151 でヘクス開放（`HexOpeningSpendService`）が `opening_point.points`
+  /// への**2人目の書き手**になった。呼び出し側のキャッシュ（`_points`）は
+  /// 「自分がいつ・いくら書いたか」しか知らず、もう一方の書き手（消費側）が
+  /// 書き込んだ量を知らないため、`_points += grantedPoints` という相対更新では
+  /// キャッシュが実際のDB残高から乖離する（例: 消費後にキャッシュが実際より
+  /// 高いまま残ると、上限クランプの計算 `capacityLeft = cap - _points` が
+  /// 過小評価され、本来まだ入るはずのポイントが切り捨てられる）。本メソッドが
+  /// 「書き込み後の実残高」を返し、呼び出し側がそれをそのまま採用する
+  /// （代入する）ことで、キャッシュは常にトランザクション確定直後のDBの値と
+  /// 一致する。
+  Future<int> applyAccrual({
     required int grantedPoints,
     required int remainderMillimeters,
     required int watermarkRowId,
+    int cap = openingPointStockCap,
   });
 }
 
@@ -84,13 +102,20 @@ abstract interface class OpeningPointLedgerStore {
 /// （`opening_point_ledger_test.dart` で検証）。次回起動時は同じ区間が改めて
 /// 計上される（失われない）。
 ///
-/// ## 上限（50P）はここでは適用しない
-/// 上限のクランプ（`docs/opening_points.md` §4）は
-/// `computeOpeningPointAccrual`（`packages/core`）が既に行っている
-/// （呼び出し側が渡す `grantedAmounts` は既にクランプ済みの値）。本クラスは
-/// 渡された値をそのまま加算するだけで、二重にクランプしない
-/// （`InventoryRepository` が地形産出について「上限を一切適用しない」のと対照的に、
-/// 本クラスは「呼び出し側が既にクランプ済みの値を渡す」という前提が異なる）。
+/// ## 上限（50P）は安全網として本クラスでも最終的にクランプする（Issue #151で変更）
+/// 上限のクランプ（`docs/opening_points.md` §4）は本来
+/// `computeOpeningPointAccrual`（`packages/core`）が呼び出し側（歩行距離換算の
+/// 計上）の責務として行う（[applyAccrual] 呼び出し前に既にクランプ済みの
+/// `grantedPoints` を渡すのが前提）。
+///
+/// Issue #151 でヘクス開放（`HexOpeningSpendService`）が `opening_point.points`
+/// への**2人目の書き手**になったことで、歩行距離換算側の呼び出し元
+/// （`OpeningPointAccrualCoordinator`）が持つキャッシュが、消費側の書き込みを
+/// 知らずに一時的に古くなる瞬間がありうる。そのキャッシュに基づいて計算された
+/// `grantedPoints` が（本来の残容量より）過大だった場合に備え、[applyAccrual]
+/// はトランザクション内で読み直した実際の残高を基準に、最終的に [cap] を
+/// 超えないようクランプしてから書き込む（安全網。呼び出し側が正しく
+/// クランプ済みの値を渡す責務そのものを免除するものではない）。
 class OpeningPointLedger implements OpeningPointLedgerStore {
   OpeningPointLedger(this._database, {OpeningPointBalanceStore? balanceStore})
       : _balanceStore = balanceStore ?? OpeningPointBalanceRepository(_database);
@@ -133,19 +158,32 @@ class OpeningPointLedger implements OpeningPointLedgerStore {
   }
 
   @override
-  Future<void> applyAccrual({
+  Future<int> applyAccrual({
     required int grantedPoints,
     required int remainderMillimeters,
     required int watermarkRowId,
+    int cap = openingPointStockCap,
   }) async {
+    var resultingPoints = 0;
     await _database.transaction(() async {
-      if (grantedPoints > 0) {
-        final currentPoints = await _balanceStore.read();
-        await _balanceStore.write(currentPoints + grantedPoints);
+      // トランザクション内で**都度**読み直す（呼び出し側キャッシュではなく
+      // このDBの値を正とする）。[grantedPoints] が0でも現在値を返せるよう、
+      // 早期returnせず必ず読む（クラスdoc「戻り値」参照）。
+      final currentPoints = await _balanceStore.read();
+      // Issue #151で開放ポイント消費（HexOpeningSpendService）が2人目の
+      // 書き手になったため、呼び出し側が渡す [grantedPoints] が
+      // （キャッシュの乖離により）上限を超えて書き込もうとしても、ここで
+      // 最終的にクランプする（クラスdoc「なぜ必要か」参照。安全網であり、
+      // 呼び出し側が正しくクランプ済みの値を渡す責務を免除するものではない）。
+      final uncapped = currentPoints + grantedPoints;
+      resultingPoints = uncapped > cap ? cap : uncapped;
+      if (resultingPoints != currentPoints) {
+        await _balanceStore.write(resultingPoints);
       }
       await _writeSetting(watermarkRowIdKey, watermarkRowId.toString());
       await _writeSetting(remainderMillimetersKey, remainderMillimeters.toString());
     });
+    return resultingPoints;
   }
 
   Future<String?> _readSetting(String key) async {
