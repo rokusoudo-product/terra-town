@@ -17,6 +17,8 @@ void main() {
       List<Map<String, Object?>> hexRows = const [],
       bool withDistrictTables = false,
       bool withPoiTable = false,
+      bool withHexNeighborTable = false,
+      List<Map<String, Object?>> hexNeighborRows = const [],
     }) {
       return RegionPackConnection.forTesting(
         seed: (db) {
@@ -69,6 +71,19 @@ void main() {
             db.execute(
               "INSERT INTO poi VALUES ('node/1', 35.0, 135.0, 'shrine', '六創堂神社')",
             );
+          }
+          if (withHexNeighborTable) {
+            db.execute(
+              'CREATE TABLE hex_neighbor (hex_id INTEGER PRIMARY KEY, '
+              'neighbor_count INTEGER NOT NULL, neighbor_hex_ids TEXT NOT NULL)',
+            );
+            for (final row in hexNeighborRows) {
+              db.execute(
+                'INSERT INTO hex_neighbor (hex_id, neighbor_count, neighbor_hex_ids) '
+                'VALUES (?, ?, ?)',
+                [row['hex_id'], row['neighbor_count'], row['neighbor_hex_ids']],
+              );
+            }
           }
         },
       );
@@ -209,6 +224,75 @@ void main() {
         ),
       ]);
     });
+
+    test('hex_neighbor テーブルが無い場合は neighborsOf が常に空（Issue #152）', () {
+      final connection = openSeeded(
+        hexRows: [
+          {'hex_id': 1, 'terrain_type': 'forest'},
+        ],
+      );
+      addTearDown(connection.close);
+
+      final repo = RegionPackRepository.load(connection);
+
+      expect(repo.neighborsOf(const HexId(1)), isEmpty);
+    });
+
+    test('hex_neighbor テーブルがある場合は実データを返す（Issue #152）', () {
+      final connection = openSeeded(
+        hexRows: [
+          {'hex_id': 1, 'terrain_type': 'forest'},
+          {'hex_id': 2, 'terrain_type': 'forest'},
+          {'hex_id': 3, 'terrain_type': 'forest'},
+        ],
+        withHexNeighborTable: true,
+        hexNeighborRows: [
+          {'hex_id': 1, 'neighbor_count': 2, 'neighbor_hex_ids': '[2, 3]'},
+          {'hex_id': 2, 'neighbor_count': 1, 'neighbor_hex_ids': '[1]'},
+          // パック範囲の縁のヘクス（隣接0件）も1行持つ想定（compute_hex_neighbors.py参照）。
+          {'hex_id': 3, 'neighbor_count': 0, 'neighbor_hex_ids': '[]'},
+        ],
+      );
+      addTearDown(connection.close);
+
+      final repo = RegionPackRepository.load(connection);
+
+      expect(repo.neighborsOf(const HexId(1)), [const HexId(2), const HexId(3)]);
+      expect(repo.neighborsOf(const HexId(2)), [const HexId(1)]);
+      expect(repo.neighborsOf(const HexId(3)), isEmpty);
+    });
+
+    test('hex_neighbor に収録されていない hexId は空のイテラブル', () {
+      final connection = openSeeded(
+        hexRows: [
+          {'hex_id': 1, 'terrain_type': 'forest'},
+        ],
+        withHexNeighborTable: true,
+        hexNeighborRows: [
+          {'hex_id': 1, 'neighbor_count': 0, 'neighbor_hex_ids': '[]'},
+        ],
+      );
+      addTearDown(connection.close);
+
+      final repo = RegionPackRepository.load(connection);
+
+      expect(repo.neighborsOf(const HexId(999)), isEmpty);
+    });
+
+    test('neighbor_hex_ids が不正なJSONの場合はfail-loud（FormatException）', () {
+      final connection = openSeeded(
+        hexRows: [
+          {'hex_id': 1, 'terrain_type': 'forest'},
+        ],
+        withHexNeighborTable: true,
+        hexNeighborRows: [
+          {'hex_id': 1, 'neighbor_count': 0, 'neighbor_hex_ids': 'not-json'},
+        ],
+      );
+      addTearDown(connection.close);
+
+      expect(() => RegionPackRepository.load(connection), throwsFormatException);
+    });
   });
 
   group('RegionPackRepository（同梱の実パック・存在する場合のみ）', () {
@@ -234,6 +318,38 @@ void main() {
       expect(repo.version, isNotNull);
       // 狭山湖周辺パックの既知の1ヘクス（research.md §8.0 実測）で最低限の疎通を確認する。
       expect(repo.terrainOf(const HexId(626833455896940543)), TerrainType.vacantLot);
+    });
+
+    test('実データで隣接ヘクスが1〜6件、かつ全てhex_terrainに実在する（Issue #152）', () {
+      if (!File(packPath).existsSync()) {
+        markTestSkipped(
+          '$packPath が存在しません（tools/pack-builder/bundle_region_pack.sh '
+          '未実行の環境。Issue #85の方針により生成物はコミットしない）。',
+        );
+        return;
+      }
+
+      final connection = RegionPackConnection.open(packPath);
+      addTearDown(connection.close);
+
+      final repo = RegionPackRepository.load(connection);
+
+      const knownHex = HexId(626833455896940543);
+      final neighbors = repo.neighborsOf(knownHex).toList();
+
+      // パック内部のヘクスは通常6件だが、縁のヘクスは6件未満になりうる
+      // （Issue #152 受け入れ基準。パック範囲外へ出る隣接は含めない）。
+      expect(neighbors, isNotEmpty);
+      expect(neighbors.length, lessThanOrEqualTo(6));
+      for (final neighbor in neighbors) {
+        // 隣接として返されたヘクスは、必ずこのパックの hex_terrain に実在する
+        // （パック範囲外の隣接が含まれていないことの実データでの確認）。
+        expect(
+          repo.terrainOf(neighbor),
+          isNotNull,
+          reason: '$neighbor はパック範囲外のはずがない（hex_neighborの受け入れ基準）',
+        );
+      }
     });
   });
 }
