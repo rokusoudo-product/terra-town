@@ -15,14 +15,18 @@ Issue #94・#152（2026-09-13代表決定・本ファイルの役割拡張）: �
 という代表決定（pack_versionが2回変わるのを避ける）に従い、本ファイルが両方の
 統合窓口を1本化する。**
 
+Issue #158（POI→ヘクス対応の事前計算・Tier 2追加）: `extract_poi.py`が
+新たに書き出す`hex_poi`テーブル（`poi.sqlite`に同居。`poi_id, hex_id`）も
+同じ統合窓口でここに取り込む。
+
 入力（すべて `out/` 配下。無い場合はエラーで停止し、生成元スクリプトを案内する）:
   - `pack.sqlite`        — `classify_terrain.py`（`hex_terrain`・`pack_meta`）
   - `districts.sqlite`   — `extract_districts.py`（`district`・`hex_district`・`pack_meta`）
-  - `poi.sqlite`         — `extract_poi.py`（`poi`・`pack_meta`）
+  - `poi.sqlite`         — `extract_poi.py`（`poi`・`hex_poi`・`pack_meta`。Issue #158で`hex_poi`追加）
   - `hex_neighbor.sqlite`— `compute_hex_neighbors.py`（`hex_neighbor`・`pack_meta`）
 
 出力: `region_pack.sqlite`（テーブル: hex_terrain, district, hex_district, poi,
-hex_neighbor, pack_meta）
+hex_poi, hex_neighbor, pack_meta）
 
 ## 統合前の整合性チェック（fail-loud。advisor 2026-09-13 指摘を反映）
 
@@ -43,6 +47,12 @@ hex_neighbor, pack_meta）
   （`config.N03_PREFECTURE_CODES`の全件）が存在すること（`pack_version`の算出に
   必須の入力。`extract_districts.py`自体もfail-loudで検証しているが、
   古い`districts.sqlite`をそのまま使い回すケースに備えて統合時にも再検証する）。
+- `poi.sqlite`の`hex_poi`の`poi_id`集合が、`poi`の`id`集合と**完全一致**すること
+  （Issue #158受け入れ基準。`extract_poi.py`は`poi`・`hex_poi`を同じレコード集合から
+  同時に書き出すため、一致しない場合は生成コード自体の不整合を疑う）。
+- `poi.sqlite`の`hex_poi`のhex_id集合が、`hex_terrain`のhex_id集合の**部分集合**である
+  こと（`extract_poi.py`がパック範囲外ヘクスのPOIを除外済みのはずだが、
+  `hex_district`と同じ理由で統合時にも再検証する）。
 
 ## 統合後の`pack_version`（Issue #94・2026-09-13代表決定）
 
@@ -55,8 +65,12 @@ hex_neighbor, pack_meta）
 2. `n03_sha256_11`・`n03_sha256_13`（N03行政区域データ、都道府県別GMLzip）
 3. `poi_rules_sha256`（`poi_rules.py`のファイル内容のsha256。POI抽出ルールの変更を
    捕捉するため）
+4. `poi_tag_tier`（`poi.sqlite`の`pack_meta`。`config.POI_INCLUDE_TIER2`の値を反映した
+   `"tier1_and_tier2"`/`"tier1_only"`。Issue #158で追加 — `POI_INCLUDE_TIER2`を切り替えると
+   `poi`の中身は変わるが`poi_rules.py`自体は変わらないため、`poi_rules_sha256`だけでは
+   捕捉できない抜け穴だった。advisor 2026-09-13指摘）
 
-`{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{上記4値を連結してsha256した先頭12桁}`という
+`{AREA_SLUG}-v{PACK_SCHEMA_VERSION}-{上記5値を連結してsha256した先頭12桁}`という
 形式（`classify_terrain.py`と同じ「生成時刻に依存しない純関数」という設計方針を踏襲）。
 **中間生成物`out/pack.sqlite`の`pack_meta.pack_version`は`classify_terrain.py`が
 計算した値（N03/POI/隣接を含まない）のまま**であり、同梱物`region_pack.sqlite`の
@@ -153,6 +167,30 @@ def verify_inputs_consistent(
             "に対して再実行してください。"
         )
 
+    # --- Issue #158: hex_poi の整合性検証 ---
+    poi_conn = sqlite3.connect(str(poi_path))
+    try:
+        poi_ids = {row[0] for row in poi_conn.execute("SELECT id FROM poi")}
+        hex_poi_ids = {row[0] for row in poi_conn.execute("SELECT poi_id FROM hex_poi")}
+        hex_poi_hex_ids = {row[0] for row in poi_conn.execute("SELECT hex_id FROM hex_poi")}
+    finally:
+        poi_conn.close()
+
+    if hex_poi_ids != poi_ids:
+        missing = poi_ids - hex_poi_ids
+        extra = hex_poi_ids - poi_ids
+        raise AssertionError(
+            "poi.sqlite の hex_poi の poi_id 集合が poi の id 集合と一致しません "
+            f"(不足={len(missing)}件, 余剰={len(extra)}件)。extract_poi.py を再実行してください。"
+        )
+    if not hex_poi_hex_ids.issubset(hex_terrain_ids):
+        extra = hex_poi_hex_ids - hex_terrain_ids
+        raise AssertionError(
+            f"poi.sqlite の hex_poi に pack.sqlite の hex_terrain に存在しない "
+            f"hex_id が{len(extra)}件あります。extract_poi.py を現在の out/pack.sqlite "
+            "に対して再実行してください。"
+        )
+
     # config.N03_PREFECTURE_CODES を正とする（extract_districts.py と同じ入力source）。
     # ハードコードした ("11", "13") だと config.py 側でエリアを変更（都道府県の増減）した
     # ときに追随せず、検証が形骸化する（advisor 2026-09-13指摘）。
@@ -166,7 +204,7 @@ def verify_inputs_consistent(
 
 
 def compute_merged_pack_version(
-    pack_meta: dict[str, str], districts_meta: dict[str, str]
+    pack_meta: dict[str, str], districts_meta: dict[str, str], poi_meta: dict[str, str]
 ) -> tuple[str, dict[str, str]]:
     """N03・POI抽出ルールの入力を含めて pack_version を組み直す（本ファイルdocstring参照）。
 
@@ -175,6 +213,10 @@ def compute_merged_pack_version(
     決めるため、`config.N03_PREFECTURE_CODES`の並び順を変えると（都道府県の追加・削除を
     伴わなくても）`pack_version`が変わる。これは意図した挙動である
     （config.py の `N03_PREFECTURE_CODES` コメント・`PACK_SCHEMA_VERSION` コメント参照）。
+
+    `poi_tag_tier`（Issue #158・`config.POI_INCLUDE_TIER2`を反映した値）もハッシュに含める。
+    `poi_rules.py`のファイル内容を変えずに`POI_INCLUDE_TIER2`だけを切り替えても`poi`の
+    中身は変わるため、`poi_rules_sha256`だけでは捕捉できない（advisor 2026-09-13指摘）。
     """
 
     area_slug = pack_meta["area_slug"]
@@ -184,9 +226,10 @@ def compute_merged_pack_version(
         pref: districts_meta[f"n03_sha256_{pref}"] for pref in config.N03_PREFECTURE_CODES
     }
     poi_rules_sha256 = sha256_of_file(HERE / "poi_rules.py")
+    poi_tag_tier = poi_meta["poi_tag_tier"]
 
     hash_input = ":".join(
-        [input_pbf_sha256, *n03_sha256_by_pref.values(), poi_rules_sha256]
+        [input_pbf_sha256, *n03_sha256_by_pref.values(), poi_rules_sha256, poi_tag_tier]
     )
     combined = hashlib.sha256(hash_input.encode("ascii")).hexdigest()
     pack_version = f"{area_slug}-v{schema_version}-{combined[:12]}"
@@ -195,6 +238,7 @@ def compute_merged_pack_version(
     for pref, sha in n03_sha256_by_pref.items():
         audit_keys[f"pack_version_n03_sha256_{pref}"] = sha
     audit_keys["pack_version_poi_rules_sha256"] = poi_rules_sha256
+    audit_keys["pack_version_poi_tag_tier"] = poi_tag_tier
     return pack_version, audit_keys
 
 
@@ -256,7 +300,9 @@ def main() -> None:
     )
     log("  consistency OK")
 
-    pack_version, pack_version_audit = compute_merged_pack_version(pack_meta, districts_meta)
+    pack_version, pack_version_audit = compute_merged_pack_version(
+        pack_meta, districts_meta, poi_meta
+    )
     log(f"merged pack_version = {pack_version}")
 
     dst = sqlite3.connect(str(out_path))
@@ -314,6 +360,18 @@ def main() -> None:
         )
         dst.execute("INSERT INTO poi SELECT * FROM src_poi.poi")
 
+        # --- hex_poi（Issue #158・extract_poi.pyの出力を統合） ---
+        dst.execute(
+            """
+            CREATE TABLE hex_poi (
+                poi_id TEXT PRIMARY KEY,
+                hex_id INTEGER NOT NULL
+            )
+            """
+        )
+        dst.execute("CREATE INDEX idx_hex_poi_hex_id ON hex_poi(hex_id)")
+        dst.execute("INSERT INTO hex_poi SELECT * FROM src_poi.hex_poi")
+
         # --- hex_neighbor（Issue #152・compute_hex_neighbors.pyの出力を統合） ---
         dst.execute(
             """
@@ -350,8 +408,8 @@ def main() -> None:
         merged_meta.update(pack_version_audit)
         merged_meta["bundle_kind"] = "region_pack_slim"
         merged_meta["bundle_note"] = (
-            "cell_terrainを除いた同梱用サブセット + district/hex_district/poi/hex_neighborを統合"
-            "（tools/pack-builder/slim_pack_for_bundle.py・Issue #94/#152）"
+            "cell_terrainを除いた同梱用サブセット + district/hex_district/poi/hex_poi/hex_neighborを統合"
+            "（tools/pack-builder/slim_pack_for_bundle.py・Issue #94/#152/#158）"
         )
 
         dst.executemany(
@@ -372,6 +430,7 @@ def main() -> None:
         hex_count = conn.execute("SELECT COUNT(*) FROM hex_terrain").fetchone()[0]
         district_count = conn.execute("SELECT COUNT(*) FROM district").fetchone()[0]
         poi_count = conn.execute("SELECT COUNT(*) FROM poi").fetchone()[0]
+        hex_poi_count = conn.execute("SELECT COUNT(*) FROM hex_poi").fetchone()[0]
         hex_neighbor_count = conn.execute("SELECT COUNT(*) FROM hex_neighbor").fetchone()[0]
     finally:
         conn.close()
@@ -379,9 +438,10 @@ def main() -> None:
     out_size = out_path.stat().st_size
     in_size = pack_path.stat().st_size
     log(
-        f"DONE. {pack_path} ({in_size} bytes) + districts/poi/hex_neighbor -> {out_path} "
+        f"DONE. {pack_path} ({in_size} bytes) + districts/poi/hex_poi/hex_neighbor -> {out_path} "
         f"({out_size} bytes). hex_terrain={hex_count} district={district_count} "
-        f"poi={poi_count} hex_neighbor={hex_neighbor_count} pack_version={pack_version}"
+        f"poi={poi_count} hex_poi={hex_poi_count} hex_neighbor={hex_neighbor_count} "
+        f"pack_version={pack_version}"
     )
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/pack-builder/bundle_region_pack.sh — Issue #85・T044（Issue #94・#152で拡張）
+# tools/pack-builder/bundle_region_pack.sh — Issue #85・T044（Issue #94・#152・#158で拡張）
 #
 # バーティカルスライス対象エリア（狭山湖周辺・config.AREA_SLUG・2026-09-10 代表決定で
 # 本番確定。Issue #85 コメント参照）のパックをエンドツーエンドで生成し、
@@ -15,13 +15,21 @@
 # **同じ1回のパック作り直しにまとめる**（別々に行うとpack_versionが2回変わるため）。
 # 本スクリプトはその統合後の手順である。
 #
+# 2026-09-13 代表決定（Issue #158・同日別コメント）: 名所POI（Tier 1）に加えて
+# Tier 2（神社・寺等）も同じこのパック作り直しで採用し、POI→ヘクス対応（hex_poi）を
+# 事前計算して同梱する（extract_poi.py が out/pack.sqlite の hex_terrain に依存する
+# ようになったため、classify_terrain.py の後に実行する必要がある。手順の順序自体は
+# 元々この並びだったため変更不要）。
+#
 # 実行内容:
 #   1. classify_terrain.py     — 地形属性の事前計算（out/pack.sqlite。cell_terrain込み）
 #   2. download_n03.sh         — 国土数値情報N03のダウンロード（未取得時のみ）
 #   3. extract_districts.py    — 行政区域ポリゴンの取り込み（out/districts.sqlite）
-#   4. extract_poi.py          — 名所POIの抽出（out/poi.sqlite）
+#   4. extract_poi.py          — 名所POI（Tier 1+2）の抽出とhex_poiの事前計算
+#                                 （out/poi.sqlite。out/pack.sqliteのhex_terrainに依存・Issue #158）
 #   5. compute_hex_neighbors.py — ヘクス隣接関係の事前計算（out/hex_neighbor.sqlite・Issue #152）
-#   6. slim_pack_for_bundle.py — 上記4つを統合し軽量化（out/region_pack.sqlite）
+#   6. slim_pack_for_bundle.py — 上記4つ（poi.sqliteのhex_poi含む）を統合し軽量化
+#                                 （out/region_pack.sqlite）
 #   7. build_vector_tiles.sh   — Planetilerでベクタタイル生成（out/tiles.mbtiles）
 #   8. app/assets/pack/ へコピー
 #
@@ -57,7 +65,7 @@ echo "=== 3/8: 行政区域ポリゴンの取り込み（extract_districts.py・
 ./.venv/bin/python extract_districts.py
 
 echo
-echo "=== 4/8: 名所POIの抽出（extract_poi.py・Issue #86/#94） ==="
+echo "=== 4/8: 名所POI（Tier1+2）の抽出とhex_poiの事前計算（extract_poi.py・Issue #86/#94/#158） ==="
 ./.venv/bin/python extract_poi.py
 
 echo

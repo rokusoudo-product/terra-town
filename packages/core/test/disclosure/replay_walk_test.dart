@@ -57,6 +57,9 @@ class _FakeRegionPack implements RegionPack {
 
   @override
   Iterable<HexId> neighborsOf(HexId hexId) => const [];
+
+  @override
+  Iterable<PointOfInterest> pointsOfInterestIn(HexId hexId) => const [];
 }
 
 class _InMemoryDisclosedHexRepository implements Repository<DisclosedHex, HexId> {

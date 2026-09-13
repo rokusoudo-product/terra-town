@@ -19,7 +19,7 @@ bash bundle_region_pack.sh
 
 | ファイル | 内容 | 生成元 |
 |---|---|---|
-| `region_pack.sqlite` | `hex_terrain`（地形属性・`boundary_geojson`＝fog of war用のヘクス境界・Issue #105）・`district`/`hex_district`（行政区域・Issue #86/#94）・`poi`（名所POI・Issue #86/#94）・`hex_neighbor`（ヘクス隣接関係・Issue #152）・`pack_meta`（`pack_version` 等） | `classify_terrain.py`・`extract_districts.py`・`extract_poi.py`・`compute_hex_neighbors.py` → `slim_pack_for_bundle.py`（統合。Issue #94/#152で拡張） |
+| `region_pack.sqlite` | `hex_terrain`（地形属性・`boundary_geojson`＝fog of war用のヘクス境界・Issue #105）・`district`/`hex_district`（行政区域・Issue #86/#94）・`poi`/`hex_poi`（名所POI Tier1+2・POI→ヘクス対応・Issue #86/#94/#158）・`hex_neighbor`（ヘクス隣接関係・Issue #152）・`pack_meta`（`pack_version` 等） | `classify_terrain.py`・`extract_districts.py`・`extract_poi.py`・`compute_hex_neighbors.py` → `slim_pack_for_bundle.py`（統合。Issue #94/#152/#158で拡張） |
 | `tiles.mbtiles` | ベクタタイル（表示専用の基盤地図） | `build_vector_tiles.sh`（Planetiler） |
 
 ## pubspec.yaml との関係
@@ -64,9 +64,10 @@ bash bundle_region_pack.sh
    bash bundle_region_pack.sh
    ```
    `app/assets/pack/region_pack.sqlite`・`app/assets/pack/tiles.mbtiles` が生成されることを
-   確認する（実測: 狭山湖周辺エリアでそれぞれ約5.5MB・約680KB。`region_pack.sqlite` は
+   確認する（実測: 狭山湖周辺エリアでそれぞれ約5.76MB・約680KB。`region_pack.sqlite` は
    Issue #105（`hex_terrain.boundary_geojson`）で約750KB→約3.16MBに、
-   Issue #94/#152（行政区域・名所POI・ヘクス隣接関係の統合）で約3.16MB→約5.5MBに
+   Issue #94/#152（行政区域・名所POI・ヘクス隣接関係の統合）で約3.16MB→約5.5MBに、
+   Issue #158（名所POI Tier 2の追加・`hex_poi`の同梱。POI件数16→51件）で約5.5MB→約5.76MBに
    それぞれ増加した。詳細は `tools/pack-builder/README.md`「ヘクス境界」「ヘクス隣接関係」節参照）。
 2. **非対話シェルでビルド/実行する**（対話シェルは sdkman が `JAVA_HOME` を JDK17に
    固定し、`maplibre_gl` 0.27.0系が要求する JDK21 でビルドできず失敗する。

@@ -37,6 +37,39 @@ void main() {
       expect(a.hashCode, b.hashCode);
     });
 
+    test('hexId未指定はnull（Issue #158・hex_poiが無い旧パックのforward-compat）', () {
+      const poi = PointOfInterest(
+        id: PointOfInterestId('node/1'),
+        name: '六創堂神社',
+        kind: 'shrine',
+        latitude: 35.0,
+        longitude: 135.0,
+      );
+
+      expect(poi.hexId, isNull);
+    });
+
+    test('hexIdが異なれば等価にならない（Issue #158）', () {
+      const a = PointOfInterest(
+        id: PointOfInterestId('node/1'),
+        name: '六創堂神社',
+        kind: 'shrine',
+        latitude: 35.0,
+        longitude: 135.0,
+        hexId: HexId(1),
+      );
+      const b = PointOfInterest(
+        id: PointOfInterestId('node/1'),
+        name: '六創堂神社',
+        kind: 'shrine',
+        latitude: 35.0,
+        longitude: 135.0,
+        hexId: HexId(2),
+      );
+
+      expect(a, isNot(b));
+    });
+
     test('緯度が範囲外だと assert で弾く', () {
       expect(
         () => PointOfInterest(

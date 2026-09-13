@@ -31,18 +31,29 @@ import '../db/region_pack_connection.dart';
 ///
 /// ## 区画・POI・隣接テーブルが同梱パックに存在しない場合への対応（forward-compat）
 /// `RegionPack` は Dart の `abstract interface class` であり
-/// `districtOf`/`districts`/`pointsOfInterest`/`neighborsOf` を実装せずに済ませる
-/// ことはできない。そのため本クラスは、読み込み時に `sqlite_master` でテーブルの
-/// 存在を確認し、**存在しなければ「該当なし」（null・空リスト・空イテラブル）として
-/// 振る舞う**（古いテストフィクスチャや、生成し直していない同梱パックに対しても
-/// 壊れずに動くようにするため）。
+/// `districtOf`/`districts`/`pointsOfInterest`/`neighborsOf`/`pointsOfInterestIn` を
+/// 実装せずに済ませることはできない。そのため本クラスは、読み込み時に
+/// `sqlite_master` でテーブルの存在を確認し、**存在しなければ「該当なし」
+/// （null・空リスト・空イテラブル）として振る舞う**（古いテストフィクスチャや、
+/// 生成し直していない同梱パックに対しても壊れずに動くようにするため）。
 ///
-/// 2026-09-13 時点（Issue #94・#152）で `tools/pack-builder/slim_pack_for_bundle.py`
-/// が生成する `region_pack.sqlite` には次の6テーブルが揃っている:
+/// 2026-09-13 時点（Issue #94・#152・#158）で `tools/pack-builder/slim_pack_for_bundle.py`
+/// が生成する `region_pack.sqlite` には次の7テーブルが揃っている:
 /// `hex_terrain(hex_id, terrain_type, feature_id, cell_count, boundary_geojson)`・
 /// `district(district_id, name, prefecture_name, county_name, geometry_geojson)`・
 /// `hex_district(hex_id, district_id)`・`poi(id, lat, lon, kind, name)`・
-/// `hex_neighbor(hex_id, neighbor_count, neighbor_hex_ids)`・`pack_meta(key, value)`。
+/// `hex_poi(poi_id, hex_id)`・`hex_neighbor(hex_id, neighbor_count, neighbor_hex_ids)`・
+/// `pack_meta(key, value)`。
+///
+/// ## `hex_poi` が無い旧パックでの `PointOfInterest.hexId`（Issue #158）
+/// `poi` テーブルはあるが `hex_poi` テーブルが無い旧パック（Issue #158以前に生成した
+/// パック）では、POIの所属ヘクスを知る術が無い。この場合は例外を投げず、
+/// 読み込んだ `PointOfInterest` すべての `hexId` を `null` にする
+/// （`pointsOfInterest` 自体は引き続き読み込む。`terrainOf` 等と異なりPOIの存在自体は
+/// `poi` テーブルだけで完結する情報のため）。`pointsOfInterestIn` はヘクスへの
+/// 帰属が分からないPOIを返しようがないため、この場合常に空のイテラブルになる。
+/// `hex_poi` に `poi` へ対応しない `poi_id` が存在する場合（生成コードの不整合）は
+/// `terrainOf` の未知`terrain_type`と同じ方針で `StateError`（fail-loud）とする。
 ///
 /// ## `terrain_type` の文字列表現（snake_case → enum）
 /// `tools/pack-builder/terrain_rules.py` は `core` の [TerrainType] enum値
@@ -70,12 +81,14 @@ class RegionPackRepository implements RegionPack {
     required List<District> districts,
     required List<PointOfInterest> pointsOfInterest,
     required Map<int, List<HexId>> neighborHexIdsByHexId,
+    required Map<int, List<PointOfInterest>> pointsOfInterestByHexId,
   })  : _version = version,
         _terrainByHexId = terrainByHexId,
         _districtByHexId = districtByHexId,
         _districts = List.unmodifiable(districts),
         _pointsOfInterest = List.unmodifiable(pointsOfInterest),
-        _neighborHexIdsByHexId = neighborHexIdsByHexId;
+        _neighborHexIdsByHexId = neighborHexIdsByHexId,
+        _pointsOfInterestByHexId = pointsOfInterestByHexId;
 
   final PackVersion _version;
   final Map<int, TerrainType> _terrainByHexId;
@@ -86,6 +99,11 @@ class RegionPackRepository implements RegionPack {
   /// ヘクスごとの隣接ヘクス一覧（Issue #152）。[load] の時点で
   /// `List.unmodifiable` 済みの値を格納する（`_loadHexNeighbors` 参照）。
   final Map<int, List<HexId>> _neighborHexIdsByHexId;
+
+  /// ヘクスごとの名所POI一覧（Issue #158）。`hexId`が`null`のPOI（`hex_poi`が
+  /// 無い旧パック由来）はここに現れない（クラスコメント参照）。[load] の時点で
+  /// `List.unmodifiable` 済みの値を格納する（`_groupPointsOfInterestByHexId` 参照）。
+  final Map<int, List<PointOfInterest>> _pointsOfInterestByHexId;
 
   /// [connection] から地域パックを読み込み、[RegionPackRepository] を組み立てる。
   ///
@@ -104,11 +122,12 @@ class RegionPackRepository implements RegionPack {
         ? _loadDistricts(connection)
         : const <District>[];
     final pointsOfInterest = tableNames.contains('poi')
-        ? _loadPointsOfInterest(connection)
+        ? _loadPointsOfInterest(connection, hasHexPoi: tableNames.contains('hex_poi'))
         : const <PointOfInterest>[];
     final neighborHexIdsByHexId = tableNames.contains('hex_neighbor')
         ? _loadHexNeighbors(connection)
         : const <int, List<HexId>>{};
+    final pointsOfInterestByHexId = _groupPointsOfInterestByHexId(pointsOfInterest);
 
     return RegionPackRepository._(
       version: version,
@@ -117,6 +136,7 @@ class RegionPackRepository implements RegionPack {
       districts: districts,
       pointsOfInterest: pointsOfInterest,
       neighborHexIdsByHexId: neighborHexIdsByHexId,
+      pointsOfInterestByHexId: pointsOfInterestByHexId,
     );
   }
 
@@ -138,6 +158,10 @@ class RegionPackRepository implements RegionPack {
   @override
   Iterable<HexId> neighborsOf(HexId hexId) =>
       _neighborHexIdsByHexId[hexId.value] ?? const <HexId>[];
+
+  @override
+  Iterable<PointOfInterest> pointsOfInterestIn(HexId hexId) =>
+      _pointsOfInterestByHexId[hexId.value] ?? const <PointOfInterest>[];
 
   static Set<String> _existingTableNames(RegionPackConnection connection) {
     final rows = connection.rawSelect(
@@ -221,10 +245,16 @@ class RegionPackRepository implements RegionPack {
     ];
   }
 
+  /// `poi` テーブルを読み込む。`hasHexPoi` が真であれば `hex_poi`（Issue #158）も
+  /// あわせて読み込み、各POIの `hexId` を埋める。`hex_poi` が無い旧パックでは
+  /// 全POIの `hexId` が `null` になる（クラスコメント参照）。
   static List<PointOfInterest> _loadPointsOfInterest(
-    RegionPackConnection connection,
-  ) {
+    RegionPackConnection connection, {
+    required bool hasHexPoi,
+  }) {
     final rows = connection.rawSelect('SELECT id, lat, lon, kind, name FROM poi');
+    final poiIds = rows.map((row) => row['id'] as String).toSet();
+    final hexIdByPoiId = hasHexPoi ? _loadHexIdByPoiId(connection, poiIds) : const <String, int>{};
     return [
       for (final row in rows)
         PointOfInterest(
@@ -233,8 +263,52 @@ class RegionPackRepository implements RegionPack {
           kind: row['kind'] as String,
           latitude: (row['lat'] as num).toDouble(),
           longitude: (row['lon'] as num).toDouble(),
+          hexId: hexIdByPoiId.containsKey(row['id'])
+              ? HexId(hexIdByPoiId[row['id']]!)
+              : null,
         ),
     ];
+  }
+
+  /// `hex_poi` テーブル（Issue #158・`tools/pack-builder/extract_poi.py`）から
+  /// `poi_id -> hex_id` の対応を読み込む。
+  ///
+  /// `poiIds`（`poi` テーブルの id 集合）に含まれない `poi_id` を持つ行があれば、
+  /// 生成コードの不整合（`hex_poi` の `poi_id` 集合は `poi` の `id` 集合と一致する
+  /// はず — `tools/pack-builder/slim_pack_for_bundle.py` が統合時に検証済み）を
+  /// 意味するため `StateError`（fail-loud。`terrainOf` の未知`terrain_type`と同じ方針）
+  /// とする。
+  static Map<String, int> _loadHexIdByPoiId(
+    RegionPackConnection connection,
+    Set<String> poiIds,
+  ) {
+    final rows = connection.rawSelect('SELECT poi_id, hex_id FROM hex_poi');
+    final result = <String, int>{};
+    for (final row in rows) {
+      final poiId = row['poi_id'] as String;
+      if (!poiIds.contains(poiId)) {
+        throw StateError(
+          'hex_poi の poi_id "$poiId" に対応する poi 行がありません。地域パックの'
+          '生成が壊れている可能性があります（tools/pack-builder/slim_pack_for_bundle.py '
+          'の hex_poi 整合性検証を確認してください）。',
+        );
+      }
+      result[poiId] = row['hex_id'] as int;
+    }
+    return result;
+  }
+
+  /// [pointsOfInterest] を `hexId`（非null のもの）でグルーピングする（[pointsOfInterestIn] 用）。
+  static Map<int, List<PointOfInterest>> _groupPointsOfInterestByHexId(
+    List<PointOfInterest> pointsOfInterest,
+  ) {
+    final result = <int, List<PointOfInterest>>{};
+    for (final poi in pointsOfInterest) {
+      final hexId = poi.hexId;
+      if (hexId == null) continue;
+      result.putIfAbsent(hexId.value, () => []).add(poi);
+    }
+    return result.map((key, value) => MapEntry(key, List.unmodifiable(value)));
   }
 
   /// `tools/pack-builder/terrain_rules.py` が書く snake_case（`vacant_lot` 等）を

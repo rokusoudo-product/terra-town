@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""extract_poi.py を2回実行し、決定論を検証する（Issue #86・T042受け入れ基準）。
+"""extract_poi.py を2回実行し、決定論を検証する（Issue #86・T042受け入れ基準。
+`hex_poi` は Issue #158 受け入れ基準）。
 
 `verify_determinism.py`（地形属性・Issue #38）と同じ考え方: 同一入力（同一
-`area.osm.pbf`・同一設定）から `poi` テーブルを2回生成し、内容が完全一致する
-ことを確認する。
+`area.osm.pbf`・同一`out/pack.sqlite`・同一設定）から `poi`・`hex_poi` テーブルを
+2回生成し、内容が完全一致することを確認する。
 
 使い方:
     python verify_poi_determinism.py
@@ -35,6 +36,14 @@ def poi_rows(path: Path) -> set[tuple]:
         conn.close()
 
 
+def hex_poi_rows(path: Path) -> set[tuple]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return set(conn.execute("SELECT poi_id, hex_id FROM hex_poi").fetchall())
+    finally:
+        conn.close()
+
+
 def main() -> None:
     print("[verify_poi_determinism] run 1 ...")
     p1 = run_once("poi_determinism_run1.sqlite")
@@ -49,13 +58,27 @@ def main() -> None:
     print(f"[verify_poi_determinism] run2 poi rows: {len(rows2)}")
     print(f"[verify_poi_determinism] symmetric diff: {len(diff)}")
 
-    if diff:
-        print("[verify_poi_determinism] FAIL: poi の内容が2回の実行で一致しませんでした。")
+    hex_rows1 = hex_poi_rows(p1)
+    hex_rows2 = hex_poi_rows(p2)
+    hex_diff = hex_rows1.symmetric_difference(hex_rows2)
+
+    print(f"[verify_poi_determinism] run1 hex_poi rows: {len(hex_rows1)}")
+    print(f"[verify_poi_determinism] run2 hex_poi rows: {len(hex_rows2)}")
+    print(f"[verify_poi_determinism] hex_poi symmetric diff: {len(hex_diff)}")
+
+    if diff or hex_diff:
+        print(
+            "[verify_poi_determinism] FAIL: poi/hex_poi の内容が2回の実行で一致しませんでした。"
+        )
         for row in list(diff)[:20]:
-            print("  ", row)
+            print("  poi", row)
+        for row in list(hex_diff)[:20]:
+            print("  hex_poi", row)
         sys.exit(1)
 
-    print("[verify_poi_determinism] PASS: 2回の生成で poi の内容が完全に一致しました。")
+    print(
+        "[verify_poi_determinism] PASS: 2回の生成で poi・hex_poi の内容が完全に一致しました。"
+    )
 
 
 if __name__ == "__main__":

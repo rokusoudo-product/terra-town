@@ -79,9 +79,18 @@ H3_RESOLUTION = 11
 # - `hex_geometry.py`（ヘクス境界`boundary_geojson`の算出ロジック。Issue #105）
 # - `hex_neighbors.py`（ヘクス隣接関係`hex_neighbor`の算出ロジック。Issue #152。
 #   例: 隣接距離kを2に変えた・除外条件を変えた等）
+# - `extract_poi.py` の POI→ヘクス対応（`hex_poi`）算出ロジック（Issue #158。
+#   例: 緯度経度の丸め桁数を変えた・パック範囲外ヘクスの除外条件を変えた等）
 # これらは`input_pbf_sha256`等の既存ハッシュ入力では捕捉できない
 # （＝入力データが同じでもロジックだけが変わりうる）ため、`terrain_rules.py`と
 # 同じ「手動インクリメント」の対象とする。
+#
+# 一方、`poi_rules.py`（タグ判定ルール本体）と `POI_INCLUDE_TIER2`（Tier 2 有効化
+# フラグ）は本値の対象外でよい。前者は`slim_pack_for_bundle.py`が`poi_rules_sha256`
+# として`pack_version`のハッシュ入力に含めており（Issue #94決定）、後者も同スクリプトが
+# `poi.sqlite`の`pack_meta`経由で`pack_version`のハッシュ入力に含める（Issue #158。
+# 「フラグを変更すると`poi`の内容は変わるのに`poi_rules.py`は変わらないため
+# `pack_version`が変わらない」という抜け穴を防ぐため）。
 PACK_SCHEMA_VERSION = 1
 
 # --- OSM抽出データのキャッシュ -----------------------------------------------
@@ -122,17 +131,21 @@ N03_DIR = f"{DATA_CACHE_DIR}/n03"
 # （実測: 約80%削減。tools/pack-builder/README.md参照）。
 DISTRICT_SIMPLIFY_TOLERANCE_M = 10.0
 
-# --- 名所POI（Issue #86・T042）------------------------------------------------
-# docs/landmark_objects.md §2.1 の Tier 1（主要層）タグのみを抽出する。
-# Tier 2（補完層。密度不足地域を補うための広めのタグ）は「地域内の主要層密度が
-# 目標密度を下回る場合のみ採用」という条件付きの仕様で、目標密度自体が仮値
-# （docs/landmark_objects.md §3.1）のため、本Issueでは実装しない
-# （tools/pack-builder/README.md「既知の簡略化・未解決事項」参照）。
+# --- 名所POI（Issue #86・T042。Tier 2 は Issue #158）--------------------------
+# docs/landmark_objects.md §2.1 の Tier 1（主要層）タグを常に抽出する。
 #
+# Tier 2（補完層。密度不足地域を補うための広めのタグ）は §2.1 上「地域内の主要層
+# 密度が目標密度を下回る場合のみ採用」という条件付きの仕様だが、目標密度自体が
+# 仮値（docs/landmark_objects.md §3.1）であり自動密度判定は実装しない
+# （Issue #158・2026-09-13代表決定）。代わりに本フラグで一律に有効/無効を切り替える
+# （tools/pack-builder/README.md「既知の簡略化・未解決事項」参照）。
+POI_INCLUDE_TIER2 = True
+
 # `leisure=park`「一定面積以上」のしきい値は docs/landmark_objects.md 上も
 # 未定義のため、1ヘクタール（100m四方相当）を暫定値として採用した
 # （`MOUNTAIN_SMALL_FEATURE_BUFFER_M` と同種の「実測に基づかないオーダー感の判断」。
-# 代表確認事項として README に記録）。
+# 代表確認事項として README に記録）。Tier 2 のタグには面積条件付きのものは無い
+# （`poi_rules.AREA_THRESHOLD_TAGS` 参照）。
 POI_PARK_MIN_AREA_M2 = 10_000.0
 
 # --- 出力 -------------------------------------------------------------------
