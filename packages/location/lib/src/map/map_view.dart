@@ -10,6 +10,7 @@ import 'package:terra_town_core/terra_town_core.dart' show GeoPosition;
 
 import 'current_location_marker.dart';
 import 'fog_of_war_layer.dart';
+import 'rendered_feature_id.dart';
 import 'map_camera_position.dart';
 import 'mbtiles_source.dart';
 
@@ -446,6 +447,15 @@ class _MapViewState extends State<MapView> {
       // ヘクスをタップして選ぶ操作の窓口（Issue #151・T064）。[onFogHexTapped]
       // が指定された場合のみ購読する（[onFogHexTapped] クラスdoc参照）。
       onMapClick: widget.onFogHexTapped == null ? null : _handleMapClick,
+      // 【必須】fog of war レイヤーは `addFillLayer` の既定（`enableInteraction: true`）
+      // でタップ対象のレイヤーとして登録される。`maplibre_gl` の Android 実装
+      // （`MapLibreMapController.java` の `onMapClick`）は、タップ地点に対話可能な
+      // レイヤーの地物があると `feature#onTap` だけを送り、`featureTapsTriggersMapClick`
+      // が true のときに限って `map#onMapClick` も送る（既定は false）。fog レイヤーは
+      // パック全域を覆っているため、既定のままでは**どこをタップしても
+      // `onMapClick` が一切届かず**、ヘクスの開放シートが開かなかった
+      // （2026-09-13 秘書の実機検証で発見・Issue #151）。
+      featureTapsTriggersMapClick: true,
     );
   }
 
@@ -462,12 +472,21 @@ class _MapViewState extends State<MapView> {
         [widget.fogLayerId],
         null,
       );
-      if (features.isEmpty) return;
+      if (features.isEmpty) {
+        _log('タップ地点に fog 地物がありませんでした（point=$point）');
+        return;
+      }
       final feature = features.first;
-      if (feature is! Map) return;
-      final rawId = feature['id'];
-      if (rawId is! num) return;
-      onFogHexTapped(rawId.toInt());
+      if (feature is! Map) {
+        _log('タップ地点の fog 地物の形式が想定外でした: ${feature.runtimeType}');
+        return;
+      }
+      final featureId = parseRenderedFeatureId(feature['id']);
+      if (featureId == null) {
+        _log('タップ地点の fog 地物の id を解釈できませんでした: ${feature['id']}');
+        return;
+      }
+      onFogHexTapped(featureId);
     } catch (e, stackTrace) {
       _log('失敗: タップ地点のfog地物の問い合わせでエラー: $e');
       developer.log(
