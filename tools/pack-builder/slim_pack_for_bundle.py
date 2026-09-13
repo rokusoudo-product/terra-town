@@ -80,6 +80,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import config
+
 HERE = Path(__file__).resolve().parent
 
 
@@ -151,7 +153,10 @@ def verify_inputs_consistent(
             "に対して再実行してください。"
         )
 
-    for pref in ("11", "13"):
+    # config.N03_PREFECTURE_CODES を正とする（extract_districts.py と同じ入力source）。
+    # ハードコードした ("11", "13") だと config.py 側でエリアを変更（都道府県の増減）した
+    # ときに追随せず、検証が形骸化する（advisor 2026-09-13指摘）。
+    for pref in config.N03_PREFECTURE_CODES:
         if f"n03_sha256_{pref}" not in districts_meta:
             raise AssertionError(
                 f"districts.sqlite の pack_meta に n03_sha256_{pref} がありません。"
@@ -163,26 +168,33 @@ def verify_inputs_consistent(
 def compute_merged_pack_version(
     pack_meta: dict[str, str], districts_meta: dict[str, str]
 ) -> tuple[str, dict[str, str]]:
-    """N03・POI抽出ルールの入力を含めて pack_version を組み直す（本ファイルdocstring参照）。"""
+    """N03・POI抽出ルールの入力を含めて pack_version を組み直す（本ファイルdocstring参照）。
+
+    N03の都道府県は`config.N03_PREFECTURE_CODES`（設定の並び順。現状`["11", "13"]`）を
+    正として反復する。ハッシュに含める文字列の組み立て順序自体が`pack_version`の値を
+    決めるため、`config.N03_PREFECTURE_CODES`の並び順を変えると（都道府県の追加・削除を
+    伴わなくても）`pack_version`が変わる。これは意図した挙動である
+    （config.py の `N03_PREFECTURE_CODES` コメント・`PACK_SCHEMA_VERSION` コメント参照）。
+    """
 
     area_slug = pack_meta["area_slug"]
     schema_version = pack_meta["pack_schema_version"]
     input_pbf_sha256 = pack_meta["input_pbf_sha256"]
-    n03_sha256_11 = districts_meta["n03_sha256_11"]
-    n03_sha256_13 = districts_meta["n03_sha256_13"]
+    n03_sha256_by_pref = {
+        pref: districts_meta[f"n03_sha256_{pref}"] for pref in config.N03_PREFECTURE_CODES
+    }
     poi_rules_sha256 = sha256_of_file(HERE / "poi_rules.py")
 
-    combined = hashlib.sha256(
-        f"{input_pbf_sha256}:{n03_sha256_11}:{n03_sha256_13}:{poi_rules_sha256}".encode("ascii")
-    ).hexdigest()
+    hash_input = ":".join(
+        [input_pbf_sha256, *n03_sha256_by_pref.values(), poi_rules_sha256]
+    )
+    combined = hashlib.sha256(hash_input.encode("ascii")).hexdigest()
     pack_version = f"{area_slug}-v{schema_version}-{combined[:12]}"
 
-    audit_keys = {
-        "pack_version_input_pbf_sha256": input_pbf_sha256,
-        "pack_version_n03_sha256_11": n03_sha256_11,
-        "pack_version_n03_sha256_13": n03_sha256_13,
-        "pack_version_poi_rules_sha256": poi_rules_sha256,
-    }
+    audit_keys = {"pack_version_input_pbf_sha256": input_pbf_sha256}
+    for pref, sha in n03_sha256_by_pref.items():
+        audit_keys[f"pack_version_n03_sha256_{pref}"] = sha
+    audit_keys["pack_version_poi_rules_sha256"] = poi_rules_sha256
     return pack_version, audit_keys
 
 
@@ -247,7 +259,6 @@ def main() -> None:
     pack_version, pack_version_audit = compute_merged_pack_version(pack_meta, districts_meta)
     log(f"merged pack_version = {pack_version}")
 
-    src = sqlite3.connect(str(pack_path))
     dst = sqlite3.connect(str(out_path))
     try:
         dst.execute("ATTACH DATABASE ? AS src_pack", (str(pack_path),))
@@ -354,7 +365,6 @@ def main() -> None:
         dst.execute("DETACH DATABASE src_neighbor")
         dst.execute("VACUUM")
     finally:
-        src.close()
         dst.close()
 
     conn = sqlite3.connect(str(out_path))

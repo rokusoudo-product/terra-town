@@ -222,11 +222,10 @@ bash build_vector_tiles.sh
 # 8. 同一入力から同一出力になることの検証（Planetilerを2回実行して比較。約1.5〜2分）
 ./.venv/bin/python verify_tiles_determinism.py
 
-# 9. 同梱用に軽量化（cell_terrainを除いたSQLiteを作る）
-./.venv/bin/python slim_pack_for_bundle.py
-# out/region_pack.sqlite が生成される（約3.16MB。cell_terrain込みの66MBに対して約4.8%。
-# Issue #105でhex_terrain.boundary_geojson（ヘクス境界）を追加したため、
-# 追加前の約750KBから増加した。詳細は下記「ヘクス境界（boundary_geojson・Issue #105）」参照）
+# 9. （旧手順。Issue #94/#152で18番へ統合・移動した）
+# ⚠️ ここで slim_pack_for_bundle.py を実行しても、この時点ではまだ
+# districts.sqlite/poi.sqlite/hex_neighbor.sqliteが無いためエラーで停止する。
+# 統合・軽量化は district/POI/隣接関係の生成（11〜17）を終えたあと、18番で行うこと。
 
 # 10. 各ヘクスFeature直下に整数idがあることの検証（T043の受け入れ基準を実際に確認する）
 # （Issue #105以降は、格納済みboundary_geojsonが再計算結果と一致することもあわせて検証する）
@@ -283,8 +282,9 @@ Feature id の検証（10）は含まれない**ため、それらは別途上�
 **`cell_terrain`は同梱対象外と判断した**（Issue #85・T044）。生成過程の中間データであり
 （抜き取り検証`spot_check_samples.py`・デバッグ用途）、fog of war の実行には`hex_terrain`
 だけで足りるため。`slim_pack_for_bundle.py`が`cell_terrain`を除いた`region_pack.sqlite`
-（実測 約3.16MB。Issue #105で`boundary_geojson`を追加する前は約750KBだった。
-`cell_terrain`込みの66MBに対して約4.8%）を作る。
+を作る（`pack.sqlite`〔`cell_terrain`込みで約66MB〕からの軽量化としては約8.3%〔統合後の
+約5.5MB時点〕。Issue #94/#152で`district`/`hex_district`/`poi`/`hex_neighbor`の統合先にも
+なった経緯・実測推移は「バーティカルスライス対象エリアの同梱」節参照）。
 
 ## 出力（`out/districts.sqlite`）のテーブル構成（T041）
 
@@ -419,12 +419,19 @@ hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #9
   `N03-20230101`（令和5年版）に対応する正しい番号は**「R 5JHf 357」**である
   （代表決定コメント: https://github.com/rokusoudo-product/terra-town/issues/94#issuecomment-5650198269 ）。
 - **2026-09-13代表決定（Issue #94）**: 帰属表示に**出典（国土交通省 国土数値情報
-  行政区域データ・上記URL）／CC BY 4.0／加工した旨／上記承認番号**を含める（安全側に
-  倒す）。`extract_districts.py`が`district_source_url`・`district_license_cc`・
-  `district_processing_note`・`district_survey_approval`として`pack_meta`に個別キーで
-  記録する（`slim_pack_for_bundle.py`の統合時に`district_`プレフィックス済みのため
-  そのまま`region_pack.sqlite`にも残る）。**画面上での常時表示（T108）は本Issueのスコープ外
-  ─ 未実装のまま**であり、T108実装時にこれらのキーをそのまま読めばよい。
+  行政区域データ・URL）／CC BY 4.0／加工した旨／上記承認番号**を含める（安全側に
+  倒す）。`extract_districts.py`が`pack_meta`に個別キーで記録する
+  （`slim_pack_for_bundle.py`の統合時に`district_`プレフィックス済みのため
+  そのまま`region_pack.sqlite`にも残る）:
+  - `district_source_site_url`（**T108が画面表示に使うべきキー**。「国土数値情報
+    利用規約」の表示例「出典：国土交通省 国土数値情報ダウンロードサイト（URL）」の
+    URLに対応する、クリック可能な実在のURL＝サイトトップ`https://nlftp.mlit.go.jp/ksj/`）
+  - `district_source_url`（監査目的。実際に取得した個別ファイル名の記録。
+    ブレース展開`N03-20230101_{11,13}_GML.zip`はURLとして単体でクリック・表示できる
+    形式ではないため、`district_source_site_url`とは別キーに分離した）
+  - `district_license_cc`・`district_processing_note`・`district_survey_approval`
+  **画面上での常時表示（T108）は本Issueのスコープ外─未実装のまま**であり、
+  T108実装時にこれらのキーをそのまま読めばよい。
   **⚠️ 法的な判断は本Issueの範囲外**: 「派生物をアプリに同梱して一般公開する際に、
   あらためて国土地理院への承認申請が必要か」は判断できる事項ではない。**一般公開
   （ストア配信）の前に、代表が国土地理院に確認すること**を推奨する。MVPの開発・実機検証の
@@ -464,16 +471,21 @@ hex_neighbor, pack_meta`）に統合する。**2026-09-13代表決定（Issue #9
 `pack_version_n03_sha256_13`・`pack_version_poi_rules_sha256`）としてそのまま残るため、
 後から「何が版に効いたか」を追える。
 
-**`hex_neighbor`（ヘクス隣接関係・Issue #152）は`pack_version`の入力に含めていない**:
-`hex_terrain`のヘクス集合とH3ライブラリのみに依存する純関数であり、既存の
-`input_pbf_sha256`（ヘクス集合を決める入力）で実質的に捕捉済みのため
-（h3-pyのバージョンは`hex_neighbor_h3_py_version`として`pack_meta`に記録するのみで
-`pack_version`のハッシュには含めない）。
+**`hex_neighbor`（ヘクス隣接関係・Issue #152）は`pack_version`のハッシュ入力に
+含めていない**: `hex_terrain`のヘクス集合とH3ライブラリのみに依存する純関数であり、
+既存の`input_pbf_sha256`（ヘクス集合を決める入力）で「入力データ」としては実質的に
+捕捉済みのため（h3-pyのバージョンは`hex_neighbor_h3_py_version`として`pack_meta`に
+記録するのみでハッシュには含めない）。
 
-**`terrain_rules.py`の判定ルールや`H3_RESOLUTION`を変えたときは、必ず
-`config.PACK_SCHEMA_VERSION`をインクリメントすること**（さもないと同一OSM入力に対して
-ロジックが変わったのに同じ`pack_version`になり、plan.md §3.3の不変性ルールの前提が壊れる。
-この既存ルールは変更していない）。
+**ただし「入力データが同じでもロジックだけを変えた場合」は`input_pbf_sha256`では
+捕捉できない**（advisor 2026-09-13指摘。`hex_geometry.py`は Issue #105 以来、
+`hex_neighbors.py`は Issue #152 で新たに同じ穴を持つ）。そのため
+**`terrain_rules.py`・`H3_RESOLUTION`・`CELL_SIZE_M`に加えて、`hex_geometry.py`
+（`boundary_geojson`の算出）・`hex_neighbors.py`（隣接関係の算出。例:
+隣接距離kを2に変える等）を変更したときも、必ず`config.PACK_SCHEMA_VERSION`を
+インクリメントすること**（さもないとロジックが変わったのに同じ`pack_version`になり、
+plan.md §3.3の不変性ルールの前提が壊れる。`config.py`の`PACK_SCHEMA_VERSION`
+コメントにも同内容を記載した）。
 
 ## 各ヘクスFeature直下の整数`id`（T043）
 

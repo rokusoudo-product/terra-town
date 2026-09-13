@@ -353,11 +353,23 @@ def main() -> None:
         # 出典表示（Issue #94・2026-09-13代表決定）: 出典URL・CC BY 4.0・加工した旨・
         # 測量法に基づく国土地理院長承認（複製）番号を、それぞれ独立したキーで持つ
         # （T108が画面表示を実装する際にそのまま読める形にするため）。
+        #
+        # district_source_site_url: 国土数値情報 利用規約が示す表示例
+        # 「出典：国土交通省 国土数値情報ダウンロードサイト（URL）」のURLに対応する、
+        # **クリック可能な実在のURL**（サイトトップ）。T108の画面表示はこちらを使うこと。
+        "district_source_site_url": "https://nlftp.mlit.go.jp/ksj/",
+        # district_source_url: 実際に取得した個別ファイルの記録用（advisor 2026-09-13指摘:
+        # ブレース展開`{11,13}`はURLではなくシェルのパターン表記であり、これ単体では
+        # クリック・表示に使えない）。監査目的でのみ保持する。
         "district_source_url": (
             "https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2023/"
             f"N03-{config.N03_EDITION}_{{"
             + ",".join(config.N03_PREFECTURE_CODES)
-            + "}_GML.zip"
+            + "}_GML.zip（都道府県コードごとに実在するURLに展開: "
+            + ", ".join(
+                f"N03-{config.N03_EDITION}_{pref}_GML.zip" for pref in config.N03_PREFECTURE_CODES
+            )
+            + "）"
         ),
         "district_edition": f"N03-{config.N03_EDITION}（第3.1版・データ基準年 令和5年）",
         "district_prefecture_codes": ",".join(config.N03_PREFECTURE_CODES),
