@@ -14,6 +14,7 @@ import 'landmark_layer.dart';
 import 'rendered_feature_id.dart';
 import 'map_camera_position.dart';
 import 'mbtiles_source.dart';
+import 'terrain_tint_layer.dart';
 
 /// vector タイルの1層に対する塗り(fill)の見た目。
 ///
@@ -93,10 +94,13 @@ class MapLineLayerStyle {
 /// 【fog of war（T056・plan.md §8）を後から載せられる構造にしていた（Issue #99 の
 /// 要件）ことの結果】`onStyleLoadedCallback`（[_addRegionPackLayers]）の中で
 /// 「①地域パックの vector source を追加 → ② fill/line レイヤーを追加 →
-/// ③（任意）fog of war のソース/レイヤーを追加」の順に処理する。③は
-/// [fogOfWarLayer] と [fogHexFeatureCollection] の両方が渡された場合のみ実行され、
-/// 同じ [MapLibreMapController] を [FogOfWarController.install] に渡す形で
-/// 拡張した。[MapLibreMapController] 自体は `app` には公開しない
+/// ③（任意）fog of war のソース/レイヤーを追加 → ③'（任意・Issue #176）
+/// 地形タイプ別色分け（塗り→縁取り）を fog と同じソースに fog の直下へ挿入」の
+/// 順に処理する。③は [fogOfWarLayer] と [fogHexFeatureCollection] の両方が渡された
+/// 場合のみ実行され、同じ [MapLibreMapController] を [FogOfWarController.install]
+/// に渡す形で拡張した。③'は [terrainTintLayer] が渡され、かつ③が成功した場合のみ
+/// 実行される（[TerrainTintController] クラスdoc参照）。[MapLibreMapController]
+/// 自体は `app` には公開しない
 /// （`terra_town_location` の役割は地図SDKを隠蔽すること。`app/pubspec.yaml` は
 /// `maplibre_gl` に依存していない）。fog 側の操作窓口は [onFogLayerReady] で
 /// 返す [FogOfWarController]（同じく地図SDK型を漏らさない不透明ハンドル）を
@@ -122,6 +126,9 @@ class MapView extends StatefulWidget {
     this.fogSourceId = FogOfWarController.defaultSourceId,
     this.fogLayerId = FogOfWarController.defaultLayerId,
     this.onFogLayerReady,
+    this.terrainTintLayer,
+    this.terrainTintFillLayerId = TerrainTintController.defaultFillLayerId,
+    this.terrainTintLineLayerId = TerrainTintController.defaultLineLayerId,
     this.landmarkAssets,
     this.landmarkSourceId = LandmarkLayerController.defaultSourceId,
     this.landmarkLayerId = LandmarkLayerController.defaultLayerId,
@@ -196,6 +203,23 @@ class MapView extends StatefulWidget {
   /// [FogOfWarController] を渡す。[MapLibreMapController] 自体は公開しない
   /// （[MapView] クラス doc コメント参照）。
   final void Function(FogOfWarController controller)? onFogLayerReady;
+
+  /// 開示済みヘクスの地形タイプ別色分け（塗り→縁取り）の設定値（Issue #176）。
+  /// `app`（composition root）が DESIGN.md のトークン・Issue #175 の承認文面から
+  /// 導出して注入する（Issue #57 の注入方式。`location` はここでも配色を知らない）。
+  ///
+  /// null の場合、地形の色分けレイヤー自体を追加しない（[fogOfWarLayer] と同じ
+  /// 「無ければ追加しない」方針）。非 null でも、[fogOfWarLayer]・
+  /// [fogHexFeatureCollection] のいずれかが null で fog 自体を追加しない場合は
+  /// 同時に追加しない（本レイヤーは fog と同じ GeoJSON ソースを参照する設計のため、
+  /// fog が無ければ参照先のソースが存在しない。[_addRegionPackLayers] 参照）。
+  final TerrainTintLayer? terrainTintLayer;
+
+  /// 地形タイプ別色分けの fill レイヤー ID。
+  final String terrainTintFillLayerId;
+
+  /// 地形タイプ別色分けの line（縁取り）レイヤー ID。
+  final String terrainTintLineLayerId;
 
   /// 名所ピンレイヤー（T071・Issue #160）のラスタ画像・GeoJSON一式。
   ///
@@ -608,15 +632,39 @@ class _MapViewState extends State<MapView> {
           final hexCount = (fogHexes['features'] as List?)?.length ?? 0;
           _log('fog of war のソース/レイヤーを追加しました（ヘクス数=$hexCount）');
           widget.onFogLayerReady?.call(fogController);
+
+          // 【Issue #176】地形タイプ別色分け（塗り→縁取り）。fog と同じソース
+          // （fogController.sourceId）を参照するだけで新しいソースは追加しない
+          // （TerrainTintController クラスdoc「新しいソースを追加しない」参照）ため、
+          // fog のソース/レイヤー追加が成功した直後（同じ try ブロック内）でのみ
+          // 意味を持つ。fog が失敗した場合は本レイヤーも追加しない
+          // （catch 節に落ちて widget.onLayersFailed が呼ばれる）。
+          // belowLayerId に fog のレイヤーIDを渡すことで、fog の直下（＝地域パックの
+          // 直上）に「塗り→縁取り→fog」の順で挿入する
+          // （受け入れ基準の描画順・TerrainTintController クラスdoc参照）。
+          final terrainTintLayer = widget.terrainTintLayer;
+          if (terrainTintLayer != null) {
+            await TerrainTintController.install(
+              controller,
+              terrainTintLayer,
+              sourceId: fogController.sourceId,
+              fillLayerId: widget.terrainTintFillLayerId,
+              lineLayerId: widget.terrainTintLineLayerId,
+              belowLayerId: widget.fogLayerId,
+            );
+            _log('地形タイプ別色分けレイヤーを追加しました');
+          }
         } catch (e, stackTrace) {
           // 【本Issueが解消しようとしているリスクそのもの】plan.md §8「未計測」＝
           // 実際の地域パック規模（13,106ヘクス）でのソース構築が実機で失敗した
           // 場合、ここで確実に捕捉してログに残す。地域パックの基盤レイヤーとは
           // 独立した try/catch にすることで、「地域パックは表示できたが fog だけ
-          // 失敗した」ことを区別できるようにする。
-          _log('失敗: fog of war のソース/レイヤー追加でエラー: $e');
+          // 失敗した」ことを区別できるようにする。地形タイプ別色分け（Issue #176）は
+          // fog のソースに依存するため同じ try ブロックに含める（fog が失敗すれば
+          // どのみち追加できない）。
+          _log('失敗: fog of war または地形タイプ別色分けレイヤー追加でエラー: $e');
           developer.log(
-            'fog of war のソース/レイヤー追加に失敗しました',
+            'fog of war または地形タイプ別色分けレイヤー追加に失敗しました',
             name: 'terra_town_location.map_view',
             error: e,
             stackTrace: stackTrace,
