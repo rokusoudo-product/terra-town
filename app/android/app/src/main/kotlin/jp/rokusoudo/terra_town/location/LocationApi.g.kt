@@ -603,6 +603,21 @@ interface LocationTrackingHostApi {
    * ブロッキング I/O を行わないため。
    */
   suspend fun getLocationPoints(afterId: Long, limit: Long): List<LocationPointMessage>
+  /**
+   * `location_point` の現在の最大 `id`（Issue #180・T105）。
+   *
+   * セーブデータのエクスポート/インポートで、読み込み先端末の
+   * `terrain_yield.watermark_row_id`・`opening_point.watermark_row_id` を
+   * 「読み込んだ時点から数え始める」値に補正するために使う
+   * （`packages/location/lib/src/save_data/` のドキュメント参照）。
+   *
+   * - 記録がまだ1件も行われていない（`location_track.sqlite` 自体が存在しない）場合は
+   *   [getLocationPoints] と同じ理由で**ファイルを新規作成せず** `0` を返す。
+   * - 1件も行が無い（ファイルはあるが空）場合も `0` を返す。
+   * - `@async` にしてある理由も [getLocationPoints] と同じ
+   *   （メインスレッドでブロッキング I/O を行わないため）。
+   */
+  suspend fun getMaxLocationPointId(): Long
 
   companion object {
     /** The codec used by LocationTrackingHostApi. */
@@ -669,6 +684,23 @@ interface LocationTrackingHostApi {
             CoroutineScope(Dispatchers.Main).launch {
               val wrapped: List<Any?> = try {
                 listOf(api.getLocationPoints(afterIdArg, limitArg))
+              } catch (exception: Throwable) {
+                LocationApiPigeonUtils.wrapError(exception)
+              }
+              reply.reply(wrapped)
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.terra_town_location.LocationTrackingHostApi.getMaxLocationPointId$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.getMaxLocationPointId())
               } catch (exception: Throwable) {
                 LocationApiPigeonUtils.wrapError(exception)
               }

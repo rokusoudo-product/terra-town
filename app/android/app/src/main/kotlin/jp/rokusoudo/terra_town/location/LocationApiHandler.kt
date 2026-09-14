@@ -86,4 +86,19 @@ class LocationApiHandler(private val context: Context) : LocationTrackingHostApi
                     )
                 }
         }
+
+    /**
+     * `location_point` の現在の最大 `id` を Dart 側へ渡す（Issue #180・T105）。
+     *
+     * [getLocationPoints] と同じ理由（メインスレッドでブロッキング I/O を行わない・
+     * ファイルが無ければ新規作成せず `0` を返す）で実装する。
+     */
+    override suspend fun getMaxLocationPointId(): Long =
+        withContext(Dispatchers.IO) {
+            val file = LocationTrackSchema.resolveDatabaseFile(context)
+            if (!file.exists()) {
+                return@withContext 0L
+            }
+            LocationTrackDatabaseHelper.getInstance(context).selectMaxId()
+        }
 }

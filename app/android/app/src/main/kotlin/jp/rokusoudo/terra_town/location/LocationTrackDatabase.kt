@@ -546,6 +546,30 @@ class LocationTrackDatabaseHelper private constructor(context: Context) :
         return rows
     }
 
+    /**
+     * `location_point` の現在の最大 `id` を返す（Issue #180・T105・Pigeon
+     * `LocationTrackingHostApi.getMaxLocationPointId` の実体）。
+     *
+     * 行が無ければ `0` を返す（`location_point.id` は1始まりのため、`0` はどの行にも
+     * 一致しない番兵値として使える。`TerrainYieldLedgerSnapshot.watermarkRowId` の
+     * 初期値と同じ考え方）。
+     *
+     * **呼び出し前提**: [selectPointsAfter] と同じく、呼び出し側（`LocationApiHandler`）が
+     * [LocationTrackSchema.resolveDatabaseFile] の存在を確認済みであること（ファイル無し＝
+     * 記録0件という意味を保つ責務は呼び出し側にある）。
+     */
+    fun selectMaxId(): Long {
+        readableDatabase.rawQuery(
+            "SELECT MAX(${LocationTrackSchema.COLUMN_ID}) FROM ${LocationTrackSchema.TABLE_POINT}",
+            null,
+        ).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) {
+                return cursor.getLong(0)
+            }
+            return 0L
+        }
+    }
+
     companion object {
         @Volatile
         private var instance: LocationTrackDatabaseHelper? = null
