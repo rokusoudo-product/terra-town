@@ -23,6 +23,7 @@ import '../../map/initial_camera.dart';
 import '../../map/landmark_layer_factory.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
+import '../../map/terrain_tint_layer_factory.dart';
 import '../permissions/tracking_control_button.dart';
 import 'widgets/hex_opening_sheet.dart';
 import 'widgets/walk_stats_hud.dart';
@@ -72,6 +73,13 @@ import 'widgets/walk_stats_hud.dart';
 /// 本ウィジェットの `_isFollowing` が保持し、[CurrentLocationFollowButton] で
 /// 切り替える。利用者が地図を動かして追従が解除された場合は
 /// [MapView.onFollowDismissedByUser] 経由で `_isFollowing` を false に戻す。
+///
+/// ## 2026-09-14（Issue #176）: 開示済みヘクスの地形タイプ別色分け
+/// `terrain_tint_layer_factory.dart`（`buildTerrainTintLayer`）が DESIGN.md の
+/// トークン・Issue #175 の承認文面から組み立てた [TerrainTintLayer] を
+/// `MapView.terrainTintLayer` へそのまま渡す。新規の位置ストリーム購読・
+/// 状態管理は追加しない（fog と同じ GeoJSON ソースの feature-state を
+/// 共有するため。`packages/location` の `TerrainTintController` クラスdoc参照）。
 ///
 /// ## 2026-09-12（Issue #143）: 開放ポイント（歩行距離換算）の入手（T063）
 /// `TerrainYieldPipeline` に `OpeningPointAccrualCoordinator` を統合し、同じ
@@ -750,6 +758,12 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       onFogLayerReady: (controller) {
         unawaited(_onFogLayerReady(controller));
       },
+      // 開示済みヘクスの地形タイプ別色分け（Issue #176）。fog と同じソースに
+      // 対して fog レイヤーの直下へ挿入される（location 側の
+      // `TerrainTintController`・`MapView._addRegionPackLayers` 参照）ため、
+      // 新規開示・起動時の復元のいずれも fog 側の feature-state 更新だけで
+      // 自動的に追従する。
+      terrainTintLayer: buildTerrainTintLayer(),
       // 名所ピンレイヤー（Issue #160・T071）。ラスタ画像の生成完了を
       // `MapView` 側で待ってから追加される（`landmarkAssets` クラスdoc参照）。
       landmarkAssets: _landmarkAssets,

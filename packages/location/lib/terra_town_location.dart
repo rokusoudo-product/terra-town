@@ -49,6 +49,7 @@ export 'src/map/mbtiles_asset.dart';
 export 'src/map/mbtiles_source.dart';
 export 'src/map/map_view.dart';
 export 'src/map/rendered_feature_id.dart';
+export 'src/map/terrain_tint_layer.dart';
 export 'src/pack/region_pack_repository.dart';
 export 'src/db/hex_opening_spend_service.dart';
 export 'src/db/inventory_repository.dart';
