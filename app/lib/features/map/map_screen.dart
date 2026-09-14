@@ -186,7 +186,8 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<MapScreenPaths> _resolvePaths() async {
     final mbtilesPath =
-        await (widget.resolveMbtilesPath ?? MapScreen.defaultResolveMbtilesPath)();
+        await (widget.resolveMbtilesPath ??
+            MapScreen.defaultResolveMbtilesPath)();
     final regionPackPath =
         await (widget.resolveRegionPackPath ?? defaultResolveRegionPackPath)();
     return MapScreenPaths(
@@ -376,9 +377,13 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   void initState() {
     super.initState();
     try {
-      final connection = RegionPackConnection.open(widget.paths.regionPackFilePath);
+      final connection = RegionPackConnection.open(
+        widget.paths.regionPackFilePath,
+      );
       _regionPackConnection = connection;
-      _fogHexFeatureCollection = buildFogHexFeatureCollectionFromRegionPack(connection);
+      _fogHexFeatureCollection = buildFogHexFeatureCollectionFromRegionPack(
+        connection,
+      );
       final regionPack = RegionPackRepository.load(connection);
       _regionPack = regionPack;
       // タップされた fog 地物の featureId → HexId の逆引き表（Issue #151・T064）。
@@ -386,14 +391,18 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       // たびの変換を完結させる（hex_feature_lookup.dart クラスdoc参照）。
       _hexIdByFeatureId = buildHexIdByFeatureId(_fogHexFeatureCollection!);
 
-      final disclosedHexRepository = DisclosedHexRepository(widget.paths.gameDatabase);
+      final disclosedHexRepository = DisclosedHexRepository(
+        widget.paths.gameDatabase,
+      );
       // 徒歩経路（LandmarkAwareDisclosedHexRepository）・ポイント開放経路
       // （HexOpeningSpendService）の両方が同じインスタンスを共有する
       // （二重管理しない。`HexOpeningSpendService` クラスdocと同じ方針）。
       // 図鑑画面（Issue #12・T075）等の将来の読み出し口はこのクラス自体
       // （`CollectionRepository`）が担う想定で、本ウィジェットの状態としては
       // 保持しない（Issue #159「読み出し口を用意する」はクラスの存在で満たす）。
-      final collectionRepository = CollectionRepository(widget.paths.gameDatabase);
+      final collectionRepository = CollectionRepository(
+        widget.paths.gameDatabase,
+      );
       _collectionRepository = collectionRepository;
 
       // 名所ピンレイヤー（Issue #160・T071）。GeoJSON（同期）はここで組み立て、
@@ -403,12 +412,13 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       final landmarkFeatureCollection = buildLandmarkFeatureCollection(
         regionPack.pointsOfInterest,
       );
-      _landmarkAssets = buildLandmarkPinImages(regionPack.pointsOfInterest).then(
-        (images) => LandmarkLayerAssets(
-          images: images,
-          featureCollection: landmarkFeatureCollection,
-        ),
-      );
+      _landmarkAssets = buildLandmarkPinImages(regionPack.pointsOfInterest)
+          .then(
+            (images) => LandmarkLayerAssets(
+              images: images,
+              featureCollection: landmarkFeatureCollection,
+            ),
+          );
 
       final known = DisclosedHexSet();
       final positionProvider = NativePositionProvider();
@@ -424,13 +434,14 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       // `TerrainYieldPipeline.disclosedHexRepository`（地形カウンタ初期化用）は
       // 引き続きプレーンな [disclosedHexRepository] を使う（`save` 以外の
       // 操作には名所判定は不要なため）。
-      final landmarkAwareDisclosedHexRepository = LandmarkAwareDisclosedHexRepository(
-        widget.paths.gameDatabase,
-        regionPack: regionPack,
-        disclosedHexRepository: disclosedHexRepository,
-        collectionRepository: collectionRepository,
-        onCollected: _showLandmarkCollectedSnackBar,
-      );
+      final landmarkAwareDisclosedHexRepository =
+          LandmarkAwareDisclosedHexRepository(
+            widget.paths.gameDatabase,
+            regionPack: regionPack,
+            disclosedHexRepository: disclosedHexRepository,
+            collectionRepository: collectionRepository,
+            onCollected: _showLandmarkCollectedSnackBar,
+          );
 
       final service = DisclosureService(
         hexLocator: const RecordedHexLocator(),
@@ -461,7 +472,9 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       }
 
       final terrainHexCounter = TerrainHexCounter();
-      final inventoryRepository = InventoryRepository(widget.paths.gameDatabase);
+      final inventoryRepository = InventoryRepository(
+        widget.paths.gameDatabase,
+      );
       _terrainHexCounter = terrainHexCounter;
       _inventoryRepository = inventoryRepository;
       // 2026-09-11（Issue #138）: composition root は DisclosureCoordinator を
@@ -550,6 +563,14 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   /// 発火が遅れうるが、`onLandmarkLayerReady` は `MapView` 側で画像生成完了後に
   /// 呼ばれるため、本メソッドが呼ばれた時点では常に画像は登録済みである
   /// （`map_view.dart` の `_addRegionPackLayers` 参照）。
+  ///
+  /// 【`restoreState` でまとめて反映する（Issue #170）】開示済みヘクスの数だけ
+  /// ループする点は変わらないが、ループのたびに
+  /// `LandmarkLayerController.revealPointsOfInterest` を呼ぶと、その都度
+  /// ソース全体が `setGeoJsonSource` で差し替わり無駄が大きい
+  /// （`landmark_layer.dart` の `LandmarkLayerController.restoreState`
+  /// クラスdoc参照）。ここでは開示済み・収集済みの全POI IDをまず集めてから、
+  /// `restoreState` で1回にまとめて反映する。
   Future<void> _onLandmarkLayerReady(LandmarkLayerController controller) async {
     _landmarkController = controller;
 
@@ -563,15 +584,18 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     }
 
     final disclosedHexes = await disclosedHexRepository.findAll();
+    final revealedIds = <PointOfInterestId>{};
     for (final hex in disclosedHexes) {
-      await controller.revealPointsOfInterest(
+      revealedIds.addAll(
         regionPack.pointsOfInterestIn(hex.hexId).map((poi) => poi.id),
       );
     }
 
     final collected = await collectionRepository.findAll();
-    await controller.markCollected(
-      collected.map((row) => PointOfInterestId(row.poiId)),
+
+    await controller.restoreState(
+      revealed: revealedIds,
+      collected: collected.map((row) => PointOfInterestId(row.poiId)),
     );
   }
 
@@ -634,11 +658,13 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         },
       ),
     );
-    unawaited(sheetClosed.then((_) {
-      final attempt = lastAttempt;
-      if (attempt == null) return;
-      _showLandmarkCollectedSnackBar(attempt.collectedLandmarks);
-    }));
+    unawaited(
+      sheetClosed.then((_) {
+        final attempt = lastAttempt;
+        if (attempt == null) return;
+        _showLandmarkCollectedSnackBar(attempt.collectedLandmarks);
+      }),
+    );
   }
 
   /// 新規に収集された名所を地図画面に簡易表示する（Issue #159「地図画面で
@@ -823,7 +849,9 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     );
 
     if (!kDebugMode) {
-      return Stack(children: [mapView, followButton, trackingControlButton, walkStatsHud]);
+      return Stack(
+        children: [mapView, followButton, trackingControlButton, walkStatsHud],
+      );
     }
 
     final fogController = _fogController;
@@ -871,46 +899,46 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         // 派生ストリーム `stats` を読むだけで、位置ストリームを直接購読しない〕
         // が担う）。
         if (_debugPanelsVisible)
-        Positioned(
-          left: 0,
-          right: 0,
-          top: 0,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (layersError != null)
-                SafeArea(
-                  bottom: false,
-                  child: Card(
-                    margin: const EdgeInsets.all(AppSpacing.sm),
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.sm),
-                      child: Text(
-                        'レイヤー追加に失敗しました（デバッグビルドのみ表示）: $layersError',
-                        style: Theme.of(context).textTheme.bodySmall,
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (layersError != null)
+                  SafeArea(
+                    bottom: false,
+                    child: Card(
+                      margin: const EdgeInsets.all(AppSpacing.sm),
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.sm),
+                        child: Text(
+                          'レイヤー追加に失敗しました（デバッグビルドのみ表示）: $layersError',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              if (restoreStats != null)
-                SafeArea(
-                  bottom: false,
-                  child: Card(
-                    margin: const EdgeInsets.all(AppSpacing.sm),
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.sm),
-                      child: Text(
-                        '起動時の復元（Issue #102）: ${restoreStats.hexCount}件 / '
-                        '${restoreStats.elapsedMs}ms',
-                        style: Theme.of(context).textTheme.bodySmall,
+                if (restoreStats != null)
+                  SafeArea(
+                    bottom: false,
+                    child: Card(
+                      margin: const EdgeInsets.all(AppSpacing.sm),
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.sm),
+                        child: Text(
+                          '起動時の復元（Issue #102）: ${restoreStats.hexCount}件 / '
+                          '${restoreStats.elapsedMs}ms',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              const LocationTrackingDebugPanel(),
-            ],
+                const LocationTrackingDebugPanel(),
+              ],
+            ),
           ),
-        ),
         if (fogController != null && _debugPanelsVisible)
           Positioned(
             left: 0,
