@@ -31,6 +31,21 @@ void main() {
       // 既定値扱いになる（本Issueの原因そのもの）。
       expect(_containsFeatureState(json), isFalse);
     });
+
+    test(
+      'icon-anchor/icon-offsetを指定せず、スタイル仕様の既定値centerに委ねる'
+      '（Issue #173: 円の中心を画像側で中心に一致させる設計のため）',
+      () {
+        final properties = landmarkSymbolLayerProperties();
+
+        expect(properties.iconAnchor, isNull);
+        expect(properties.iconOffset, isNull);
+
+        final json = properties.toJson();
+        expect(json.containsKey('icon-anchor'), isFalse);
+        expect(json.containsKey('icon-offset'), isFalse);
+      },
+    );
   });
 
   group('LandmarkLayerController', () {
