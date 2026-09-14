@@ -117,9 +117,10 @@ Map<String, dynamic> buildLandmarkFeatureCollection(
       },
       'properties': {
         'poi_id_str': poi.id.value,
-        // feature-state（'revealed'/'collected'）に応じてどの登録済み画像を
-        // 使うかを、スタイル式（['get', ...]）でこのプロパティから引く
-        // （`LandmarkLayerController.install` 参照）。
+        // 開示済み・収集済みそれぞれの状態で使う登録済み画像IDの候補
+        // （`LandmarkLayerController.install` がこれらを基に、実際に
+        // `icon-image` が参照する可変プロパティ `icon` を組み立てる。
+        // Issue #170「なぜ `icon` を別に持たせるか」参照）。
         'revealed_icon': landmarkRevealedIconId(poi.id),
         'collected_icon': landmarkCollectedIconId(poi.id),
       },
@@ -148,7 +149,7 @@ void validateLandmarkFeatureCollectionIds(
         feature,
         'feature',
         '名所レイヤーの各 Feature は直下（properties の外）に整数 id を'
-        '持つ必要があります（promoteId は Android で機能しないため）。',
+            '持つ必要があります（promoteId は Android で機能しないため）。',
       );
     }
   }
@@ -180,13 +181,44 @@ void validateLandmarkFeatureCollectionIds(
 /// （[LandmarkPinImages] クラスdoc参照）を採用し、MapLibre 自体の
 /// テキストレンダリングパイプラインに一切依存しない。
 ///
-/// ## `feature-state` による O(1) トグル（[FogOfWarController] と同じ設計）
-/// 各名所 Feature の `revealed`/`collected` を `setFeatureState` でトグルし、
-/// `icon-image` のスタイル式（`case` 式）でその状態に応じた登録済み画像名を
-/// 選ぶ。ヘクス開示のたびに GeoJSON ソース全体を作り直す必要はない
-/// （名所は全国で51件程度・`docs/landmark_objects.md` 想定であり、そもそも
-/// フルリプレースでも許容範囲だが、既存の fog と同じ設計に揃えることを
-/// 優先した）。
+/// ## Feature の `properties.icon` を書き換えて `icon-image` に `['get', ...]`
+/// で参照させる方式（Issue #170。[FogOfWarController] とは異なる設計）
+/// 当初は [FogOfWarController] に合わせて、`icon-image`（**レイアウトプロパティ**）
+/// のスタイル式（`case` 式）で `['feature-state', 'collected']`／
+/// `['feature-state', 'revealed']` を参照する実装にしていたが、これは
+/// **MapLibre のスタイル仕様違反**だった。`feature-state` 式は
+/// **データ駆動スタイリングに対応したペイントプロパティでのみ評価**され、
+/// レイアウトプロパティ（`icon-image`・`icon-size`・`text-field` 等）や
+/// `filter` では一切評価されない（常に既定値になる）。[FogOfWarController] の
+/// `fill-opacity` は**ペイントプロパティ**なので問題にならなかったが、
+/// `icon-image` はレイアウトプロパティのため、開示・収集後もピンが常に
+/// 既定値（伏せピン）のまま切り替わらないという不具合を起こした
+/// （PR #168 マージ後に秘書が実機で発見・Issue #170）。widget テストでは
+/// 実プラットフォームの描画・スタイル評価が動かないため、実機でしか
+/// 見つからない種類の不具合だった。
+///
+/// **⚠️ 落とし穴: レイアウトプロパティ・`filter` に `feature-state` を使わない。**
+/// 本ファイルで新たにトグル可能な見た目を追加する際は、必ずペイントプロパティ
+/// （`icon-opacity`・`fill-opacity`・`icon-color` 等）側で `feature-state` を
+/// 使うか、本クラスの方式（下記）を踏襲すること。
+///
+/// 代わりに、各名所 Feature の `properties` に「今表示すべきアイコン画像ID」
+/// （`icon`）を持たせ、`icon-image` は [landmarkSymbolLayerProperties] が
+/// 組み立てる `['get', 'icon']` 式で参照する。`['get', ...]` は
+/// `feature-state` に依存しないため、レイアウトプロパティでも安全に評価される。
+/// [revealPointsOfInterest]／[markCollected]／[restoreState] は、[install] が
+/// 保持するミュータブルな Feature 一覧（[_features]）の該当 POI の
+/// `properties['icon']` を書き換えたうえで、ソース全体を
+/// `setGeoJsonSource` で差し替える。名所は全国で51件程度
+/// （`docs/landmark_objects.md` 想定）のため、フルリプレースでも負荷は
+/// 問題にならない（Issue #170 提案内容）。
+///
+/// ## 起動時の復元をバッチ化する（[restoreState]）
+/// アプリ起動時の復元（`map_screen.dart` の `_onLandmarkLayerReady`）は
+/// 開示済みヘクスの数だけループする。[revealPointsOfInterest] を都度呼ぶと
+/// その都度ソース全体を差し替えることになり無駄が大きいため、[restoreState]
+/// で開示済み・収集済みの全POI IDをまとめて受け取り、`setGeoJsonSource` の
+/// 呼び出しを1回に抑える。
 ///
 /// ## タップを吸わない（Issue #151と同じ落とし穴・最重要）
 /// `addSymbolLayer` は既定で `enableInteraction: true` になり、地物タップが
@@ -195,15 +227,16 @@ void validateLandmarkFeatureCollectionIds(
 /// （ピン自体のタップ機能は本Issueの対象外）。
 ///
 /// ## 正は `disclosed_hex`・`collection` テーブルである
-/// [FogOfWarController] と同じく、ここで管理する feature-state は描画のための
-/// 派生状態にすぎない。正は `disclosed_hex`・`collection`（Issue #159）であり、
+/// ここで管理する Feature の `properties.icon` は描画のための派生状態に
+/// すぎない。正は `disclosed_hex`・`collection`（Issue #159）であり、
 /// アプリ再起動後・`setStyle` 後の復元は呼び出し側（`map_screen.dart`）の
-/// 責務とする。
+/// 責務とする（[restoreState] 参照）。
 class LandmarkLayerController {
   LandmarkLayerController._(
     this._controller,
     this.sourceId,
-    this._featureIdByPoiId,
+    this._features,
+    this._propertiesByPoiId,
   );
 
   final MapLibreMapController _controller;
@@ -211,15 +244,32 @@ class LandmarkLayerController {
   /// このコントローラが管理する GeoJSON ソースのID。
   final String sourceId;
 
-  /// `PointOfInterestId.value` → このレイヤー内での Feature の整数 `id`。
-  final Map<String, int> _featureIdByPoiId;
+  /// [install] 時に組み立てたミュータブルな Feature 一覧。各 Feature の
+  /// `properties`（[_propertiesByPoiId] と同じ Map インスタンスを指す）を
+  /// 書き換えたうえで、本リストごと [_syncSource] で `setGeoJsonSource` に
+  /// 渡す（Issue #170 クラスdoc「Feature の `properties.icon` を書き換えて」
+  /// 参照）。
+  final List<Map<String, dynamic>> _features;
+
+  /// `PointOfInterestId.value` → 対応する Feature の `properties`
+  /// （[_features] 内の Map と同一インスタンス。ここを書き換えると
+  /// [_features] 側にも反映される）。
+  final Map<String, Map<String, dynamic>> _propertiesByPoiId;
+
+  /// 収集済みとして扱った POI ID（[_reveal] が誤って収集済み表示を伏せピン側に
+  /// 巻き戻さないための状態。[markCollected]/[restoreState] が追加する）。
+  final Set<String> _collectedPoiIds = {};
 
   static const defaultSourceId = 'terra_town_landmark';
   static const defaultLayerId = 'terra_town_landmark_layer';
 
   /// [featureCollection] を1回だけ `addGeoJsonSource` でソースに追加し、
-  /// [images] を `addImage` で登録したうえで、`icon-image` を feature-state
-  /// （`revealed`/`collected`）に応じて切り替えるシンボルレイヤーを追加する。
+  /// [images] を `addImage` で登録したうえで、`icon-image` が
+  /// `properties.icon`（[landmarkSymbolLayerProperties] 参照）を参照する
+  /// シンボルレイヤーを追加する。追加直後は全 Feature が伏せピン
+  /// （[landmarkLockedIconId]）になる（開示済み・収集済みの復元は
+  /// [restoreState] を呼ぶ呼び出し側の責務。`map_screen.dart` の
+  /// `_onLandmarkLayerReady` 参照）。
   static Future<LandmarkLayerController> install(
     MapLibreMapController controller,
     LandmarkPinImages images,
@@ -234,73 +284,152 @@ class LandmarkLayerController {
       await controller.addImage(entry.key, entry.value);
     }
 
-    await controller.addGeoJsonSource(sourceId, featureCollection);
+    // 渡された featureCollection をそのまま保持すると、呼び出し側が保持する
+    // Map を本コントローラが暗黙に書き換えてしまう（呼び出し側から見て
+    // 予期しない副作用になる）ため、独立したミュータブルなコピーを作る。
+    final features = <Map<String, dynamic>>[];
+    final propertiesByPoiId = <String, Map<String, dynamic>>{};
+    for (final rawFeature in featureCollection['features'] as List) {
+      final feature = Map<String, dynamic>.from(rawFeature as Map);
+      final properties = Map<String, dynamic>.from(
+        feature['properties'] as Map,
+      );
+      // icon-image が実際に参照する可変プロパティ。install 直後は常に
+      // 伏せピン（クラスdoc参照）。
+      properties['icon'] = landmarkLockedIconId;
+      feature['properties'] = properties;
+      features.add(feature);
+      propertiesByPoiId[properties['poi_id_str'] as String] = properties;
+    }
+
+    await controller.addGeoJsonSource(sourceId, {
+      'type': 'FeatureCollection',
+      'features': features,
+    });
 
     await controller.addSymbolLayer(
       sourceId,
       layerId,
-      SymbolLayerProperties(
-        iconImage: [
-          'case',
-          [
-            'boolean',
-            ['feature-state', 'collected'],
-            false,
-          ],
-          ['get', 'collected_icon'],
-          [
-            'boolean',
-            ['feature-state', 'revealed'],
-            false,
-          ],
-          ['get', 'revealed_icon'],
-          landmarkLockedIconId,
-        ],
-        iconSize: iconSize,
-        iconAllowOverlap: true,
-        iconIgnorePlacement: true,
-      ),
+      landmarkSymbolLayerProperties(iconSize: iconSize),
       // 【必須】クラスdoc「タップを吸わない」参照。
       enableInteraction: false,
     );
 
-    final featureIdByPoiId = <String, int>{};
-    for (final feature in featureCollection['features'] as List) {
-      final map = feature as Map;
-      final properties = map['properties'] as Map;
-      featureIdByPoiId[properties['poi_id_str'] as String] = map['id'] as int;
-    }
-
-    return LandmarkLayerController._(controller, sourceId, featureIdByPoiId);
+    return LandmarkLayerController._(
+      controller,
+      sourceId,
+      features,
+      propertiesByPoiId,
+    );
   }
 
   /// [ids] の名所を「開示済み」表示（種別アイコン＋名称ラベル）に切り替える。
   ///
   /// このレイヤーに存在しない（＝ `hexId` が無い旧パック由来等で
   /// [buildLandmarkFeatureCollection] が除外した）POI IDは無視する。
+  /// 実際に見た目が変わる Feature が1件も無ければ `setGeoJsonSource` 自体を
+  /// 呼ばない（無駄な全件差し替えを避ける）。
   Future<void> revealPointsOfInterest(Iterable<PointOfInterestId> ids) async {
+    var changed = false;
     for (final id in ids) {
-      final featureId = _featureIdByPoiId[id.value];
-      if (featureId == null) continue;
-      await _controller.setFeatureState(sourceId, featureId.toString(), {
-        'revealed': true,
-      });
+      if (_reveal(id.value)) changed = true;
     }
+    if (changed) await _syncSource();
   }
 
   /// [ids] の名所を「収集済み」表示（accentハイライト）に切り替える。
   ///
   /// 収集は開示済みヘクスに対してのみ起こる（`docs/landmark_objects.md` §3.2）
-  /// ため、`revealed` もあわせて true にしておく（万一の呼び出し順序の
-  /// 前後でも収集済みの見た目が伏せピンに戻らないようにする多重の安全策）。
+  /// ため、以後 [_reveal] が呼ばれても収集済み表示を伏せピン側に巻き戻さない
+  /// （[_collectedPoiIds] 参照。万一の呼び出し順序の前後への安全策）。
   Future<void> markCollected(Iterable<PointOfInterestId> ids) async {
+    var changed = false;
     for (final id in ids) {
-      final featureId = _featureIdByPoiId[id.value];
-      if (featureId == null) continue;
-      await _controller.setFeatureState(sourceId, featureId.toString(), {
-        'revealed': true,
-        'collected': true,
-      });
+      if (_collect(id.value)) changed = true;
     }
+    if (changed) await _syncSource();
   }
+
+  /// アプリ起動時の復元用の一括反映（Issue #170）。
+  ///
+  /// `map_screen.dart` の `_onLandmarkLayerReady` は開示済みヘクスの数だけ
+  /// ループして名所を集める。[revealPointsOfInterest] をループのたびに
+  /// 呼ぶと、その都度ソース全体を `setGeoJsonSource` で差し替えることになり
+  /// 無駄が大きい。本メソッドは [revealed]・[collected] をまとめて受け取り、
+  /// `setGeoJsonSource` の呼び出しを（変更があった場合）1回に抑える。
+  Future<void> restoreState({
+    required Iterable<PointOfInterestId> revealed,
+    required Iterable<PointOfInterestId> collected,
+  }) async {
+    var changed = false;
+    for (final id in revealed) {
+      if (_reveal(id.value)) changed = true;
+    }
+    for (final id in collected) {
+      if (_collect(id.value)) changed = true;
+    }
+    if (changed) await _syncSource();
+  }
+
+  /// [poiId] の Feature を「開示済み」表示に切り替える（見た目が変わった場合
+  /// [_syncSource] を呼ぶ必要があることを示す `true` を返す）。
+  bool _reveal(String poiId) {
+    if (_collectedPoiIds.contains(poiId)) return false;
+    final properties = _propertiesByPoiId[poiId];
+    if (properties == null) return false;
+    if (properties['icon'] == properties['revealed_icon']) return false;
+    properties['icon'] = properties['revealed_icon'];
+    return true;
+  }
+
+  /// [poiId] の Feature を「収集済み」表示に切り替える（戻り値は [_reveal] と
+  /// 同じ）。
+  bool _collect(String poiId) {
+    final properties = _propertiesByPoiId[poiId];
+    if (properties == null) return false;
+    _collectedPoiIds.add(poiId);
+    if (properties['icon'] == properties['collected_icon']) return false;
+    properties['icon'] = properties['collected_icon'];
+    return true;
+  }
+
+  /// 現在の [_features]（各 Feature の `properties.icon` を書き換え済み）を
+  /// まるごと `setGeoJsonSource` でソースに反映する（Issue #170 クラスdoc
+  /// 「名所は全国で51件程度のためフルリプレースでも負荷は問題にならない」）。
+  Future<void> _syncSource() {
+    return _controller.setGeoJsonSource(sourceId, {
+      'type': 'FeatureCollection',
+      'features': _features,
+    });
+  }
+}
+
+/// [LandmarkLayerController.install] が追加するシンボルレイヤーの見た目
+/// （レイアウトプロパティ）を組み立てる。
+///
+/// 【`feature-state` を使わない・再発防止（Issue #170）】MapLibre のスタイル
+/// 仕様では `feature-state` 式は**データ駆動スタイリングに対応したペイント
+/// プロパティでのみ評価**され、`icon-image` のようなレイアウトプロパティや
+/// `filter` では一切評価されない。過去の実装はこれを見落とし、`icon-image`
+/// の `case` 式で `['feature-state', ...]` を参照したため、開示・収集後も
+/// ピンが常に伏せピンのまま切り替わらない不具合を起こした
+/// （[LandmarkLayerController] クラスdoc参照）。本関数が組み立てる
+/// `['get', 'icon']` は `feature-state` に依存しない `get` 式であり、
+/// レイアウトプロパティでも安全に評価される。
+///
+/// `install` 本体から切り出したのは、`MapLibreMapController`
+/// （プラットフォームチャンネル必須・`flutter test` では動作しない）に
+/// 依存せず、本関数が組み立てる式そのものに `feature-state` が含まれて
+/// いないことを単体テストで検証できるようにするため
+/// （`packages/location/test/map/landmark_layer_test.dart` 参照。
+/// `fog_of_war_layer_test.dart` 冒頭コメント「install 自体は
+/// プラットフォームチャンネルが必要なため flutter test では検証できない」と
+/// 同じ制約への対処）。
+SymbolLayerProperties landmarkSymbolLayerProperties({double iconSize = 1.0}) {
+  return SymbolLayerProperties(
+    iconImage: const ['get', 'icon'],
+    iconSize: iconSize,
+    iconAllowOverlap: true,
+    iconIgnorePlacement: true,
+  );
 }
