@@ -10,6 +10,7 @@ import 'package:terra_town_core/terra_town_core.dart' show GeoPosition;
 
 import 'current_location_marker.dart';
 import 'fog_of_war_layer.dart';
+import 'landmark_layer.dart';
 import 'rendered_feature_id.dart';
 import 'map_camera_position.dart';
 import 'mbtiles_source.dart';
@@ -121,6 +122,10 @@ class MapView extends StatefulWidget {
     this.fogSourceId = FogOfWarController.defaultSourceId,
     this.fogLayerId = FogOfWarController.defaultLayerId,
     this.onFogLayerReady,
+    this.landmarkAssets,
+    this.landmarkSourceId = LandmarkLayerController.defaultSourceId,
+    this.landmarkLayerId = LandmarkLayerController.defaultLayerId,
+    this.onLandmarkLayerReady,
     this.onMapControllerReady,
     this.currentLocation,
     this.currentLocationMarkerStyle,
@@ -191,6 +196,26 @@ class MapView extends StatefulWidget {
   /// [FogOfWarController] を渡す。[MapLibreMapController] 自体は公開しない
   /// （[MapView] クラス doc コメント参照）。
   final void Function(FogOfWarController controller)? onFogLayerReady;
+
+  /// 名所ピンレイヤー（T071・Issue #160）のラスタ画像・GeoJSON一式。
+  ///
+  /// 【`Future` で受け取る理由】ラスタ画像の生成（`app` 側で Material アイコン・
+  /// 名称ラベルを焼き込む処理）は `dart:ui` のラスタライズを伴い必ず非同期になる
+  /// （[LandmarkLayerAssets] クラスdoc参照）。[MapView] は
+  /// `onStyleLoadedCallback`（[_addRegionPackLayers]）の一連の処理の中でこの
+  /// [Future] を `await` してから名所レイヤーを追加する。null の場合は
+  /// fog of war と同じく名所レイヤー自体を追加しない。
+  final Future<LandmarkLayerAssets>? landmarkAssets;
+
+  /// 名所ピンレイヤーの GeoJSON ソース ID。
+  final String landmarkSourceId;
+
+  /// 名所ピンレイヤーの symbol レイヤー ID。
+  final String landmarkLayerId;
+
+  /// 名所ピンレイヤーのソース/レイヤー追加が成功した直後に、開示/収集状態の
+  /// トグル窓口となる [LandmarkLayerController] を渡す。
+  final void Function(LandmarkLayerController controller)? onLandmarkLayerReady;
 
   /// マップ作成直後（`onMapCreated`）に、[MapCameraReader]（カメラ中心の取得のみに
   /// 限定した窓口。Issue #137）を渡す。[MapLibreMapController] 自体は公開しない
@@ -592,6 +617,40 @@ class _MapViewState extends State<MapView> {
           _log('失敗: fog of war のソース/レイヤー追加でエラー: $e');
           developer.log(
             'fog of war のソース/レイヤー追加に失敗しました',
+            name: 'terra_town_location.map_view',
+            error: e,
+            stackTrace: stackTrace,
+            level: 1000,
+          );
+          widget.onLayersFailed?.call(e, stackTrace);
+        }
+      }
+
+      // 【T071（名所ピン・Issue #160）】fog と同じく、ベースレイヤー追加の
+      // 直後・fog レイヤーの後に名所ピンのソース/レイヤーを追加する。fog より
+      // 後に追加することで、霧の上にピンが見える描画順にする（Issue #160
+      // 受け入れ基準「ピンが霧に隠れない」）。landmarkAssets が null の場合は
+      // 何もしない（fog と同じ「両方揃ったら追加」の考え方だが、こちらは
+      // [LandmarkLayerAssets] 1つに画像・GeoJSONをまとめているため単一の
+      // null 判定で足りる）。
+      final landmarkAssetsFuture = widget.landmarkAssets;
+      if (landmarkAssetsFuture != null) {
+        try {
+          final assets = await landmarkAssetsFuture;
+          final landmarkController = await LandmarkLayerController.install(
+            controller,
+            assets.images,
+            assets.featureCollection,
+            sourceId: widget.landmarkSourceId,
+            layerId: widget.landmarkLayerId,
+          );
+          final poiCount = (assets.featureCollection['features'] as List?)?.length ?? 0;
+          _log('名所ピンのソース/レイヤーを追加しました（件数=$poiCount）');
+          widget.onLandmarkLayerReady?.call(landmarkController);
+        } catch (e, stackTrace) {
+          _log('失敗: 名所ピンのソース/レイヤー追加でエラー: $e');
+          developer.log(
+            '名所ピンのソース/レイヤー追加に失敗しました',
             name: 'terra_town_location.map_view',
             error: e,
             stackTrace: stackTrace,

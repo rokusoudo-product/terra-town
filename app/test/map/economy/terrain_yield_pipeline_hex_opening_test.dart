@@ -83,6 +83,7 @@ void main() {
     DisclosedHexRepository disclosedHexRepository,
     TerrainHexCounter terrainHexCounter,
     List<int> revealed,
+    List<HexId> revealedLandmarkHexes,
   })> buildHarness({
     required int initialPoints,
     Map<HexId, TerrainType>? terrainByHex,
@@ -105,6 +106,7 @@ void main() {
 
     final known = DisclosedHexSet.from(initiallyKnown);
     final revealed = <int>[];
+    final revealedLandmarkHexes = <HexId>[];
     final terrainHexCounter = TerrainHexCounter();
 
     final regionPack = _FakeRegionPack(
@@ -130,6 +132,7 @@ void main() {
     final pipeline = TerrainYieldPipeline(
       disclosureService: disclosureService,
       reveal: (featureId) async => revealed.add(featureId),
+      revealLandmarks: (hexId) async => revealedLandmarkHexes.add(hexId),
       accrualCoordinator: accrualCoordinator,
       openingPointCoordinator: openingPointCoordinator,
       hexOpeningSpendService: HexOpeningSpendService(database),
@@ -145,6 +148,7 @@ void main() {
       disclosedHexRepository: disclosedHexRepository,
       terrainHexCounter: terrainHexCounter,
       revealed: revealed,
+      revealedLandmarkHexes: revealedLandmarkHexes,
     );
   }
 
@@ -162,6 +166,9 @@ void main() {
       expect(h.known.contains(target), isTrue, reason: '歩いて再訪した際の二重加算を防ぐため必須');
       expect(h.terrainHexCounter.counts, {TerrainType.forest: 1});
       expect(h.revealed, [hexIdToFeatureId(target.value)]);
+      // 名所ピンレイヤー（Issue #160）: ポイント開放でもrevealと同じタイミングで
+      // revealLandmarksが呼ばれる。
+      expect(h.revealedLandmarkHexes, [target]);
       expect(h.pipeline.openingPointCoordinator.points, 2);
       expect(h.pipeline.openingPointStats.value.points, 2);
 
@@ -183,6 +190,7 @@ void main() {
       expect(h.known.contains(target), isFalse);
       expect(h.terrainHexCounter.counts, isEmpty);
       expect(h.revealed, isEmpty);
+      expect(h.revealedLandmarkHexes, isEmpty);
       expect(h.pipeline.openingPointCoordinator.points, 5, reason: '拒否時はポイントを消費しない');
 
       final persisted = await h.disclosedHexRepository.findById(target);

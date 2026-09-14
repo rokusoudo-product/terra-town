@@ -20,6 +20,7 @@ import '../../map/economy/terrain_yield_pipeline.dart';
 import '../../map/fog_of_war_layer_factory.dart';
 import '../../map/hex_feature_lookup.dart';
 import '../../map/initial_camera.dart';
+import '../../map/landmark_layer_factory.dart';
 import '../../map/map_style_factory.dart';
 import '../../map/region_pack_asset.dart';
 import '../permissions/tracking_control_button.dart';
@@ -323,6 +324,15 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   RegionPackConnection? _regionPackConnection;
   Map<String, dynamic>? _fogHexFeatureCollection;
 
+  /// 名所ピンレイヤー（Issue #160・T071）。`_regionPack`・`_collectionRepository`
+  /// は開示/収集の復元（[_onLandmarkLayerReady]）・新規開示時の反映
+  /// （`revealLandmarks`。initState内のローカル関数）の両方で必要なため、
+  /// initState のローカル変数ではなくフィールドとして保持する。
+  RegionPack? _regionPack;
+  CollectionRepository? _collectionRepository;
+  LandmarkLayerController? _landmarkController;
+  Future<LandmarkLayerAssets>? _landmarkAssets;
+
   /// タップされた fog 地物の `feature_id` → `core` の [HexId] への逆引き表
   /// （Issue #151・T064）。`hex_feature_lookup.dart` 参照。
   Map<int, HexId>? _hexIdByFeatureId;
@@ -370,6 +380,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       _regionPackConnection = connection;
       _fogHexFeatureCollection = buildFogHexFeatureCollectionFromRegionPack(connection);
       final regionPack = RegionPackRepository.load(connection);
+      _regionPack = regionPack;
       // タップされた fog 地物の featureId → HexId の逆引き表（Issue #151・T064）。
       // 起動時に一度だけ組み立て、地域パックへの追加のDBアクセスなしにタップの
       // たびの変換を完結させる（hex_feature_lookup.dart クラスdoc参照）。
@@ -383,6 +394,22 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       // （`CollectionRepository`）が担う想定で、本ウィジェットの状態としては
       // 保持しない（Issue #159「読み出し口を用意する」はクラスの存在で満たす）。
       final collectionRepository = CollectionRepository(widget.paths.gameDatabase);
+      _collectionRepository = collectionRepository;
+
+      // 名所ピンレイヤー（Issue #160・T071）。GeoJSON（同期）はここで組み立て、
+      // ラスタ画像（`dart:ui` のラスタライズを伴い非同期。`landmark_layer_factory.dart`
+      // クラスdoc参照）は Future のまま MapView に渡す
+      // （`MapView.landmarkAssets` クラスdoc「`Future` で受け取る理由」参照）。
+      final landmarkFeatureCollection = buildLandmarkFeatureCollection(
+        regionPack.pointsOfInterest,
+      );
+      _landmarkAssets = buildLandmarkPinImages(regionPack.pointsOfInterest).then(
+        (images) => LandmarkLayerAssets(
+          images: images,
+          featureCollection: landmarkFeatureCollection,
+        ),
+      );
+
       final known = DisclosedHexSet();
       final positionProvider = NativePositionProvider();
       _disclosedHexRepository = disclosedHexRepository;
@@ -421,6 +448,18 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         await controller.revealHex(featureId);
       }
 
+      // 名所ピンレイヤー（Issue #160・T071）: ヘクスが新規開示されるたびに
+      // TerrainYieldPipeline から呼ばれ、そのヘクスに属する名所を「開示済み」
+      // 表示へ切り替える（`_landmarkController` は onLandmarkLayerReady が
+      // 発火するまで null。`reveal` と同じ「都度読むだけ」の方針）。
+      Future<void> revealLandmarks(HexId hexId) async {
+        final controller = _landmarkController;
+        if (controller == null) return;
+        await controller.revealPointsOfInterest(
+          regionPack.pointsOfInterestIn(hexId).map((poi) => poi.id),
+        );
+      }
+
       final terrainHexCounter = TerrainHexCounter();
       final inventoryRepository = InventoryRepository(widget.paths.gameDatabase);
       _terrainHexCounter = terrainHexCounter;
@@ -436,6 +475,7 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       _pipeline = TerrainYieldPipeline(
         disclosureService: service,
         reveal: reveal,
+        revealLandmarks: revealLandmarks,
         accrualCoordinator: TerrainYieldAccrualCoordinator(
           ledger: TerrainYieldLedger(widget.paths.gameDatabase),
         ),
@@ -498,6 +538,41 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     // 指摘の順序保証。`terrain_yield_pipeline.dart` クラスdoc参照）。2回目以降の
     // 呼び出し（将来のsetStyle相当）では start() は何もしない。
     await pipeline.start();
+  }
+
+  /// [MapView.onLandmarkLayerReady] から呼ぶ（Issue #160・T071）。
+  ///
+  /// [_onFogLayerReady] の fog 復元（`restoreDisclosedHexes`）と対になる処理。
+  /// アプリ起動時点で既に開示済みのヘクス・既に収集済みの名所を、レイヤー
+  /// 追加直後に一括で反映する（そうしないと、新規にヘクスを開示するまで
+  /// 既存の開示済みヘクスの名所が伏せピンのまま表示され続けてしまう）。
+  /// `_landmarkController` 自体は fog と異なりラスタ画像の生成完了を待つため
+  /// 発火が遅れうるが、`onLandmarkLayerReady` は `MapView` 側で画像生成完了後に
+  /// 呼ばれるため、本メソッドが呼ばれた時点では常に画像は登録済みである
+  /// （`map_view.dart` の `_addRegionPackLayers` 参照）。
+  Future<void> _onLandmarkLayerReady(LandmarkLayerController controller) async {
+    _landmarkController = controller;
+
+    final regionPack = _regionPack;
+    final disclosedHexRepository = _disclosedHexRepository;
+    final collectionRepository = _collectionRepository;
+    if (regionPack == null ||
+        disclosedHexRepository == null ||
+        collectionRepository == null) {
+      return;
+    }
+
+    final disclosedHexes = await disclosedHexRepository.findAll();
+    for (final hex in disclosedHexes) {
+      await controller.revealPointsOfInterest(
+        regionPack.pointsOfInterestIn(hex.hexId).map((poi) => poi.id),
+      );
+    }
+
+    final collected = await collectionRepository.findAll();
+    await controller.markCollected(
+      collected.map((row) => PointOfInterestId(row.poiId)),
+    );
   }
 
   /// [CurrentLocationFollowButton] から呼ぶ。
@@ -578,7 +653,22 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   /// §6「配置についての判断」と同じ、固定位置UIを覆わせない方針）。
   /// 色・サイズは DESIGN.md のトークン（[AppSpacing]）のみを使い、直書きしない。
   void _showLandmarkCollectedSnackBar(List<LandmarkCollectionRecord> records) {
-    if (records.isEmpty || !mounted) return;
+    if (records.isEmpty) return;
+
+    // 名所ピンレイヤー（Issue #160・T071）: accentハイライト表示への切り替え。
+    // 徒歩経路（`LandmarkAwareDisclosedHexRepository.onCollected`）・
+    // ポイント開放経路（`_handleFogHexTapped`）のどちらも本メソッドを唯一の
+    // 合流点として呼ぶため、ここ1箇所での配線で両経路をカバーできる。
+    // SnackBar表示（`mounted` 判定）とは独立した関心事のため、`mounted` の
+    // 早期リターンより前に行う。
+    unawaited(
+      _landmarkController?.markCollected(
+            records.map((record) => record.poiId),
+          ) ??
+          Future<void>.value(),
+    );
+
+    if (!mounted) return;
 
     final names = records.map((record) => '「${record.name}」').join();
     final methodLabel = switch (records.first.collectMethod) {
@@ -633,6 +723,12 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       fogHexFeatureCollection: fogHexFeatureCollection,
       onFogLayerReady: (controller) {
         unawaited(_onFogLayerReady(controller));
+      },
+      // 名所ピンレイヤー（Issue #160・T071）。ラスタ画像の生成完了を
+      // `MapView` 側で待ってから追加される（`landmarkAssets` クラスdoc参照）。
+      landmarkAssets: _landmarkAssets,
+      onLandmarkLayerReady: (controller) {
+        unawaited(_onLandmarkLayerReady(controller));
       },
       onLayersFailed: (error, stackTrace) {
         if (!mounted) return;
