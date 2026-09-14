@@ -5,6 +5,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import 'design/app_theme.dart';
+import 'features/collection/collection_screen.dart';
+import 'features/collection/region_pack_loader.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/map/map_screen.dart';
 import 'features/settings/settings_screen.dart';
@@ -14,7 +16,12 @@ void main() {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key, this.mapPathResolver, this.gameDatabaseBuilder});
+  const MyApp({
+    super.key,
+    this.mapPathResolver,
+    this.gameDatabaseBuilder,
+    this.loadRegionPack,
+  });
 
   /// テスト用の差し替えフック（既定 null では [MapScreen] が実アセットから
   /// 地域パックを解決する）。
@@ -32,6 +39,12 @@ class MyApp extends StatelessWidget {
   /// widget テストでは [GameDatabase.forTesting]（インメモリ）を渡すことで、
   /// `path_provider` の実プラットフォーム実装なしに設定画面を検証できる。
   final GameDatabase Function()? gameDatabaseBuilder;
+
+  /// テスト用の差し替えフック（既定 null では [defaultLoadRegionPack] を使う）。
+  ///
+  /// [CollectionScreen]（図鑑タブ・T075・Issue #161）がカテゴリ集計の総数（分母）を
+  /// 得るために地域パックを読み込む関数。`region_pack_loader.dart` クラスdoc参照。
+  final LoadRegionPack? loadRegionPack;
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +67,7 @@ class MyApp extends StatelessWidget {
       home: RootScaffold(
         mapPathResolver: mapPathResolver,
         gameDatabaseBuilder: gameDatabaseBuilder,
+        loadRegionPack: loadRegionPack,
       ),
     );
   }
@@ -69,8 +83,17 @@ class MyApp extends StatelessWidget {
 /// 建設UI本体（建物を建てる操作・T089）はまだ無いため、現時点では
 /// [InventoryScreen]（所持資材の一覧）のみを表示する。T089 実装時に
 /// 本タブの中身を差し替える。
+///
+/// ## 図鑑タブ（2026-09-14・Issue #161・T075）
+/// [CollectionScreen]（名所図鑑）を表示する。建設タブと同じく、既存の
+/// Repository（[CollectionRepository]）をそのまま使う方針。
 class RootScaffold extends StatefulWidget {
-  const RootScaffold({super.key, this.mapPathResolver, this.gameDatabaseBuilder});
+  const RootScaffold({
+    super.key,
+    this.mapPathResolver,
+    this.gameDatabaseBuilder,
+    this.loadRegionPack,
+  });
 
   /// [MyApp.mapPathResolver] をそのまま [MapScreen] まで橋渡しするテスト用フック。
   final Future<String> Function()? mapPathResolver;
@@ -78,6 +101,10 @@ class RootScaffold extends StatefulWidget {
   /// [MyApp.gameDatabaseBuilder] をそのまま [SettingsScreen] まで橋渡しする
   /// テスト用フック（Issue #135）。
   final GameDatabase Function()? gameDatabaseBuilder;
+
+  /// [MyApp.loadRegionPack] をそのまま [CollectionScreen] まで橋渡しする
+  /// テスト用フック（T075・Issue #161）。
+  final LoadRegionPack? loadRegionPack;
 
   @override
   State<RootScaffold> createState() => _RootScaffoldState();
@@ -102,6 +129,12 @@ class _RootScaffoldState extends State<RootScaffold> {
   /// （新しい Repository は作らない・Issue #150 提案内容3）。
   late final InventoryRepository _inventoryRepository =
       InventoryRepository(_gameDatabase);
+
+  /// 図鑑タブ（[CollectionScreen]）が収集記録を読み出すためのリポジトリ。
+  /// `CollectionRepository` は Issue #159 で追加済みの既存クラスをそのまま使う
+  /// （建設タブの `InventoryRepository` と同じ方針・T075）。
+  late final CollectionRepository _collectionRepository =
+      CollectionRepository(_gameDatabase);
 
   @override
   void dispose() {
@@ -136,6 +169,10 @@ class _RootScaffoldState extends State<RootScaffold> {
           gameDatabase: _gameDatabase,
         ),
       1 => InventoryScreen(inventoryRepository: _inventoryRepository),
+      2 => CollectionScreen(
+          collectionRepository: _collectionRepository,
+          loadRegionPack: widget.loadRegionPack ?? defaultLoadRegionPack,
+        ),
       3 => SettingsScreen(store: _rewardSettingsRepository),
       _ => _PlaceholderScreen(label: _tabs[_selectedIndex].label),
     };

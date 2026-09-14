@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import 'package:terra_town/design/app_theme.dart';
@@ -28,6 +29,28 @@ Future<String> _missingPackResolver() {
   return Future<String>.error(
     const PackAssetMissingException(MapScreen.mbtilesAssetKey),
   );
+}
+
+/// 【Issue #161・T075】図鑑タブ（[CollectionScreen]）が地域パックを読み込む際も、
+/// `MapScreen` と同じ理由（`path_provider`/`sqlite3` の実プラットフォーム実装が
+/// widget テスト環境に無い）で実アセットには触れられない。POIを1件も持たない
+/// インメモリの地域パックを返すフェイクを注入する。
+Future<RegionPack> _emptyRegionPackLoader() async {
+  final connection = RegionPackConnection.forTesting(
+    seed: (db) {
+      db.execute('CREATE TABLE pack_meta (key TEXT PRIMARY KEY, value TEXT)');
+      db.execute(
+        "INSERT INTO pack_meta (key, value) VALUES ('pack_version', 'test-v1')",
+      );
+      db.execute(
+        'CREATE TABLE hex_terrain ('
+        'hex_id INTEGER PRIMARY KEY, terrain_type TEXT NOT NULL, '
+        'feature_id INTEGER NOT NULL, cell_count INTEGER NOT NULL, '
+        'boundary_geojson TEXT NOT NULL)',
+      );
+    },
+  );
+  return RegionPackRepository.load(connection);
 }
 
 void main() {
@@ -169,6 +192,26 @@ void main() {
     // 新規ゲームDB（インメモリ）は所持資材が0件のため空状態になる
     // （InventoryScreen クラスdoc「所持数が0の資材の扱い」参照）。
     expect(find.text('まだ資材がありません'), findsOneWidget);
+  });
+
+  testWidgets('図鑑タブに切り替えると名所図鑑画面（Issue #161・T075）が表示される', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MyApp(
+        mapPathResolver: _missingPackResolver,
+        gameDatabaseBuilder: GameDatabase.forTesting,
+        loadRegionPack: _emptyRegionPackLoader,
+      ),
+    );
+
+    await tester.tap(find.text('図鑑'));
+    await tester.pumpAndSettle();
+
+    // 新規ゲームDB（インメモリ）＋名所0件のパックのため「名所データがありません」
+    // の空状態になる（CollectionScreen クラスdoc参照。DESIGN.md「図鑑」タブの
+    // 空状態＝未収集の見せ方とは別で、本当にPOIが無い場合の防御的な表示）。
+    expect(find.text('名所データがありません'), findsOneWidget);
   });
 
   testWidgets('設定タブに切り替えるとスイッチ（歩数判定オプトアウト・Issue #135）が表示される', (
