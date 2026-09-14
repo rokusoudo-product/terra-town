@@ -87,9 +87,14 @@ FillLayerProperties terrainTintFillLayerProperties(TerrainTintLayer layer) {
       ..add(layer.fillOpacity);
   }
   // 既定値（未知の terrain_type・空き地 vacant_lot のように
-  // fillColorHexByTerrainType に無いキー）。色自体は不透明度が常に0のため
-  // 画面には出ないプレースホルダである。
-  colorMatch.add('#000000');
+  // fillColorHexByTerrainType に無いキー）。対応する不透明度が常に0のため
+  // 画面には出ないプレースホルダだが、`location` は配色を一切知らない方針
+  // （クラスdoc「Issue #57 の注入方式を踏襲」）のため、ここでも新規の色
+  // リテラルは書かず、[layer] が既に持つ注入済みの値（[outlineColorHex]）を
+  // 使い回す（`FogOfWarController.installBenchmarkLayerForDebug` が計測用
+  // レイヤーにも独自の色リテラルを持たず `_layer.fillColorHex` を使い回すのと
+  // 同じ考え方）。
+  colorMatch.add(layer.outlineColorHex);
   opacityMatch.add(0.0);
 
   return FillLayerProperties(
