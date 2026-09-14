@@ -246,6 +246,75 @@ void main() {
       expect(ledger.grantedCalls, isEmpty); // 産出の計上は行われない
     });
 
+    test(
+      '名所ピンレイヤー（Issue #160）: revealLandmarksはrevealと同じ新規開示のたびに'
+      '対応するHexIdで呼ばれる（recordManualPosition経路）',
+      () async {
+        final revealed = <int>[];
+        final revealedLandmarkHexes = <HexId>[];
+        final known = DisclosedHexSet();
+        final repository = _InMemoryDisclosedHexRepository();
+        final ledger = _FakeLedger();
+        final terrainHexCounter = TerrainHexCounter();
+
+        final service = DisclosureService(
+          hexLocator: const RecordedHexLocator(),
+          regionPack: _FakeRegionPack(terrainByHex: {const HexId(9): TerrainType.sea}),
+          known: known,
+          repository: repository,
+        );
+
+        final pipeline = TerrainYieldPipeline(
+          disclosureService: service,
+          reveal: (featureId) async => revealed.add(featureId),
+          revealLandmarks: (hexId) async => revealedLandmarkHexes.add(hexId),
+          accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: ledger),
+          openingPointCoordinator: _fakeOpeningPointCoordinator(),
+          hexOpeningSpendService: _fakeHexOpeningSpendService(),
+          terrainHexCounter: terrainHexCounter,
+          disclosedHexRepository: repository,
+          recordedPositionUpdates: const Stream<LocationPointRecord>.empty(),
+        );
+
+        await pipeline.recordManualPosition(
+          GeoPosition(latitude: 1, longitude: 1, timestamp: DateTime.now(), hexId: const HexId(9)),
+        );
+
+        expect(revealedLandmarkHexes, [const HexId(9)]);
+      },
+    );
+
+    test('revealLandmarksを渡さない既存の呼び出し元は引き続き動作する（後方互換）', () async {
+      final known = DisclosedHexSet();
+      final repository = _InMemoryDisclosedHexRepository();
+      final ledger = _FakeLedger();
+      final terrainHexCounter = TerrainHexCounter();
+
+      final service = DisclosureService(
+        hexLocator: const RecordedHexLocator(),
+        regionPack: _FakeRegionPack(terrainByHex: {const HexId(9): TerrainType.sea}),
+        known: known,
+        repository: repository,
+      );
+
+      final pipeline = TerrainYieldPipeline(
+        disclosureService: service,
+        reveal: (featureId) async {},
+        accrualCoordinator: TerrainYieldAccrualCoordinator(ledger: ledger),
+        openingPointCoordinator: _fakeOpeningPointCoordinator(),
+        hexOpeningSpendService: _fakeHexOpeningSpendService(),
+        terrainHexCounter: terrainHexCounter,
+        disclosedHexRepository: repository,
+        recordedPositionUpdates: const Stream<LocationPointRecord>.empty(),
+      );
+
+      final disclosed = await pipeline.recordManualPosition(
+        GeoPosition(latitude: 1, longitude: 1, timestamp: DateTime.now(), hexId: const HexId(9)),
+      );
+
+      expect(disclosed, isNotNull);
+    });
+
     test('start()を2回呼んでも購読は1つのまま（二重購読しない）', () async {
       final controller = StreamController<LocationPointRecord>();
       final known = DisclosedHexSet();

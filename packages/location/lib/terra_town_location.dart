@@ -43,6 +43,7 @@ export 'src/map/current_location_marker.dart';
 export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';
 export 'src/map/hex_feature_bridge.dart';
+export 'src/map/landmark_layer.dart';
 export 'src/map/map_camera_position.dart';
 export 'src/map/mbtiles_asset.dart';
 export 'src/map/mbtiles_source.dart';

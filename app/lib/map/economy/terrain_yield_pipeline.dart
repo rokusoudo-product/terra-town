@@ -202,6 +202,7 @@ class TerrainYieldPipeline {
   TerrainYieldPipeline({
     required this.disclosureService,
     required this.reveal,
+    this.revealLandmarks,
     required this.accrualCoordinator,
     required this.openingPointCoordinator,
     required this.terrainHexCounter,
@@ -212,6 +213,17 @@ class TerrainYieldPipeline {
 
   final DisclosureService disclosureService;
   final Future<void> Function(int featureId) reveal;
+
+  /// 名所ピンレイヤー（Issue #160・T071）の開示状態の更新。ヘクスが新規開示
+  /// されるたびに（歩行・手動開示・ポイント開放のいずれでも）、[reveal] と
+  /// 同じ呼び出し箇所で合わせて呼ぶ。composition root（`map_screen.dart`）が
+  /// `regionPack.pointsOfInterestIn(hexId)` から該当ヘクスの名所IDを引き、
+  /// `LandmarkLayerController.revealPointsOfInterest` に渡す想定。
+  ///
+  /// null の場合は何もしない（名所ピンレイヤーを配線していない呼び出し元・
+  /// 既存テストへの後方互換）。
+  final Future<void> Function(HexId hexId)? revealLandmarks;
+
   final TerrainYieldAccrualCoordinator accrualCoordinator;
 
   /// 開放ポイント（歩行距離換算）の計上（Issue #143・T063）。
@@ -321,6 +333,7 @@ class TerrainYieldPipeline {
           if (disclosed != null) {
             terrainHexCounter.increment(disclosed.terrainType);
             await reveal(hexIdToFeatureId(disclosed.hexId.value));
+            await revealLandmarks?.call(disclosed.hexId);
           }
 
           _stats.value = TerrainYieldPipelineStats(
@@ -363,6 +376,7 @@ class TerrainYieldPipeline {
     if (disclosed != null) {
       terrainHexCounter.increment(disclosed.terrainType);
       await reveal(hexIdToFeatureId(disclosed.hexId.value));
+      await revealLandmarks?.call(disclosed.hexId);
     }
     return disclosed;
   }
@@ -426,6 +440,7 @@ class TerrainYieldPipeline {
         disclosureService.known.add(disclosedHex.hexId);
         terrainHexCounter.increment(disclosedHex.terrainType);
         await reveal(hexIdToFeatureId(disclosedHex.hexId.value));
+        await revealLandmarks?.call(disclosedHex.hexId);
         openingPointCoordinator.syncPointsAfterExternalChange(result.remainingPoints);
         _publishOpeningPointStatsFromCoordinator();
         return HexOpeningAttemptResult.success(
