@@ -283,6 +283,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // クラスdoc参照: このコールバックによりアプリの状態が全体的に作り直され、
       // 本ウィジェット自体も破棄される。以後 setState を呼ばない。
       widget.onDataRestored?.call();
+    } catch (error) {
+      // 上記の個別 catch が拾わない例外（記録中確認・ファイル選択の Pigeon 呼び出し
+      // 自体の失敗〔`PlatformException`〕、[SaveDataTransfer.importFromJsonString]
+      // 内部でトランザクション開始前に失敗した場合〔`getMaxLocationPointId`・
+      // バックアップ用のエクスポート自体〕等）を拾う最後の砦。
+      //
+      // これらはいずれも `GameDatabase.transaction`（削除・挿入）に到達する前の
+      // 失敗であるため、「データは読み込み前の状態のまま」という説明は常に正しい
+      // （トランザクション自体の失敗は [SaveDataImportFailedException] として
+      // 個別 catch 済み）。
+      if (!mounted) return;
+      await _showRecoveryDialog(
+        title: '読み込みに失敗しました',
+        message: '予期しないエラーが発生したため、読み込みを中断しました。'
+            'データは読み込み前の状態のままです。もう一度お試しください。\n($error)',
+      );
     } finally {
       if (mounted) setState(() => _importing = false);
     }

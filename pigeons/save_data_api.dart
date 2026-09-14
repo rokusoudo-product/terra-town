@@ -26,14 +26,14 @@ import 'package:pigeon/pigeon.dart';
 /// 1. **新しい Gradle プラグインを追加しない。** `packages/location/pubspec.yaml` の
 ///    `maplibre_gl` に関する記録（Issue #67）が示すとおり、このリポジトリでは
 ///    Flutter プラグインの追加が Kotlin ツールチェーンの相互排他で実際にビルドを
-///    壊した前例がある。`file_selector` 等の新規プラグインを追加するリスクを
-///    冒すより、既存の Pigeon（`LocationTrackingHostApi`）と同じ仕組みを拡張する
-///    方が安全である。
-/// 2. **`file_selector` の Android 実装は保存（`getSaveLocation`）に対応していない**
-///    （2026-09時点のパッケージ実装）。Issue の決定事項6が「file_selector の保存
-///    **or** share_plus」と二択で書いているのはこのためであり、保存・読み込みの
-///    両方を一貫した1つの仕組みで実装するには、いずれにせよ Kotlin 側の
-///    `ACTION_CREATE_DOCUMENT` 実装が必要になる。
+///    壊した前例がある。`file_selector`・`share_plus` 等の新規プラグインを
+///    追加するリスクを冒すより、既存の Pigeon（`LocationTrackingHostApi`）と
+///    同じ仕組みを拡張する方が安全である。
+/// 2. 保存・読み込みの両方を**一貫した1つの仕組み**で実装できる。決定事項6が
+///    「file_selector の保存 **or** share_plus」と二択で書いているのは、
+///    候補プラグインの組み合わせによって保存側・読み込み側の実装元が分かれうる
+///    ためだが、Pigeon → Kotlin なら両方向を同じハンドラ・同じ Activity で
+///    完結できる。
 /// 3. Dart は `content://` URI のバイト列を直接読み書きできないため、
 ///    いずれの案でも最終的には Kotlin（`ContentResolver`）側での I/O が必要になる。
 ///

@@ -12,8 +12,8 @@ import 'save_data_exceptions.dart';
 /// ## `hex_id` 等の巨大整数を10進文字列で書く理由
 /// H3 の解像度11セルインデックス（`docs/terrain.md` §4.2）は実機で
 /// `6` × `10^17` 程度の値になる（`disclosed_hex.hex_id`・`building.hex_id`。
-/// [terra-town の](地物 ID の丸め問題)。**MVP で実際に使われるヘクスIDは
-/// ほぼ確実に IEEE754 倍精度浮動小数点数の安全な整数範囲（2^53 =
+/// `docs/terrain.md` §4.4 の地物 ID の丸め問題と同種）。**MVP で実際に
+/// 使われるヘクスIDはほぼ確実に IEEE754 倍精度浮動小数点数の安全な整数範囲（2^53 =
 /// 9007199254740992）を超える**ため、これは理論上の縁ケースではなく通常運転で
 /// 毎回踏む値である。`dart:convert` の `jsonEncode`/`jsonDecode` は数値を
 /// double 経由で扱うため、これらの列は常に10進文字列としてエンコードし、

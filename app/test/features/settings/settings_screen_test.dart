@@ -95,10 +95,15 @@ class _FakeSaveDataTransfer implements SaveDataTransfer {
 
 /// [SaveDataFileAccess] のフェイク（Issue #180）。
 class _FakeSaveDataFileAccess implements SaveDataFileAccess {
-  _FakeSaveDataFileAccess({this.saveResult = true, this.openResult});
+  _FakeSaveDataFileAccess({
+    this.saveResult = true,
+    this.openResult,
+    this.openError,
+  });
 
   final bool saveResult;
   final String? openResult;
+  final Object? openError;
 
   bool saveCalled = false;
   bool openCalled = false;
@@ -116,6 +121,7 @@ class _FakeSaveDataFileAccess implements SaveDataFileAccess {
   @override
   Future<String?> openTextFile() async {
     openCalled = true;
+    if (openError != null) throw openError!;
     return openResult;
   }
 }
@@ -317,6 +323,24 @@ void main() {
       expect(find.text('読み込めません'), findsOneWidget);
       expect(find.textContaining('記録を停止してから'), findsOneWidget);
       expect(fileAccess.openCalled, isFalse);
+    });
+
+    testWidgets('ファイル選択自体が失敗（例: PlatformException）した場合も復旧案内を表示する', (
+      tester,
+    ) async {
+      final fileAccess = _FakeSaveDataFileAccess(
+        openError: StateError('SAFピッカーの起動に失敗（テスト用）'),
+      );
+      await tester.pumpWidget(
+        _wrap(_buildScreen(saveDataFileAccess: fileAccess)),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('データの読み込み'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('読み込みに失敗しました'), findsOneWidget);
+      expect(find.textContaining('データは読み込み前の状態のままです'), findsOneWidget);
     });
 
     testWidgets('ファイル選択をキャンセルすると何も起きない', (tester) async {
