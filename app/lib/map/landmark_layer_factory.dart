@@ -127,6 +127,24 @@ IconData _iconForKind(String kind) {
 /// 実装が複雑になる。DESIGN.mdにアイコン/ラベルのサイズトークンは無いため、
 /// 本関数のサイズ定数は実装判断の値である。`current_location_marker.dart`の
 /// `radius`と同じ位置づけ）。
+///
+/// 【円の中心を画像の中心に一致させる（Issue #173）】
+/// `landmark_layer.dart` の [landmarkSymbolLayerProperties] は `icon-anchor`
+/// を指定せず、MapLibre のスタイル仕様の既定値 `center`（画像全体の中心を
+/// 座標に合わせる）に委ねている。これは「円の中心が名所の座標に来る」
+/// 受け入れ基準を、`icon-anchor`/`icon-offset`（ピクセル単位で
+/// `icon-size` 倍率・端末の devicePixelRatio との関係を考慮する必要があり、
+/// 事故りやすい）を使わずに満たすための設計判断である。そのために本関数は
+/// キャンバスを**円の中心を軸に上下対称**にレイアウトする。
+///
+/// 具体的には、円の下側にラベル用の余白（[labelTop] から [canvasHeight] まで、
+/// 常に一定）を確保したうえで、円の**上側にも同じ高さの余白**
+/// （[verticalPadding]）を確保する。これにより
+/// `center.dy`（= [verticalPadding] + 半径）と `canvasHeight / 2` が一致し、
+/// 画像全体の中心＝円の中心になる。ラベルが無い伏せピン画像も含め、
+/// 3状態すべて同じキャンバスサイズ・同じ円の位置で描くため（[canvasWidth]・
+/// [canvasHeight]・円中心が呼び出し元の [label] 有無によらず常に同一）、
+/// `icon-anchor: center` 1つの既定値で3状態すべてに対応できる。
 Future<Uint8List> _renderPin({
   required IconData icon,
   required Color backgroundColor,
@@ -135,14 +153,21 @@ Future<Uint8List> _renderPin({
 }) async {
   const double diameter = 64;
   const double canvasWidth = 176;
-  const double canvasHeight = 96;
+
+  // 円の上下対称のレイアウトにする余白。下側は「ラベルの行の高さ + 円との
+  // 間隔」に相当し、上側も同じ値にすることで円の中心が画像の中心
+  // （canvasHeight / 2）に一致する（クラスdoc「円の中心を画像の中心に
+  // 一致させる」参照）。労力を割いて可変にする理由が無いため、旧実装の
+  // ラベル領域の高さ（26px）から逆算した固定値。
+  const double verticalPadding = 28;
+  const double canvasHeight = verticalPadding * 2 + diameter; // = 120
 
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(
     recorder,
     const Rect.fromLTWH(0, 0, canvasWidth, canvasHeight),
   );
-  final center = const Offset(canvasWidth / 2, diameter / 2 + 4);
+  final center = const Offset(canvasWidth / 2, verticalPadding + diameter / 2);
 
   canvas.drawCircle(center, diameter / 2, Paint()..color = backgroundColor);
   canvas.drawCircle(
@@ -198,7 +223,10 @@ Future<Uint8List> _renderPin({
   }
 
   if (label != null) {
-    const labelTop = diameter + 6;
+    // 円の下端（verticalPadding + diameter）から2px空けた位置。
+    // canvasHeight（= verticalPadding * 2 + diameter）との差である
+    // 「verticalPadding - 2」がラベル1行分の描画領域になる（クラスdoc参照）。
+    const labelTop = verticalPadding + diameter + 2;
     // 縁取り（ハロー）付きラベル。DESIGN.md「地図オーバーレイのラベルのみ
     // 視認性のため縁取り可」の例外規定を用いる。
     final haloPainter = TextPainter(

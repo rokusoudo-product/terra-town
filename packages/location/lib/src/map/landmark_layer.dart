@@ -425,6 +425,23 @@ class LandmarkLayerController {
 /// `fog_of_war_layer_test.dart` 冒頭コメント「install 自体は
 /// プラットフォームチャンネルが必要なため flutter test では検証できない」と
 /// 同じ制約への対処）。
+///
+/// 【`icon-anchor`/`icon-offset` を指定しない（Issue #173）】
+/// 名所ピンの円が座標より上に描かれ、ピンをタップすると隣のヘクスが選ばれて
+/// しまう不具合があった（原因: 円の下にラベルを焼き込んだ縦長画像の
+/// **画像全体の中心**が座標に来ていたため、円自体は座標より上にずれていた）。
+/// 修正は `icon-anchor`/`icon-offset`（ピクセル単位で `icon-size` 倍率・
+/// 端末の devicePixelRatio との関係を考慮する必要があり事故りやすい）を
+/// 使うのではなく、`app/lib/map/landmark_layer_factory.dart`（`_renderPin`）側で
+/// **画像そのものを円の中心が画像の中心に一致するレイアウト**（円の上下に
+/// 同じ高さの余白を確保する）に直す方式を採った。そのため本関数は
+/// `icon-anchor` を明示せず、MapLibre のスタイル仕様の既定値 `center`
+/// （＝画像全体の中心を座標に合わせる）に委ねる。3状態
+/// （伏せ・開示済み・収集済み）すべて同じキャンバスサイズ・同じ円の位置で
+/// 描画するため、この既定値1つで3状態すべてに対応できる
+/// （`landmark_layer_factory.dart` の `_renderPin` クラスdoc参照）。
+/// `icon-pitch-alignment`/`icon-rotation-alignment` も既定値（`auto` ≒
+/// 地図がピッチしていてもビューポート基準で円中心が座標に来る）のままでよい。
 SymbolLayerProperties landmarkSymbolLayerProperties({double iconSize = 1.0}) {
   return SymbolLayerProperties(
     iconImage: const ['get', 'icon'],
