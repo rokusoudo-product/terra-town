@@ -1457,6 +1457,59 @@ class $CollectionsTable extends Collections
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _isBonusMeta = const VerificationMeta(
+    'isBonus',
+  );
+  @override
+  late final GeneratedColumn<bool> isBonus = GeneratedColumn<bool>(
+    'is_bonus',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_bonus" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<CollectMethod?, String>
+  collectMethod = GeneratedColumn<String>(
+    'collect_method',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  ).withConverter<CollectMethod?>($CollectionsTable.$convertercollectMethodn);
+  static const VerificationMeta _bonusGrantedMeta = const VerificationMeta(
+    'bonusGranted',
+  );
+  @override
+  late final GeneratedColumn<int> bonusGranted = GeneratedColumn<int>(
+    'bonus_granted',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _discoveredAtMeta = const VerificationMeta(
     'discoveredAt',
   );
@@ -1470,7 +1523,15 @@ class $CollectionsTable extends Collections
     defaultValue: currentDateAndTime,
   );
   @override
-  List<GeneratedColumn> get $columns => [poiId, discoveredAt];
+  List<GeneratedColumn> get $columns => [
+    poiId,
+    kind,
+    name,
+    isBonus,
+    collectMethod,
+    bonusGranted,
+    discoveredAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1490,6 +1551,33 @@ class $CollectionsTable extends Collections
       );
     } else if (isInserting) {
       context.missing(_poiIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    }
+    if (data.containsKey('is_bonus')) {
+      context.handle(
+        _isBonusMeta,
+        isBonus.isAcceptableOrUnknown(data['is_bonus']!, _isBonusMeta),
+      );
+    }
+    if (data.containsKey('bonus_granted')) {
+      context.handle(
+        _bonusGrantedMeta,
+        bonusGranted.isAcceptableOrUnknown(
+          data['bonus_granted']!,
+          _bonusGrantedMeta,
+        ),
+      );
     }
     if (data.containsKey('discovered_at')) {
       context.handle(
@@ -1513,6 +1601,28 @@ class $CollectionsTable extends Collections
         DriftSqlType.string,
         data['${effectivePrefix}poi_id'],
       )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      ),
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      ),
+      isBonus: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_bonus'],
+      )!,
+      collectMethod: $CollectionsTable.$convertercollectMethodn.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}collect_method'],
+        ),
+      ),
+      bonusGranted: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}bonus_granted'],
+      ),
       discoveredAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}discovered_at'],
@@ -1524,17 +1634,79 @@ class $CollectionsTable extends Collections
   $CollectionsTable createAlias(String alias) {
     return $CollectionsTable(attachedDatabase, alias);
   }
+
+  static JsonTypeConverter2<CollectMethod, String, String>
+  $convertercollectMethod = const EnumNameConverter<CollectMethod>(
+    CollectMethod.values,
+  );
+  static JsonTypeConverter2<CollectMethod?, String?, String?>
+  $convertercollectMethodn = JsonTypeConverter2.asNullable(
+    $convertercollectMethod,
+  );
 }
 
 class CollectionRow extends DataClass implements Insertable<CollectionRow> {
   /// `PointOfInterestId.value` と対応。
   final String poiId;
+
+  /// 収集時点のPOI種別（OSMタグ由来。例: `tourism=attraction`）のスナップショット。
+  /// v2以前の行には存在しないため nullable（クラスdoc参照）。
+  final String? kind;
+
+  /// 収集時点のPOI名称のスナップショット。[kind] と同じ理由で nullable。
+  final String? name;
+
+  /// ボーナスオブジェクトか否か（`docs/landmark_objects.md` §2.2）。
+  /// 本Issue（#159）では全件 false 固定（ボーナス判定は `future` Issue #162）。
+  final bool isBonus;
+
+  /// 収集手段（`walk`=現地開示 / `point`=ポイント開放。
+  /// `docs/landmark_objects.md` §3.2・§5）。v2以前の行には存在しないため
+  /// nullable（クラスdoc参照）。
+  final CollectMethod? collectMethod;
+
+  /// 収集時に付与された副次ボーナス値（`docs/landmark_objects.md` §4）。
+  /// 本Issue（#159）では全件 null 固定（ボーナス効果は `future` Issue #162）。
+  final int? bonusGranted;
+
+  /// 収集日時（`docs/landmark_objects.md` §5 の `collected_at` に相当）。
+  ///
+  /// 【列名を `discovered_at` のまま据え置いた理由（Issue #159・PR本文にも記載）】
+  /// 列のリネーム（`discovered_at` → `collected_at`）は意味的にはより正確だが、
+  /// SQLite の列リネームは `ALTER TABLE ... RENAME COLUMN`（3.25+）が必要で
+  /// あり、本Issueの他の変更（列追加5本）と比べて移行のリスク・レビューコストが
+  /// 見合わないと判断し見送った。ドメイン層（[CollectionRepository]・
+  /// `LandmarkCollectionRecord`）ではこの列を `collectedAt` として読み書きし、
+  /// スキーマ上の列名とドメイン上の意味の対応はコード上のコメントで明示する。
   final DateTime discoveredAt;
-  const CollectionRow({required this.poiId, required this.discoveredAt});
+  const CollectionRow({
+    required this.poiId,
+    this.kind,
+    this.name,
+    required this.isBonus,
+    this.collectMethod,
+    this.bonusGranted,
+    required this.discoveredAt,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['poi_id'] = Variable<String>(poiId);
+    if (!nullToAbsent || kind != null) {
+      map['kind'] = Variable<String>(kind);
+    }
+    if (!nullToAbsent || name != null) {
+      map['name'] = Variable<String>(name);
+    }
+    map['is_bonus'] = Variable<bool>(isBonus);
+    if (!nullToAbsent || collectMethod != null) {
+      map['collect_method'] = Variable<String>(
+        $CollectionsTable.$convertercollectMethodn.toSql(collectMethod),
+      );
+    }
+    if (!nullToAbsent || bonusGranted != null) {
+      map['bonus_granted'] = Variable<int>(bonusGranted);
+    }
     map['discovered_at'] = Variable<DateTime>(discoveredAt);
     return map;
   }
@@ -1542,6 +1714,15 @@ class CollectionRow extends DataClass implements Insertable<CollectionRow> {
   CollectionsCompanion toCompanion(bool nullToAbsent) {
     return CollectionsCompanion(
       poiId: Value(poiId),
+      kind: kind == null && nullToAbsent ? const Value.absent() : Value(kind),
+      name: name == null && nullToAbsent ? const Value.absent() : Value(name),
+      isBonus: Value(isBonus),
+      collectMethod: collectMethod == null && nullToAbsent
+          ? const Value.absent()
+          : Value(collectMethod),
+      bonusGranted: bonusGranted == null && nullToAbsent
+          ? const Value.absent()
+          : Value(bonusGranted),
       discoveredAt: Value(discoveredAt),
     );
   }
@@ -1553,6 +1734,13 @@ class CollectionRow extends DataClass implements Insertable<CollectionRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return CollectionRow(
       poiId: serializer.fromJson<String>(json['poiId']),
+      kind: serializer.fromJson<String?>(json['kind']),
+      name: serializer.fromJson<String?>(json['name']),
+      isBonus: serializer.fromJson<bool>(json['isBonus']),
+      collectMethod: $CollectionsTable.$convertercollectMethodn.fromJson(
+        serializer.fromJson<String?>(json['collectMethod']),
+      ),
+      bonusGranted: serializer.fromJson<int?>(json['bonusGranted']),
       discoveredAt: serializer.fromJson<DateTime>(json['discoveredAt']),
     );
   }
@@ -1561,18 +1749,48 @@ class CollectionRow extends DataClass implements Insertable<CollectionRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'poiId': serializer.toJson<String>(poiId),
+      'kind': serializer.toJson<String?>(kind),
+      'name': serializer.toJson<String?>(name),
+      'isBonus': serializer.toJson<bool>(isBonus),
+      'collectMethod': serializer.toJson<String?>(
+        $CollectionsTable.$convertercollectMethodn.toJson(collectMethod),
+      ),
+      'bonusGranted': serializer.toJson<int?>(bonusGranted),
       'discoveredAt': serializer.toJson<DateTime>(discoveredAt),
     };
   }
 
-  CollectionRow copyWith({String? poiId, DateTime? discoveredAt}) =>
-      CollectionRow(
-        poiId: poiId ?? this.poiId,
-        discoveredAt: discoveredAt ?? this.discoveredAt,
-      );
+  CollectionRow copyWith({
+    String? poiId,
+    Value<String?> kind = const Value.absent(),
+    Value<String?> name = const Value.absent(),
+    bool? isBonus,
+    Value<CollectMethod?> collectMethod = const Value.absent(),
+    Value<int?> bonusGranted = const Value.absent(),
+    DateTime? discoveredAt,
+  }) => CollectionRow(
+    poiId: poiId ?? this.poiId,
+    kind: kind.present ? kind.value : this.kind,
+    name: name.present ? name.value : this.name,
+    isBonus: isBonus ?? this.isBonus,
+    collectMethod: collectMethod.present
+        ? collectMethod.value
+        : this.collectMethod,
+    bonusGranted: bonusGranted.present ? bonusGranted.value : this.bonusGranted,
+    discoveredAt: discoveredAt ?? this.discoveredAt,
+  );
   CollectionRow copyWithCompanion(CollectionsCompanion data) {
     return CollectionRow(
       poiId: data.poiId.present ? data.poiId.value : this.poiId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      name: data.name.present ? data.name.value : this.name,
+      isBonus: data.isBonus.present ? data.isBonus.value : this.isBonus,
+      collectMethod: data.collectMethod.present
+          ? data.collectMethod.value
+          : this.collectMethod,
+      bonusGranted: data.bonusGranted.present
+          ? data.bonusGranted.value
+          : this.bonusGranted,
       discoveredAt: data.discoveredAt.present
           ? data.discoveredAt.value
           : this.discoveredAt,
@@ -1583,42 +1801,85 @@ class CollectionRow extends DataClass implements Insertable<CollectionRow> {
   String toString() {
     return (StringBuffer('CollectionRow(')
           ..write('poiId: $poiId, ')
+          ..write('kind: $kind, ')
+          ..write('name: $name, ')
+          ..write('isBonus: $isBonus, ')
+          ..write('collectMethod: $collectMethod, ')
+          ..write('bonusGranted: $bonusGranted, ')
           ..write('discoveredAt: $discoveredAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(poiId, discoveredAt);
+  int get hashCode => Object.hash(
+    poiId,
+    kind,
+    name,
+    isBonus,
+    collectMethod,
+    bonusGranted,
+    discoveredAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is CollectionRow &&
           other.poiId == this.poiId &&
+          other.kind == this.kind &&
+          other.name == this.name &&
+          other.isBonus == this.isBonus &&
+          other.collectMethod == this.collectMethod &&
+          other.bonusGranted == this.bonusGranted &&
           other.discoveredAt == this.discoveredAt);
 }
 
 class CollectionsCompanion extends UpdateCompanion<CollectionRow> {
   final Value<String> poiId;
+  final Value<String?> kind;
+  final Value<String?> name;
+  final Value<bool> isBonus;
+  final Value<CollectMethod?> collectMethod;
+  final Value<int?> bonusGranted;
   final Value<DateTime> discoveredAt;
   final Value<int> rowid;
   const CollectionsCompanion({
     this.poiId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.name = const Value.absent(),
+    this.isBonus = const Value.absent(),
+    this.collectMethod = const Value.absent(),
+    this.bonusGranted = const Value.absent(),
     this.discoveredAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CollectionsCompanion.insert({
     required String poiId,
+    this.kind = const Value.absent(),
+    this.name = const Value.absent(),
+    this.isBonus = const Value.absent(),
+    this.collectMethod = const Value.absent(),
+    this.bonusGranted = const Value.absent(),
     this.discoveredAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : poiId = Value(poiId);
   static Insertable<CollectionRow> custom({
     Expression<String>? poiId,
+    Expression<String>? kind,
+    Expression<String>? name,
+    Expression<bool>? isBonus,
+    Expression<String>? collectMethod,
+    Expression<int>? bonusGranted,
     Expression<DateTime>? discoveredAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (poiId != null) 'poi_id': poiId,
+      if (kind != null) 'kind': kind,
+      if (name != null) 'name': name,
+      if (isBonus != null) 'is_bonus': isBonus,
+      if (collectMethod != null) 'collect_method': collectMethod,
+      if (bonusGranted != null) 'bonus_granted': bonusGranted,
       if (discoveredAt != null) 'discovered_at': discoveredAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -1626,11 +1887,21 @@ class CollectionsCompanion extends UpdateCompanion<CollectionRow> {
 
   CollectionsCompanion copyWith({
     Value<String>? poiId,
+    Value<String?>? kind,
+    Value<String?>? name,
+    Value<bool>? isBonus,
+    Value<CollectMethod?>? collectMethod,
+    Value<int?>? bonusGranted,
     Value<DateTime>? discoveredAt,
     Value<int>? rowid,
   }) {
     return CollectionsCompanion(
       poiId: poiId ?? this.poiId,
+      kind: kind ?? this.kind,
+      name: name ?? this.name,
+      isBonus: isBonus ?? this.isBonus,
+      collectMethod: collectMethod ?? this.collectMethod,
+      bonusGranted: bonusGranted ?? this.bonusGranted,
       discoveredAt: discoveredAt ?? this.discoveredAt,
       rowid: rowid ?? this.rowid,
     );
@@ -1641,6 +1912,23 @@ class CollectionsCompanion extends UpdateCompanion<CollectionRow> {
     final map = <String, Expression>{};
     if (poiId.present) {
       map['poi_id'] = Variable<String>(poiId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (isBonus.present) {
+      map['is_bonus'] = Variable<bool>(isBonus.value);
+    }
+    if (collectMethod.present) {
+      map['collect_method'] = Variable<String>(
+        $CollectionsTable.$convertercollectMethodn.toSql(collectMethod.value),
+      );
+    }
+    if (bonusGranted.present) {
+      map['bonus_granted'] = Variable<int>(bonusGranted.value);
     }
     if (discoveredAt.present) {
       map['discovered_at'] = Variable<DateTime>(discoveredAt.value);
@@ -1655,6 +1943,11 @@ class CollectionsCompanion extends UpdateCompanion<CollectionRow> {
   String toString() {
     return (StringBuffer('CollectionsCompanion(')
           ..write('poiId: $poiId, ')
+          ..write('kind: $kind, ')
+          ..write('name: $name, ')
+          ..write('isBonus: $isBonus, ')
+          ..write('collectMethod: $collectMethod, ')
+          ..write('bonusGranted: $bonusGranted, ')
           ..write('discoveredAt: $discoveredAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -3259,12 +3552,22 @@ typedef $$DistrictProgressesTableProcessedTableManager =
 typedef $$CollectionsTableCreateCompanionBuilder =
     CollectionsCompanion Function({
       required String poiId,
+      Value<String?> kind,
+      Value<String?> name,
+      Value<bool> isBonus,
+      Value<CollectMethod?> collectMethod,
+      Value<int?> bonusGranted,
       Value<DateTime> discoveredAt,
       Value<int> rowid,
     });
 typedef $$CollectionsTableUpdateCompanionBuilder =
     CollectionsCompanion Function({
       Value<String> poiId,
+      Value<String?> kind,
+      Value<String?> name,
+      Value<bool> isBonus,
+      Value<CollectMethod?> collectMethod,
+      Value<int?> bonusGranted,
       Value<DateTime> discoveredAt,
       Value<int> rowid,
     });
@@ -3280,6 +3583,32 @@ class $$CollectionsTableFilterComposer
   });
   ColumnFilters<String> get poiId => $composableBuilder(
     column: $table.poiId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isBonus => $composableBuilder(
+    column: $table.isBonus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<CollectMethod?, CollectMethod, String>
+  get collectMethod => $composableBuilder(
+    column: $table.collectMethod,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+
+  ColumnFilters<int> get bonusGranted => $composableBuilder(
+    column: $table.bonusGranted,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3303,6 +3632,31 @@ class $$CollectionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isBonus => $composableBuilder(
+    column: $table.isBonus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get collectMethod => $composableBuilder(
+    column: $table.collectMethod,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get bonusGranted => $composableBuilder(
+    column: $table.bonusGranted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get discoveredAt => $composableBuilder(
     column: $table.discoveredAt,
     builder: (column) => ColumnOrderings(column),
@@ -3320,6 +3674,26 @@ class $$CollectionsTableAnnotationComposer
   });
   GeneratedColumn<String> get poiId =>
       $composableBuilder(column: $table.poiId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<bool> get isBonus =>
+      $composableBuilder(column: $table.isBonus, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<CollectMethod?, String> get collectMethod =>
+      $composableBuilder(
+        column: $table.collectMethod,
+        builder: (column) => column,
+      );
+
+  GeneratedColumn<int> get bonusGranted => $composableBuilder(
+    column: $table.bonusGranted,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get discoveredAt => $composableBuilder(
     column: $table.discoveredAt,
@@ -3359,20 +3733,40 @@ class $$CollectionsTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> poiId = const Value.absent(),
+                Value<String?> kind = const Value.absent(),
+                Value<String?> name = const Value.absent(),
+                Value<bool> isBonus = const Value.absent(),
+                Value<CollectMethod?> collectMethod = const Value.absent(),
+                Value<int?> bonusGranted = const Value.absent(),
                 Value<DateTime> discoveredAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion(
                 poiId: poiId,
+                kind: kind,
+                name: name,
+                isBonus: isBonus,
+                collectMethod: collectMethod,
+                bonusGranted: bonusGranted,
                 discoveredAt: discoveredAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
                 required String poiId,
+                Value<String?> kind = const Value.absent(),
+                Value<String?> name = const Value.absent(),
+                Value<bool> isBonus = const Value.absent(),
+                Value<CollectMethod?> collectMethod = const Value.absent(),
+                Value<int?> bonusGranted = const Value.absent(),
                 Value<DateTime> discoveredAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion.insert(
                 poiId: poiId,
+                kind: kind,
+                name: name,
+                isBonus: isBonus,
+                collectMethod: collectMethod,
+                bonusGranted: bonusGranted,
                 discoveredAt: discoveredAt,
                 rowid: rowid,
               ),

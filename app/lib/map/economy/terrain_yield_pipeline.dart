@@ -21,10 +21,18 @@ class HexOpeningAttemptResult {
     required this.success,
     this.denialReason,
     this.disclosedHex,
+    this.collectedLandmarks = const [],
   });
 
-  factory HexOpeningAttemptResult.success(DisclosedHex disclosedHex) =>
-      HexOpeningAttemptResult._(success: true, disclosedHex: disclosedHex);
+  factory HexOpeningAttemptResult.success(
+    DisclosedHex disclosedHex, {
+    List<LandmarkCollectionRecord> collectedLandmarks = const [],
+  }) =>
+      HexOpeningAttemptResult._(
+        success: true,
+        disclosedHex: disclosedHex,
+        collectedLandmarks: collectedLandmarks,
+      );
 
   factory HexOpeningAttemptResult.denied(HexOpeningDenialReason reason) =>
       HexOpeningAttemptResult._(success: false, denialReason: reason);
@@ -36,6 +44,13 @@ class HexOpeningAttemptResult {
 
   /// [success] が true の場合に新規開示された [DisclosedHex]。
   final DisclosedHex? disclosedHex;
+
+  /// 開放と同時に新規収集された名所（Issue #159・T070）。[success] が false、
+  /// または名所の無いヘクスだった場合は空リスト。`HexOpeningSheet` が閉じた
+  /// **後**に `map_screen.dart` がこれを読んでSnackBarを表示する
+  /// （`HexOpeningSheet` クラスdoc「『閉じる』で確定結果を呼び出し元へ返す」参照。
+  /// モーダル表示中にSnackBarを出すと背面に隠れて見えないため）。
+  final List<LandmarkCollectionRecord> collectedLandmarks;
 }
 
 /// [TerrainYieldPipeline] が処理済みの位置について保持する観測用スナップショット
@@ -413,7 +428,10 @@ class TerrainYieldPipeline {
         await reveal(hexIdToFeatureId(disclosedHex.hexId.value));
         openingPointCoordinator.syncPointsAfterExternalChange(result.remainingPoints);
         _publishOpeningPointStatsFromCoordinator();
-        return HexOpeningAttemptResult.success(disclosedHex);
+        return HexOpeningAttemptResult.success(
+          disclosedHex,
+          collectedLandmarks: result.collectedLandmarks,
+        );
     }
   }
 

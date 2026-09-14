@@ -26,6 +26,16 @@ import '../../../map/economy/terrain_yield_pipeline.dart';
 /// 「責務の境界」参照）。そのため、開いてから確定するまでの間に他の経路
 /// （歩行・別の消費操作）で状態が変わっていても、[onConfirm] の結果
 /// （[HexOpeningAttemptResult]）が正しい最終結果を返す。
+///
+/// ## 名所の収集通知（SnackBar）はシートが閉じた後に出す（Issue #159）
+/// 本シートが表示されている間にSnackBarを出してもモーダルの背面に隠れて
+/// 利用者に見えない。そのため呼び出し側（`map_screen.dart` の
+/// `_handleFogHexTapped`）は [onConfirm] の戻り値（[HexOpeningAttemptResult]）を
+/// 自前で捕まえておき、`showModalBottomSheet` の `Future` が完了した**後**
+/// （＝シートが閉じた後。「閉じる」ボタンだけでなくスワイプ／バリアタップに
+/// よる `Navigator.pop()` 引数なしの dismiss でも確実に読めるよう、シート側の
+/// `pop` 戻り値には依存しない設計にしている。advisor指摘・2026-09-14）に
+/// SnackBarを表示する。
 class HexOpeningSheet extends StatefulWidget {
   const HexOpeningSheet({
     super.key,

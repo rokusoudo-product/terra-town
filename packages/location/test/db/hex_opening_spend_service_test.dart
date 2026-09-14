@@ -30,6 +30,64 @@ class _ThrowingDisclosedHexRepository implements Repository<DisclosedHex, HexId>
   Future<void> delete(HexId id) => _delegate.delete(id);
 }
 
+/// [CollectionRepository.save] を意図したタイミングで失敗させるフェイク
+/// （上記 `_ThrowingDisclosedHexRepository` と同じ手法。名所の収集記録と
+/// ポイント消費・開示のトランザクション原子性を検証するために使う）。
+class _ThrowingCollectionRepository implements CollectionRepository {
+  _ThrowingCollectionRepository(this._delegate);
+
+  final CollectionRepository _delegate;
+  bool throwOnNextSave = false;
+
+  @override
+  Future<void> save(LandmarkCollectionRecord record) async {
+    if (throwOnNextSave) {
+      throwOnNextSave = false;
+      throw StateError('意図的な失敗（テスト用）');
+    }
+    await _delegate.save(record);
+  }
+
+  @override
+  Future<Set<PointOfInterestId>> findCollectedIds(Iterable<PointOfInterestId> ids) =>
+      _delegate.findCollectedIds(ids);
+
+  @override
+  Future<List<CollectionRow>> findAll() => _delegate.findAll();
+
+  @override
+  Future<int> count() => _delegate.count();
+}
+
+/// [RegionPack.pointsOfInterestIn] だけを差し替えるフェイク
+/// （`opening_point_test.dart` の `_FakeRegionPack` と同じ手法）。
+class _FakeRegionPackWithPoi implements RegionPack {
+  _FakeRegionPackWithPoi({required this.version, this.pointsOfInterestByHex = const {}});
+
+  @override
+  final PackVersion version;
+  final Map<HexId, List<PointOfInterest>> pointsOfInterestByHex;
+
+  @override
+  TerrainType? terrainOf(HexId hexId) => null;
+
+  @override
+  DistrictId? districtOf(HexId hexId) => null;
+
+  @override
+  List<District> get districts => const [];
+
+  @override
+  List<PointOfInterest> get pointsOfInterest => const [];
+
+  @override
+  Iterable<HexId> neighborsOf(HexId hexId) => const [];
+
+  @override
+  Iterable<PointOfInterest> pointsOfInterestIn(HexId hexId) =>
+      pointsOfInterestByHex[hexId] ?? const [];
+}
+
 void main() {
   const hex = HexId(42);
   const version = PackVersion('test-pack');
@@ -241,6 +299,144 @@ void main() {
       expect(resultingPoints, openingPointStockCap);
       final finalBalance = await balanceStore.read();
       expect(finalBalance, openingPointStockCap);
+    });
+  });
+
+  group('HexOpeningSpendService（名所の収集記録・Issue #159・T070）', () {
+    const poi = PointOfInterest(
+      id: PointOfInterestId('node/1'),
+      name: '六創堂神社',
+      kind: 'amenity=place_of_worship',
+      latitude: 35.0,
+      longitude: 135.0,
+      hexId: hex,
+    );
+
+    test('名所のあるヘクスをポイントで開放すると collect_method = point で記録される', () async {
+      final database = GameDatabase.forTesting();
+      addTearDown(database.close);
+
+      final regionPack = _FakeRegionPackWithPoi(
+        version: version,
+        pointsOfInterestByHex: {
+          hex: [poi],
+        },
+      );
+      List<LandmarkCollectionRecord>? notified;
+      final service = HexOpeningSpendService(
+        database,
+        regionPack: regionPack,
+        onCollected: (records) => notified = records,
+      );
+      await OpeningPointBalanceRepository(database).write(5);
+
+      final result = await service.spend(
+        hexId: hex,
+        terrainType: TerrainType.forest,
+        packVersion: version,
+      );
+
+      expect(result.outcome, HexOpeningSpendOutcome.opened);
+      expect(result.collectedLandmarks, hasLength(1));
+      expect(result.collectedLandmarks.single.poiId, poi.id);
+      expect(result.collectedLandmarks.single.collectMethod, CollectMethod.point);
+
+      final saved = await CollectionRepository(database).findAll();
+      expect(saved, hasLength(1));
+      expect(saved.single.poiId, 'node/1');
+      expect(saved.single.collectMethod, CollectMethod.point);
+
+      expect(notified, isNotNull);
+      expect(notified!.single.poiId, poi.id);
+    });
+
+    test('regionPack を渡さない場合は収集判定を一切行わない（既存呼び出し元との後方互換）', () async {
+      final database = GameDatabase.forTesting();
+      addTearDown(database.close);
+
+      final service = HexOpeningSpendService(database);
+      await OpeningPointBalanceRepository(database).write(5);
+
+      final result = await service.spend(
+        hexId: hex,
+        terrainType: TerrainType.forest,
+        packVersion: version,
+      );
+
+      expect(result.outcome, HexOpeningSpendOutcome.opened);
+      expect(result.collectedLandmarks, isEmpty);
+      final saved = await CollectionRepository(database).findAll();
+      expect(saved, isEmpty);
+    });
+
+    test('名所の無いヘクスを開放しても collection には何も記録されない', () async {
+      final database = GameDatabase.forTesting();
+      addTearDown(database.close);
+
+      final regionPack = _FakeRegionPackWithPoi(version: version);
+      final service = HexOpeningSpendService(database, regionPack: regionPack);
+      await OpeningPointBalanceRepository(database).write(5);
+
+      final result = await service.spend(
+        hexId: hex,
+        terrainType: TerrainType.forest,
+        packVersion: version,
+      );
+
+      expect(result.collectedLandmarks, isEmpty);
+      final saved = await CollectionRepository(database).findAll();
+      expect(saved, isEmpty);
+    });
+
+    test('収集記録の保存に失敗したら、開示・ポイント減算もロールバックされる（同一トランザクション）',
+        () async {
+      final database = GameDatabase.forTesting();
+      addTearDown(database.close);
+
+      final regionPack = _FakeRegionPackWithPoi(
+        version: version,
+        pointsOfInterestByHex: {
+          hex: [poi],
+        },
+      );
+      await OpeningPointBalanceRepository(database).write(5);
+
+      final throwingCollectionRepository =
+          _ThrowingCollectionRepository(CollectionRepository(database))
+            ..throwOnNextSave = true;
+      final throwingService = HexOpeningSpendService(
+        database,
+        regionPack: regionPack,
+        collectionRepository: throwingCollectionRepository,
+      );
+
+      await expectLater(
+        throwingService.spend(
+          hexId: hex,
+          terrainType: TerrainType.forest,
+          packVersion: version,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      final balance = await OpeningPointBalanceRepository(database).read();
+      expect(balance, 5, reason: '収集記録が失敗した以上、ポイントも減っていてはならない');
+
+      final saved = await DisclosedHexRepository(database).findById(hex);
+      expect(saved, isNull, reason: '収集記録が失敗した以上、開示も残っていてはならない');
+
+      final collected = await CollectionRepository(database).findAll();
+      expect(collected, isEmpty);
+
+      // 通常のサービス（失敗しない）でやり直せば成功することを確認する。
+      final normalService = HexOpeningSpendService(database, regionPack: regionPack);
+      final result = await normalService.spend(
+        hexId: hex,
+        terrainType: TerrainType.forest,
+        packVersion: version,
+      );
+      expect(result.outcome, HexOpeningSpendOutcome.opened);
+      expect(result.collectedLandmarks, hasLength(1));
     });
   });
 }
