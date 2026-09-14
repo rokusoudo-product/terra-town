@@ -9,13 +9,14 @@ import 'features/collection/collection_screen.dart';
 import 'features/collection/region_pack_loader.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/map/map_screen.dart';
+import 'features/settings/save_data_transfer_adapters.dart';
 import 'features/settings/settings_screen.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({
     super.key,
     this.mapPathResolver,
@@ -47,6 +48,28 @@ class MyApp extends StatelessWidget {
   final LoadRegionPack? loadRegionPack;
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  /// [RootScaffold] に付与する Key（Issue #180・T105 決定事項4「読み込み後は
+  /// アプリの状態を全体的に作り直す」）。
+  ///
+  /// セーブデータの読み込み成功後にこの値を変えることで、`RootScaffold`
+  /// （`_gameDatabase`・地図タブのパイプライン・各種 Repository を保持する）を
+  /// **丸ごと作り直す**。`_RootScaffoldState._gameDatabase` は `late final` のため
+  /// 差し替えられず、DB だけを新しくしても `MapScreen` のパイプライン・
+  /// coordinator がメモリ上に保持している古いウォーターマーク等が次の計上で
+  /// 書き戻される危険がある（Issue #180 本文「DB だけを差し替えても、次の計上で
+  /// 古い値を書き戻す危険がある」）。Key を変えて `State` ごと破棄・再生成する
+  /// ことで、この危険を構造的に断つ。
+  Key _rootKey = UniqueKey();
+
+  void _handleDataRestored() {
+    setState(() => _rootKey = UniqueKey());
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'terra-town',
@@ -65,9 +88,11 @@ class MyApp extends StatelessWidget {
       supportedLocales: const [Locale('ja')],
       locale: const Locale('ja'),
       home: RootScaffold(
-        mapPathResolver: mapPathResolver,
-        gameDatabaseBuilder: gameDatabaseBuilder,
-        loadRegionPack: loadRegionPack,
+        key: _rootKey,
+        mapPathResolver: widget.mapPathResolver,
+        gameDatabaseBuilder: widget.gameDatabaseBuilder,
+        loadRegionPack: widget.loadRegionPack,
+        onDataRestored: _handleDataRestored,
       ),
     );
   }
@@ -93,6 +118,7 @@ class RootScaffold extends StatefulWidget {
     this.mapPathResolver,
     this.gameDatabaseBuilder,
     this.loadRegionPack,
+    this.onDataRestored,
   });
 
   /// [MyApp.mapPathResolver] をそのまま [MapScreen] まで橋渡しするテスト用フック。
@@ -105,6 +131,11 @@ class RootScaffold extends StatefulWidget {
   /// [MyApp.loadRegionPack] をそのまま [CollectionScreen] まで橋渡しする
   /// テスト用フック（T075・Issue #161）。
   final LoadRegionPack? loadRegionPack;
+
+  /// セーブデータの読み込み成功後に呼ばれるコールバック（Issue #180・T105）。
+  /// [SettingsScreen.onDataRestored] へそのまま橋渡しする。`_MyAppState` が
+  /// これを受けて本ウィジェットの `Key` を変え、アプリの状態を作り直す。
+  final VoidCallback? onDataRestored;
 
   @override
   State<RootScaffold> createState() => _RootScaffoldState();
@@ -135,6 +166,16 @@ class _RootScaffoldState extends State<RootScaffold> {
   /// （建設タブの `InventoryRepository` と同じ方針・T075）。
   late final CollectionRepository _collectionRepository =
       CollectionRepository(_gameDatabase);
+
+  /// セーブデータのエクスポート/インポート（Issue #180・T105）。[SettingsScreen] に
+  /// 渡す3つの抽象実装は、いずれも `_gameDatabase`（または Pigeon・SAF）へ
+  /// 委譲するだけの薄いラッパー（`save_data_transfer_adapters.dart` 参照）。
+  late final SaveDataTransfer _saveDataTransfer = LocationSaveDataTransfer(
+    SaveDataTransferService(_gameDatabase),
+  );
+  final SaveDataFileAccess _saveDataFileAccess = PigeonSaveDataFileAccess();
+  final RecordingStatusCheck _recordingStatusCheck =
+      NativeRecordingStatusCheck();
 
   @override
   void dispose() {
@@ -173,7 +214,13 @@ class _RootScaffoldState extends State<RootScaffold> {
           collectionRepository: _collectionRepository,
           loadRegionPack: widget.loadRegionPack ?? defaultLoadRegionPack,
         ),
-      3 => SettingsScreen(store: _rewardSettingsRepository),
+      3 => SettingsScreen(
+          store: _rewardSettingsRepository,
+          saveDataTransfer: _saveDataTransfer,
+          saveDataFileAccess: _saveDataFileAccess,
+          recordingStatusCheck: _recordingStatusCheck,
+          onDataRestored: widget.onDataRestored,
+        ),
       _ => _PlaceholderScreen(label: _tabs[_selectedIndex].label),
     };
 

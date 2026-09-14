@@ -61,6 +61,15 @@ export 'src/position/location_point_record.dart';
 export 'src/position/native_location_tracking_control.dart';
 export 'src/position/native_position_provider.dart';
 export 'src/position/recorded_hex_locator.dart';
+// セーブデータのエクスポート/インポート（Issue #180・T105）。
+export 'src/save_data/location_point_id_source.dart';
+export 'src/save_data/save_data_api.g.dart';
+export 'src/save_data/save_data_backup.dart';
+export 'src/save_data/save_data_codec.dart';
+export 'src/save_data/save_data_exceptions.dart';
+export 'src/save_data/save_data_file_channel.dart';
+export 'src/save_data/save_data_summary.dart';
+export 'src/save_data/save_data_transfer_service.dart';
 
 /// 土台の疎通確認用。location から core を参照できることを示す。
 /// 逆方向（core -> location）は tools/check_import_direction.sh が禁止する。

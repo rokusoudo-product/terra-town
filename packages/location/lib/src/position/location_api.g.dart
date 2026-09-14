@@ -579,4 +579,35 @@ class LocationTrackingHostApi {
     ;
     return (pigeonVar_replyValue! as List<Object?>).cast<LocationPointMessage>();
   }
+
+  /// `location_point` の現在の最大 `id`（Issue #180・T105）。
+  ///
+  /// セーブデータのエクスポート/インポートで、読み込み先端末の
+  /// `terrain_yield.watermark_row_id`・`opening_point.watermark_row_id` を
+  /// 「読み込んだ時点から数え始める」値に補正するために使う
+  /// （`packages/location/lib/src/save_data/` のドキュメント参照）。
+  ///
+  /// - 記録がまだ1件も行われていない（`location_track.sqlite` 自体が存在しない）場合は
+  ///   [getLocationPoints] と同じ理由で**ファイルを新規作成せず** `0` を返す。
+  /// - 1件も行が無い（ファイルはあるが空）場合も `0` を返す。
+  /// - `@async` にしてある理由も [getLocationPoints] と同じ
+  ///   （メインスレッドでブロッキング I/O を行わないため）。
+  Future<int> getMaxLocationPointId() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.terra_town_location.LocationTrackingHostApi.getMaxLocationPointId$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as int;
+  }
 }
