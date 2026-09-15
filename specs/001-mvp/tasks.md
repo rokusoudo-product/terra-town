@@ -264,7 +264,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 
 **Purpose**: 複数ストーリーに跨る仕上げ。**T105 と T110 は MVP 必須**
 
-- [ ] T105 🔴 **セーブデータのエクスポート/インポート**を実装（plan.md §6 で MVP 要件に昇格。機種変更・故障での全ロスト対策。端末内ファイル/共有シート経由で**サーバに送らない**）
+- [x] T105 🔴 **セーブデータのエクスポート/インポート**を実装（plan.md §6 で MVP 要件に昇格。機種変更・故障での全ロスト対策。端末内ファイル/共有シート経由で**サーバに送らない**） **2026-09-15 完了**: Issue #180 / PR #182。設定タブから JSON で書き出し・読み込み（位置記録は含めない・読み込み時にウォーターマークを端末の最大 location_point.id に置き換え・上書き前に自動バックアップ）。Pixel 7a で実機確認済み（書き出し内容・新しい schema の拒否・ウォーターマーク置き換え・データ不変・再起動後も不変）。記録中の読み込み拒否は単体テストのみで確認。
 - [x] T106 [P] `specs/001-mvp/balance.yaml` を作成し、数値パラメータ（建設コスト・人口成長・産出量・ポイント換算・閾値）の**正本**とする。コードから数値の直書きを排除 → **完了（2026-09-15・Issue #36・PR本文参照）**: 2026-09-15代表決定コメントに従い YAML 形式で作成。`code` を持つ項目（`terrainYieldAmountPerHexPerUnit`・`openingPointDistanceMillimetersPerPoint`・`openingPointStockCap`・`openingPointCostPerHex`・`Inventory.defaultCap`・`SpeedFilter.defaultThresholdKmh`）はコードの定数と一致することを`packages/core/test/balance/balance_yaml_test.dart`で照合する（`core`本体にファイル読み込みは持ち込まない）。「コードから数値の直書きを排除」は2026-09-15代表決定により「照合テストで一致を保証」に読み替え済み（既存コードの定数はこのPRでは書き換えない）。不正対策の仮値・位置記録の設定は対象外（9/20実歩行検証後に追加）。
 - [ ] T107 [P] **デイリークエスト**を薄く実装（端末内生成・報酬は資材/コレクション中心でポイントは少量 — #11 代表回答）
 - [ ] T108 🔴 **ライセンス表記**を実装（「© OpenStreetMap contributors」を**地図上に常時表示**＋ライセンス画面。OpenMapTiles 系スキーマ利用時は「© OpenMapTiles」追加。国土数値情報の出典表示 — plan.md §11）
