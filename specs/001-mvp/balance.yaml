@@ -1,0 +1,379 @@
+# terra-town — 数値パラメータの正本（balance.yaml）
+#
+# 出典・経緯: Issue #36「数値パラメータの正本」2026-09-15 代表決定コメント
+#   （https://github.com/rokusoudo-product/terra-town/issues/36#issuecomment-5674982371）。
+#   同コメントの §1〜§7 が本ファイルの仕様であり、Issue本文・過去のコメント
+#   （形式=CSV・6カラム等）は本コメントで置き換えられている。
+#
+# ## 書式（各項目は value / unit / status / code / source / note の5〜6フィールド）
+#   - value:  数値（数式で決まる項目は formula に文字列で記す。上限なし等は null）
+#   - unit:   単位。`%` はYAMLの予約記号のため必ずクォートする（例: "%"）
+#   - status: `確定`（代表が値まで確定させた）/ `仮`（構造は確定・値は今後の
+#             balance調整で変更されうる）のいずれか
+#   - code:   対応するコードの定数名（`Class.member` 形式含む）。コードに
+#             対応する定数が無い項目（建物・人口などの未実装領域、または
+#             意図的にコードを持たない値）は省略する
+#   - source: 転記元のドキュメント・Issue
+#   - note:   補足（代表決定日・計算式・注意点など）
+#
+# ## 照合テスト
+#   `code` を持つ項目は、`packages/core/test/balance/balance_yaml_test.dart` が
+#   本ファイルの値とコードの定数が一致することを確認する。単位が異なる場合
+#   （km と mm 等）はテスト側で換算してから比較する。
+#
+# ## 本ファイルに含めないもの（2026-09-15 決定 §3）
+#   9/20 の実歩行検証の後に追加する:
+#   - 不正対策の仮値（速度の平滑化120秒・歩数突合の100m・歩幅1.5m・不一致時0.5倍）
+#     … `packages/core/lib/src/antispoof/speed_filter.dart`・`reward_policy.dart` 参照
+#   - 位置記録の設定（距離しきい値15m・精度ゲート30m・要求間隔15秒・最短5秒・
+#     時間上限5分） … `docs/location-track-db.md` 参照
+#   これらは balance.yaml の対象外というだけで、廃止されたわけではない。
+
+# ---------------------------------------------------------------------------
+# 開放ポイント（docs/opening_points.md）
+# ---------------------------------------------------------------------------
+opening_point:
+  distance_per_point:
+    value: 1.5
+    unit: km/P
+    status: 確定
+    code: openingPointDistanceMillimetersPerPoint
+    source: docs/opening_points.md §2.2
+    note: >-
+      2026-09-12 代表決定。コードはミリメートル単位の定数
+      （1.5km = 1,500,000mm）として保持している。単位換算は照合テスト側で行う。
+
+  stock_cap:
+    value: 50
+    unit: P
+    status: 仮
+    code: openingPointStockCap
+    source: docs/opening_points.md §4
+    note: 上限値の妥当性は開放コスト（1pt/ヘクス）と合わせて balance 検討で再検証しうる。
+
+  cost_per_hex:
+    value: 1
+    unit: P/ヘクス
+    status: 確定
+    code: openingPointCostPerHex
+    source: docs/opening_points.md §5.1
+    note: 2026-07-22 代表決定。地形タイプに関わらず一律（距離逓増なし）。
+
+  natural_recovery_per_day:
+    value: 1
+    unit: P/日
+    status: 確定
+    source: docs/opening_points.md §2.1
+    note: >-
+      2026-07-22 代表決定。ただし2026-09-12 代表決定により MVP では未実装
+      （「1日ごと」の判定に必要な端末の壁時計を信頼できないため。
+      Issue #146 で別途扱う）。未実装のため対応する `code` はない。
+
+# ---------------------------------------------------------------------------
+# 地形産出（受動・時間ベース。docs/terrain-yield.md）
+# ---------------------------------------------------------------------------
+terrain_yield:
+  amount_per_hex_per_hour:
+    value: 1
+    unit: 個/時間/ヘクス
+    status: 仮
+    code: terrainYieldAmountPerHexPerUnit
+    source: docs/terrain-yield.md §1
+    note: >-
+      2026-09-11 代表決定。地形の産出資材ごとに1ヘクスあたり1時間に1個。
+      記録サービスが稼働している時間だけで計上する（壁時計は使わない）。
+      9/20 の実歩行検証の後に見直す。
+
+  cap:
+    value: null
+    unit: null
+    status: 確定
+    source: docs/terrain-yield.md §1
+    note: >-
+      2026-09-11 代表決定。「貯められる上限は設けない」。`Inventory.defaultCap`
+      による一般的な上限クランプは、地形産出の実装（`TerrainYieldLedger`）が
+      `Inventory` を経由しない設計により適用されない
+      （`resource_grant_service.dart` のコメント参照）。
+
+# ---------------------------------------------------------------------------
+# 資材（インベントリ）
+# ---------------------------------------------------------------------------
+inventory:
+  default_cap:
+    value: 999
+    unit: 個
+    status: 仮
+    code: Inventory.defaultCap
+    source: specs/001-mvp/spec.md §6
+    note: 資材ごとに個別上限を指定しない場合の既定上限値。
+
+# ---------------------------------------------------------------------------
+# 開始時の資材（チュートリアル。具体的な付与フローは別Issueで定義）
+# ---------------------------------------------------------------------------
+starting_resources:
+  wood:
+    value: 50
+    unit: 個
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: チュートリアル開始時の初期資材。付与フロー自体は別Issueで定義する。
+
+  stone:
+    value: 10
+    unit: 個
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: チュートリアル開始時の初期資材。付与フロー自体は別Issueで定義する。
+
+# ---------------------------------------------------------------------------
+# 不正対策のうち、balance.yaml で管理する値（徒歩上限速度・プライバシーゾーン半径）
+# 上記以外の不正対策の仮値・位置記録の設定は対象外（ファイル冒頭の説明参照）
+# ---------------------------------------------------------------------------
+antispoof:
+  walk_max_speed:
+    value: 10
+    unit: km/h
+    status: 確定
+    code: SpeedFilter.defaultThresholdKmh
+    source: "docs/opening_points.md §3（出典 Issue #9 代表回答 9-2）"
+    note: 徒歩上限速度。超過区間は当該区間のみ報酬対象外（罰則ではない）。
+
+privacy:
+  zone_radius:
+    value: 500
+    unit: m
+    status: 確定
+    source: specs/001-mvp/plan.md §10
+    note: >-
+      プライバシーゾーンの既定半径。初回起動地点を自動ゾーン化する
+      （T097未実装のため対応する `code` はまだ無い）。
+
+# ---------------------------------------------------------------------------
+# 建物（docs/buildings.md）
+# ---------------------------------------------------------------------------
+buildings:
+  # 建設コスト（Lv.1・木/石/鉄）。docs/buildings.md §4.1
+  construction_cost:
+    house:
+      wood: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+    apartment:
+      wood: {value: 40, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+    field:
+      wood: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+    ranch:
+      wood: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+    factory:
+      wood: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+    quarry:
+      wood:
+        value: 20
+        unit: 個
+        status: 仮
+        source: "Issue #36 2026-09-15 代表決定コメント §4"
+        note: 2026-09-15 代表決定で 30 から 20 に変更（docs/buildings.md 旧値は写しのため修正済み）。
+      stone:
+        value: 0
+        unit: 個
+        status: 確定
+        source: docs/buildings.md §4.1・§6.3
+        note: >-
+          石0は仮値ではなく設計要件（2026-09-09 代表決定・Issue #72）。
+          石・鉄を手に入れるために石・鉄が要る鶏卵問題を避けるため、balance
+          調整の対象外。
+      iron:
+        value: 0
+        unit: 個
+        status: 確定
+        source: docs/buildings.md §4.1・§6.3
+        note: 鉄0も石0と同じ理由で設計要件（balance調整の対象外）。
+
+    resort:
+      wood: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+    museum:
+      wood: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      stone: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      iron: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+
+  # アップグレード段階（Lv.1〜Lv.3）。docs/buildings.md §4.2
+  upgrade:
+    cost_multiplier:
+      lv2:
+        value: 1.5
+        unit: 倍
+        status: 仮
+        source: docs/buildings.md §4.2
+        note: 初期建設コスト（木・石・鉄それぞれ）に対する倍率。
+      lv3:
+        value: 2
+        unit: 倍
+        status: 仮
+        source: docs/buildings.md §4.2
+
+    effect_multiplier:
+      lv2:
+        value: 1.5
+        unit: 倍
+        status: 仮
+        source: "Issue #36 2026-09-15 代表決定コメント §4"
+        note: 人口上限・産出量・効率UP幅など、建物ごとの効果に対する倍率。
+      lv3:
+        value: 2
+        unit: 倍
+        status: 仮
+        source: "Issue #36 2026-09-15 代表決定コメント §4"
+
+  # 建物の産出（Lv.1・1時間あたり）。docs/buildings.md §2・§6.3
+  yield_per_hour:
+    field:
+      vegetable: {value: 2, unit: 個/時間, status: 仮, source: docs/buildings.md §2}
+      fruit: {value: 2, unit: 個/時間, status: 仮, source: docs/buildings.md §2}
+
+    ranch:
+      meat: {value: 2, unit: 個/時間, status: 仮, source: docs/buildings.md §2}
+
+    quarry:
+      stone: {value: 2, unit: 個/時間, status: 仮, source: docs/buildings.md §6.3}
+      iron: {value: 1, unit: 個/時間, status: 仮, source: docs/buildings.md §6.3}
+      mountain_adjacency_multiplier:
+        value: 3
+        unit: 倍
+        status: 仮
+        source: docs/buildings.md §6.3
+        note: 山に隣接する空き地に建てた場合、上記の産出量に掛かる倍率。
+
+    factory:
+      building_yield_bonus_per_building:
+        value: 10
+        unit: "%"
+        status: 仮
+        source: docs/buildings.md §2
+        note: 街全体の建物産出に対する加算ボーナス（工場1棟あたり）。
+      building_yield_bonus_cap:
+        value: 50
+        unit: "%"
+        status: 仮
+        source: "Issue #36 2026-09-15 代表決定コメント §4"
+
+    resort_museum:
+      population_growth_bonus_per_building:
+        value: 20
+        unit: "%"
+        status: 仮
+        source: docs/buildings.md §5.2
+        note: 街全体の人口増加速度に対する加算ボーナス（リゾート・ミュージアム1棟あたり）。
+      building_yield_bonus_per_building:
+        value: 5
+        unit: "%"
+        status: 仮
+        source: docs/buildings.md §5.2
+        note: >-
+          街全体の建物産出に対する加算ボーナス（1棟あたり）。工場のような上限は
+          代表決定コメントに明記が無い（本PRの「判断に迷った点」参照）。
+
+# ---------------------------------------------------------------------------
+# 人口（docs/buildings.md §5）
+# ---------------------------------------------------------------------------
+population:
+  cap:
+    house:
+      lv1: {value: 300, unit: 人, status: 仮, source: docs/buildings.md §5.1}
+      lv2: {value: 450, unit: 人, status: 仮, source: "Issue #36 2026-09-15 代表決定コメント §4"}
+      lv3: {value: 600, unit: 人, status: 仮, source: "Issue #36 2026-09-15 代表決定コメント §4"}
+    apartment:
+      lv1: {value: 1000, unit: 人, status: 仮, source: docs/buildings.md §5.1}
+      lv2: {value: 1500, unit: 人, status: 仮, source: "Issue #36 2026-09-15 代表決定コメント §4"}
+      lv3: {value: 2000, unit: 人, status: 仮, source: "Issue #36 2026-09-15 代表決定コメント §4"}
+
+  growth_rate_per_hour:
+    value: 10
+    unit: "%（人口上限に対する割合）"
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: 上限に向かって直線的に増加し、上限で頭打ちになる。
+
+  life_resource_bonus_per_type:
+    value: 10
+    unit: "%（人口増加速度への加算）"
+    status: 仮
+    source: docs/buildings.md §5.2
+    note: >-
+      生活系資材（塩・水・野菜・フルーツ・肉）のうち在庫が1個以上ある種類ごとに
+      加算（5種すべて揃うと +50%）。特定の1種が欠けても成長は停止しない
+      （2026-09-09 代表決定・Issue #72）。
+
+  life_resource_consumption:
+    value: false
+    unit: null
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: MVP では生活系資材を消費しない（在庫の有無だけを見る）。
+
+  total_population_yield_multiplier:
+    tier1:
+      threshold: 0
+      multiplier: {value: 1.0, unit: 倍, status: 仮, source: docs/buildings.md §5.3}
+    tier2:
+      threshold: 10000
+      multiplier: {value: 1.1, unit: 倍, status: 仮, source: docs/buildings.md §5.3}
+
+# ---------------------------------------------------------------------------
+# 地形産出と建物産出の合算ルール（T088・spec.md §6 の2層構造）
+# ---------------------------------------------------------------------------
+yield_aggregation:
+  formula: >-
+    資材ごとに (地形産出 + 建物産出 × (1 + 工場ボーナス + 娯楽ボーナス)) × 総人口の倍率
+  status: 確定
+  source: "Issue #36 2026-09-15 代表決定コメント §4（T088）"
+  note: >-
+    数式そのものは代表決定済み。各項（地形産出・建物産出・工場ボーナス・
+    娯楽ボーナス・総人口の倍率）の値は本ファイルの他の項目を参照する。
+
+# ---------------------------------------------------------------------------
+# 名所のボーナス（Issue #162・future。実装はまだ行わない）
+# ---------------------------------------------------------------------------
+landmark_bonus:
+  onsite_visit:
+    value: 3
+    unit: P
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: "現地訪問時に付与するボーナスポイント。実装は Issue #162（future）。"
+
+  remote_collect:
+    value: 1
+    unit: P
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: "ポイント開放で収集した場合に付与するボーナスポイント。実装は Issue #162（future）。"
+
+  yield_multiplier_per_landmark:
+    value: 0.1
+    unit: "%（産出倍率への加算・収集件数1件あたり）"
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: "実装は Issue #162（future）。"
+
+  yield_multiplier_cap:
+    value: 5
+    unit: "%"
+    status: 仮
+    source: "Issue #36 2026-09-15 代表決定コメント §4"
+    note: "実装は Issue #162（future）。"

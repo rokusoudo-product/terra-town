@@ -284,7 +284,7 @@ v1→v3（複数ステップの一括適用）・v2→v3（単一ステップ）
 実機の既存DB（schema_version 1 または 2）への上書きインストールでの確認は
 §8.7 で行う。
 
-### 歩数突合の閾値（Issue #126・正本は将来 `balance.csv`）
+### 歩数突合の閾値（Issue #126・正本は将来 `balance.yaml`・現時点では対象外）
 
 `step_count` を使った歩数対距離の突合ロジック本体は `core`（GPS/Kotlin非依存）
 の `packages/core/lib/src/antispoof/reward_policy.dart`（`RewardPolicy`）に実装
@@ -297,9 +297,11 @@ v1→v3（複数ステップの一括適用）・v2→v3（単一ステップ）
 | `RewardPolicy.defaultMinWindowDistanceMeters` | 100m | このウィンドウ内の合計移動距離未満では判定しない |
 | `RewardPolicy.defaultStepMismatchMultiplier` | 0.5 | 不一致時の資材付与レート倍率（0にはしない） |
 
-**いずれも仮の値であり、正本は将来 `specs/001-mvp/balance.csv`（Issue #36・
-T106・未作成）。作成時はそこへ移す。** 最終調整は `tasks.md` T017（代表の
-実機スパイク）で行う。
+**いずれも仮の値であり、正本は将来 `specs/001-mvp/balance.yaml`（Issue #36・
+T106）。** ただし2026-09-15代表決定（Issue #36コメント §3）により、これら
+歩数突合・不正対策の仮値は 9/20 の実歩行検証の後に balance.yaml へ追加する
+方針となっており、**T106（balance.yaml 自体の作成・2026-09-15完了）の
+時点ではまだ対象外**。最終調整は `tasks.md` T017（代表の実機スパイク）で行う。
 
 **利用者は設定（設定タブ）でこの歩数突合そのものを無効化できる**（Issue #135・
 車いす・時速10km未満の自転車など歩数が出ない移動手段への配慮・自己申告）。

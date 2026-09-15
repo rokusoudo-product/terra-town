@@ -27,10 +27,12 @@ related:
 
 **仮値（2026-09-11 代表決定）**: 1ヘクスあたり、その地形の産出資材それぞれ
 **1時間に1個**。貯められる上限は設けない。数値の正本は
-`specs/001-mvp/balance.csv`（Issue #36・T106・**未作成**）であり、作成された際は
-そちらへ移す（`packages/core/lib/src/economy/resource_grant_service.dart` の
-`terrainYieldAmountPerHexPerUnit` 定数のコメント参照）。**本 Issue の時点では
-`balance.csv` は作らない。**
+`specs/001-mvp/balance.yaml`（`terrain_yield.amount_per_hex_per_hour`・
+`terrain_yield.cap`。Issue #36・T106・2026-09-15作成）である
+（`packages/core/lib/src/economy/resource_grant_service.dart` の
+`terrainYieldAmountPerHexPerUnit` 定数のコメント参照。同定数と balance.yaml の
+値が一致することは `packages/core/test/balance/balance_yaml_test.dart` で
+照合する）。**本書の表は読みやすさのための写し。**
 
 ## 2. 全体の流れ
 

@@ -23,3 +23,7 @@ dependencies:
 dev_dependencies:
   lints: ^6.0.0
   test: ^1.25.6
+  # balance.yaml（specs/001-mvp/balance.yaml）の照合テスト専用（Issue #36・T106）。
+  # lib/ 本体には追加しない（core は数値の正本ファイルを読み込まない。
+  # packages/core/test/balance/balance_yaml_test.dart だけが使う）。
+  yaml: ^3.1.2
