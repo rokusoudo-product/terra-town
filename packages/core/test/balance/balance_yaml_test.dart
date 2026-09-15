@@ -95,6 +95,8 @@ void main() {
       'openingPointCostPerHex': (leaf) => leaf.value as num,
       'Inventory.defaultCap': (leaf) => leaf.value as num,
       'SpeedFilter.defaultThresholdKmh': (leaf) => leaf.value as num,
+      'startingResourceWoodAmount': (leaf) => leaf.value as num,
+      'startingResourceStoneAmount': (leaf) => leaf.value as num,
     };
 
     // コード側の実際の値（テスト対象の定数そのものを直接参照する）。
@@ -106,6 +108,8 @@ void main() {
       'openingPointCostPerHex': openingPointCostPerHex,
       'Inventory.defaultCap': Inventory.defaultCap,
       'SpeedFilter.defaultThresholdKmh': SpeedFilter.defaultThresholdKmh,
+      'startingResourceWoodAmount': startingResourceWoodAmount,
+      'startingResourceStoneAmount': startingResourceStoneAmount,
     };
 
     test('balance.yaml の code はすべて既知の定数に対応する（typo・更新漏れ検出）', () {
@@ -146,6 +150,8 @@ void main() {
       'openingPointCostPerHex',
       'Inventory.defaultCap',
       'SpeedFilter.defaultThresholdKmh',
+      'startingResourceWoodAmount',
+      'startingResourceStoneAmount',
     ]) {
       test('$code は balance.yaml の値と一致する', () {
         final leaf = _findLeafByCode(balance, code);

@@ -44,6 +44,7 @@ export 'src/economy/inventory.dart';
 export 'src/economy/opening_point_accrual_service.dart';
 export 'src/economy/resource.dart';
 export 'src/economy/resource_grant_service.dart';
+export 'src/economy/starting_resources.dart';
 export 'src/economy/terrain_hex_counter.dart';
 export 'src/geo/distance.dart';
 export 'src/geo/hex_geometry.dart';

@@ -56,6 +56,7 @@ export 'src/db/inventory_repository.dart';
 export 'src/db/opening_point_ledger.dart';
 export 'src/db/resource_key_codec.dart';
 export 'src/db/terrain_yield_ledger.dart';
+export 'src/db/tutorial_starting_resources_grant.dart';
 export 'src/position/location_api.g.dart';
 export 'src/position/location_point_record.dart';
 export 'src/position/native_location_tracking_control.dart';

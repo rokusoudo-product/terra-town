@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:terra_town_core/terra_town_core.dart';
 import 'package:terra_town_location/terra_town_location.dart';
 
 import 'design/app_theme.dart';
+import 'design/color_tokens.dart';
 import 'features/collection/collection_screen.dart';
 import 'features/collection/region_pack_loader.dart';
 import 'features/inventory/inventory_screen.dart';
@@ -176,6 +178,40 @@ class _RootScaffoldState extends State<RootScaffold> {
   final SaveDataFileAccess _saveDataFileAccess = PigeonSaveDataFileAccess();
   final RecordingStatusCheck _recordingStatusCheck =
       NativeRecordingStatusCheck();
+
+  /// チュートリアル開始資材（木50・石10）の1回限りの付与（Issue #188・T116）。
+  /// `_gameDatabase` 作成後に構築する（`TutorialStartingResourcesGrant` クラスdoc
+  /// 参照）。セーブデータ読み込み後は `_MyAppState` が本ウィジェットの `Key` を
+  /// 変えて作り直すため（`onDataRestored`）、[initState] が読み込み直後の
+  /// `_gameDatabase` に対しても改めて呼ばれる（印が無ければそこでもう一度
+  /// 付与される。`docs/tutorial.md` §5）。
+  late final TutorialStartingResourcesGrant _tutorialStartingResourcesGrant =
+      TutorialStartingResourcesGrant(_gameDatabase);
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_grantTutorialStartingResourcesIfNeeded());
+  }
+
+  /// 印が無ければ開始資材を付与し、付与した場合だけトランザクションの確定後に
+  /// SnackBar で通知する（`docs/tutorial.md` §3・§4、DESIGN.md「プロジェクト
+  /// 固有ルール」の「初回資材付与（チュートリアル）の通知」）。
+  Future<void> _grantTutorialStartingResourcesIfNeeded() async {
+    final granted = await _tutorialStartingResourcesGrant.grantIfNeeded();
+    if (!granted || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'はじめの資材として '
+          '木$startingResourceWoodAmount・石$startingResourceStoneAmount '
+          'を受け取りました',
+        ),
+        backgroundColor: Theme.of(context).infoColor,
+      ),
+    );
+  }
 
   @override
   void dispose() {

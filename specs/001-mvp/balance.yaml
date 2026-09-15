@@ -115,15 +115,21 @@ starting_resources:
     value: 50
     unit: 個
     status: 仮
+    code: startingResourceWoodAmount
     source: "Issue #36 2026-09-15 代表決定コメント §4"
-    note: チュートリアル開始時の初期資材。付与フロー自体は別Issueで定義する。
+    note: >-
+      チュートリアル開始時の初期資材。付与フロー自体は Issue #188・`docs/tutorial.md`
+      で定義する（`packages/location` の `TutorialStartingResourcesGrant`）。
 
   stone:
     value: 10
     unit: 個
     status: 仮
+    code: startingResourceStoneAmount
     source: "Issue #36 2026-09-15 代表決定コメント §4"
-    note: チュートリアル開始時の初期資材。付与フロー自体は別Issueで定義する。
+    note: >-
+      チュートリアル開始時の初期資材。付与フロー自体は Issue #188・`docs/tutorial.md`
+      で定義する（`packages/location` の `TutorialStartingResourcesGrant`）。
 
 # ---------------------------------------------------------------------------
 # 不正対策のうち、balance.yaml で管理する値（徒歩上限速度・プライバシーゾーン半径）
