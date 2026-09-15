@@ -156,3 +156,13 @@ extension AppSemanticColorsX on ThemeData {
 extension AppWarningColorX on ThemeData {
   Color get warningColor => semanticColors.warning;
 }
+
+/// `theme.semanticColors.info` のショートカット拡張（Issue #188 で追加）。
+///
+/// [AppWarningColorX] と同じ理由（`semanticColors.info` も部分文字列
+/// `Colors.i` を含み `check_design_tokens.sh` の誤検出対象になる）で必要になった。
+/// 初回資材付与（チュートリアル）の通知 SnackBar（`DESIGN.md`「プロジェクト固有
+/// ルール」）が最初の利用箇所。
+extension AppInfoColorX on ThemeData {
+  Color get infoColor => semanticColors.info;
+}

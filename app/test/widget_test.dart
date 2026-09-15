@@ -189,9 +189,14 @@ void main() {
     await tester.tap(find.text('建設'));
     await tester.pumpAndSettle();
 
-    // 新規ゲームDB（インメモリ）は所持資材が0件のため空状態になる
-    // （InventoryScreen クラスdoc「所持数が0の資材の扱い」参照）。
-    expect(find.text('まだ資材がありません'), findsOneWidget);
+    // Issue #188（T116）以降、新規ゲームDB（インメモリ）でも起動時にチュートリアル
+    // 開始資材（木50・石10）が自動付与されるため、資材0件の空状態
+    // （InventoryScreen クラスdoc「所持数が0の資材の扱い」）にはならない。
+    expect(find.text('まだ資材がありません'), findsNothing);
+    expect(find.text('木'), findsOneWidget);
+    expect(find.text('50'), findsOneWidget);
+    expect(find.text('石'), findsOneWidget);
+    expect(find.text('10'), findsOneWidget);
   });
 
   testWidgets('図鑑タブに切り替えると名所図鑑画面（Issue #161・T075）が表示される', (
@@ -230,6 +235,45 @@ void main() {
     expect(find.text('歩数による判定を使わない'), findsOneWidget);
     expect(find.byType(Switch), findsOneWidget);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+  });
+
+  group('チュートリアル開始資材の付与（Issue #188・T116）', () {
+    testWidgets('印が無い状態で起動すると、開始資材の付与を知らせるSnackBarが表示される', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MyApp(
+          mapPathResolver: _missingPackResolver,
+          gameDatabaseBuilder: GameDatabase.forTesting,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('はじめの資材として 木50・石10 を受け取りました'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('既に印がある場合（2回目以降の起動）はSnackBarが表示されない', (tester) async {
+      final database = GameDatabase.forTesting();
+      addTearDown(database.close);
+      // 事前に付与済みの状態を作る（初回起動を模す）。
+      await TutorialStartingResourcesGrant(database).grantIfNeeded();
+
+      await tester.pumpWidget(
+        MyApp(
+          mapPathResolver: _missingPackResolver,
+          gameDatabaseBuilder: () => database,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('はじめの資材として 木50・石10 を受け取りました'),
+        findsNothing,
+      );
+    });
   });
 
   group('日本語ロケール（Issue #51）', () {
