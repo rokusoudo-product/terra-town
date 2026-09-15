@@ -56,15 +56,16 @@ import '../position/geo_position.dart';
 ///   「報酬なしになるまでのタイムラグ」は罰則ではなく単なる報酬対象外化なので、
 ///   この程度の遅延は許容範囲と判断した。
 ///
-/// ## 閾値・窓幅は設定値（正本は balance.csv ではない・要注意）
-/// 【仮置き】[defaultThresholdKmh]（時速10km）は Issue #9 代表回答 9-2 が明示した
-/// 具体値であり、資材付与レート等の他の balance 数値とは異なり
-/// **spec/Issue で既に代表が確定した値**である。とはいえ将来 `balance.csv`
-/// （Issue #36）が徒歩上限速度も含めて管理するようになった場合はそちらを正本とし、
-/// 本定数は差し替えの対象とする。[defaultSmoothingWindow] は上記の根拠に基づく
-/// 本実装独自の仮パラメータであり、実機計測（T017）や `balance.csv` 検討で
-/// 見直されることを想定している。いずれも [SpeedFilter] のコンストラクタ引数で
-/// 変更可能にしてあり、呼び出し側がハードコードされた値に縛られないようにしている。
+/// ## 閾値・窓幅は設定値（正本は balance.yaml）
+/// [defaultThresholdKmh]（時速10km）は Issue #9 代表回答 9-2 が明示した具体値であり、
+/// **正本は `specs/001-mvp/balance.yaml`（`antispoof.walk_max_speed`）**である。
+/// 照合テスト（`packages/core/test/balance/balance_yaml_test.dart`）で本定数との
+/// 一致を確認している。[defaultSmoothingWindow] は上記の根拠に基づく本実装独自の
+/// 仮パラメータであり、balance.yaml にはまだ含まれていない
+/// （`specs/001-mvp/balance.yaml` 冒頭「本ファイルに含めないもの」参照）。9/20 の
+/// 実機検証（`tasks.md` T017）の後に balance.yaml へ追加予定。いずれも
+/// [SpeedFilter] のコンストラクタ引数で変更可能にしてあり、呼び出し側が
+/// ハードコードされた値に縛られないようにしている。
 ///
 /// ## 段階的ペナルティにおける位置づけ（Issue #9 代表回答 9-1）
 /// 本判定は「区間ごとに報酬対象か否か」を返すのみで、**罰則（BAN・無効化）は行わない**。
@@ -119,14 +120,17 @@ class SpeedFilter {
   /// 出典: Issue #9 代表回答 9-2（「徒歩上限速度（例: 時速10km）超過は
   /// 『移動中』として開拓・資材付与を停止する」）。**「時速10km超」＝この値を
   /// 厳密に超えた場合にのみ報酬対象外とする**（[classify] のドキュメント参照）。
-  /// balance.csv（Issue #36）が徒歩上限速度を管理するようになった場合はそちらへ
-  /// 差し替えること（クラスdocの「閾値・窓幅は設定値」参照）。
+  /// 正本は `specs/001-mvp/balance.yaml`（`antispoof.walk_max_speed`）であり、
+  /// 照合テスト（`balance_yaml_test.dart`）で一致を確認している
+  /// （クラスdocの「閾値・窓幅は設定値」参照）。
   static const double defaultThresholdKmh = 10.0;
 
   /// 移動平均の既定窓幅。
   ///
-  /// 【仮置き】根拠はクラスdoc「窓幅の根拠」参照。実機計測（tasks.md T017・R5）や
-  /// balance.csv 検討で見直されることを想定した本実装独自のパラメータ。
+  /// 【仮置き】根拠はクラスdoc「窓幅の根拠」参照。balance.yaml にはまだ含まれて
+  /// おらず、9/20 の実機検証（tasks.md T017・R5）の後に追加予定
+  /// （クラスdocの「閾値・窓幅は設定値」参照）。実機計測の結果によっては
+  /// 見直されることを想定した本実装独自のパラメータ。
   static const Duration defaultSmoothingWindow = Duration(seconds: 120);
 
   /// この閾値〔km/h〕を厳密に超えた区間のみ [SpeedSegment.rewardEligible] が false になる。

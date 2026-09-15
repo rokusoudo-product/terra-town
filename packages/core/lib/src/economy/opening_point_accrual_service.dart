@@ -3,11 +3,10 @@
 ///
 /// **1.5km = 1,500,000mm（2026-09-12 代表決定・Issue #143）。**
 /// `docs/opening_points.md` §2.2 の「secretary 提案の仮置き値・代表の最終確認待ち」は
-/// この決定により解消済み。ただし数値の正本は引き続き `specs/001-mvp/balance.csv`
-/// （Issue #36・T106・**未作成**）であり、同ファイル作成時にはそちらから読む方式へ
-/// 差し替えること（`resource_grant_service.dart` の
-/// `terrainYieldAmountPerHexPerUnit` と同じ「確定値だが将来の差し替え対象」という
-/// 位置づけ）。**本 Issue（#143）のスコープでは `balance.csv` は作らない。**
+/// この決定により解消済み。数値の正本は `specs/001-mvp/balance.yaml`
+/// （`opening_point.distance_per_point`）であり、照合テスト
+/// （`packages/core/test/balance/balance_yaml_test.dart`）で本定数との一致を
+/// 確認している。
 const int openingPointDistanceMillimetersPerPoint = 1500000;
 
 /// 開放ポイントのストック上限（`docs/opening_points.md` §4・2026-07-22代表決定）。

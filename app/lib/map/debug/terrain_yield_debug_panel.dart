@@ -94,7 +94,8 @@ class _TerrainYieldDebugPanelState extends State<TerrainYieldDebugPanel> {
                     style: textTheme.labelMedium,
                   ),
                   Text(
-                    '【仮値】1ヘクスあたり1時間に1個。正本は balance.csv（Issue #36・未作成）',
+                    '【仮値】1ヘクスあたり1時間に1個。正本は '
+                    'specs/001-mvp/balance.yaml（照合テストで一致を確認）',
                     style: textTheme.bodySmall,
                   ),
                   const SizedBox(height: AppSpacing.xs),
