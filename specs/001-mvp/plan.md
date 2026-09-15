@@ -272,7 +272,7 @@ terra-town/
 
 > **2026-09-09 確定**: 「Flutter 地図プラグインの最終選定」は `maplibre_gl` 0.27.0（pub.dev 版）で確定した（§14 R1・research.md §6.1）。未確定リストから除外する。
 
-- 距離しきい値（位置記録の設定・不正対策の仮値。balance.yaml の対象外）。balance.yaml 自体は Issue #36 で作成済み。
+- 距離しきい値・不正対策の仮値の最終確定（9/20の実歩行検証後に `balance.yaml` へ追加予定。plan.md §7・Issue #36 2026-09-15代表決定コメント §3）。`balance.yaml` 自体は Issue #36 で作成済み。
 - 地域パックの静的ホスティング先（GitHub Releases / R2 等）の最終選定。
 - DESIGN.md のカラートークン確定値（本ゲート②で方向、実装で微調整）。
 

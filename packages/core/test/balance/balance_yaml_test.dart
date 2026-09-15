@@ -45,6 +45,43 @@ void main() {
         );
       }
     });
+
+    test('unit は文字列の "null" ではない（YAMLのnull直書きの取り違え検出）', () {
+      // `unit: null` は Dart の null になるべきで、うっかり `unit: "null"` と
+      // 文字列で書いてしまうと _collectLeaves は気づけない（どちらも非nullの
+      // 値として通ってしまう）ため、ここで明示的に弾く。
+      for (final leaf in _collectLeaves(balance)) {
+        expect(
+          leaf.unit,
+          isNot(equals('null')),
+          reason: '${leaf.path}.unit が文字列 "null" になっている（YAMLの null を'
+              '意図しているなら quote を外すこと）。',
+        );
+      }
+    });
+
+    test('葉（statusを持つYamlMap）の子はスカラー値のみで、YamlMap/YamlListを含まない', () {
+      // _collectLeaves は「status を持つ YamlMap」を1パラメータの葉として扱い、
+      // それ以上は再帰しない。もし葉の中にさらに YamlMap/YamlList が
+      // 紛れ込んだ場合、その子は黙って無視され、照合漏れになる。将来
+      // balance.yaml の構造を広げたときに気づけるよう、ここで検出する。
+      for (final leaf in _collectLeaves(balance)) {
+        final node = _findNodeByPath(balance, leaf.path);
+        for (final childValue in node.values) {
+          expect(
+            childValue,
+            isNot(isA<YamlMap>()),
+            reason: '${leaf.path} の子に YamlMap が含まれている。'
+                '_collectLeaves は葉の中を再帰しないため照合漏れになる可能性がある。',
+          );
+          expect(
+            childValue,
+            isNot(isA<YamlList>()),
+            reason: '${leaf.path} の子に YamlList が含まれている（同上）。',
+          );
+        }
+      }
+    });
   });
 
   group('code とコードの定数の照合（2026-09-15 代表決定コメント §2）', () {
@@ -198,4 +235,15 @@ _BalanceLeaf? _findLeafByCode(YamlMap balance, String code) {
     }
   }
   return null;
+}
+
+/// [_BalanceLeaf.path]（ドット区切り）をたどり、[balance] からその YamlMap
+/// ノードそのものを返す。`_collectLeaves` が返す path は必ず存在する
+/// YamlMap を指すため、途中でスカラーに当たった場合は呼び出し側のバグ。
+YamlMap _findNodeByPath(YamlMap balance, String path) {
+  dynamic node = balance;
+  for (final key in path.split('.')) {
+    node = (node as YamlMap)[key];
+  }
+  return node as YamlMap;
 }
