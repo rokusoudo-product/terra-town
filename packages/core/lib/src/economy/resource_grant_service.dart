@@ -7,17 +7,16 @@ import 'resource.dart';
 ///
 /// 【仮値であることについて】この定数自体（時間の単位）は仮値ではないが、
 /// これを使う [terrainYieldAmountPerHexPerUnit]（分子側の量）は仮値であり、
-/// 正本は `specs/001-mvp/balance.csv`（Issue #36・T106・未作成）である
-/// （[terrainYieldAmountPerHexPerUnit] のドキュメント参照）。
+/// 正本は `specs/001-mvp/balance.yaml`（`terrain_yield.amount_per_hex_per_hour`）
+/// である（[terrainYieldAmountPerHexPerUnit] のドキュメント参照）。
 const int terrainYieldMicrosecondsPerUnit = Duration.microsecondsPerHour;
 
 /// 【仮値】1ヘクスあたり、その地形の産出資材それぞれ [terrainYieldMicrosecondsPerUnit]
 /// （1時間）に1個産出する（2026-09-11・Issue #138・代表決定）。
 ///
-/// 正本は `specs/001-mvp/balance.csv`（Issue #36・T106・**未作成**）。同ファイルが
-/// 作成された際は、この定数をそちらから読む方式へ差し替えること。**本 Issue の
-/// スコープでは `balance.csv` は作らない**（Issue #138 本文「起票時に決定済みの
-/// 事項」2番）。
+/// 正本は `specs/001-mvp/balance.yaml`（`terrain_yield.amount_per_hex_per_hour`）
+/// であり、照合テスト（`packages/core/test/balance/balance_yaml_test.dart`）で
+/// 本定数との一致を確認している。
 ///
 /// **貯められる上限は設けない**（同・代表決定）。`core` の `Inventory` クラスは
 /// `defaultCap`（仮値999）による上限クランプの仕組みを持つが、地形産出の

@@ -285,7 +285,7 @@ void main() {
       expect(firstRun, isNotEmpty);
     });
 
-    test('7. 閾値は設定値として変更可能（正本は balance.csv ではなく本実装のコンストラクタ引数）', () {
+    test('7. 閾値は設定値として変更可能（既定値の正本は balance.yaml だが本実装のコンストラクタ引数で上書きできる）', () {
       // 既定の10km/hでは報酬対象外になる時速15kmの持続的な移動が、
       // 閾値を20km/hに引き上げると報酬対象になることを確認する。
       final route = _walkingRoute(count: 120, speedKmh: 15.0);

@@ -65,9 +65,10 @@ class OpeningPointDebugPanel extends StatelessWidget {
                     style: textTheme.labelMedium,
                   ),
                   Text(
-                    '換算レート 1.5km=1P（2026-09-12代表決定）。仮値ではなく確定値だが、'
-                    '正本は balance.csv（Issue #36・未作成）。自然回復（1P/日）は'
-                    'MVPでは未実装（壁時計を使わない方針のため。docs/opening_points.md §2.1）',
+                    '換算レート 1.5km=1P（2026-09-12代表決定）。正本は '
+                    'specs/001-mvp/balance.yaml（照合テストで一致を確認）。'
+                    '自然回復（1P/日）はMVPでは未実装（壁時計を使わない方針のため。'
+                    'docs/opening_points.md §2.1）',
                     style: textTheme.bodySmall,
                   ),
                   const SizedBox(height: AppSpacing.xs),

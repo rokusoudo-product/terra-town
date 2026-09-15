@@ -44,7 +44,7 @@ void main() {
       expect(() => inventory.consume(Resource.wood, -1), throwsArgumentError);
     });
 
-    group('上限（仮置き。正本は balance.csv・Issue #36）', () {
+    group('上限（正本は balance.yaml・Issue #36。照合テストで一致を確認）', () {
       test('指定なしの資材は defaultCap を上限として扱う', () {
         final inventory = Inventory();
         expect(inventory.capOf(Resource.wood), Inventory.defaultCap);
