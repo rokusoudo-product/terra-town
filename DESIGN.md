@@ -199,3 +199,4 @@ SVG が正本。Android の mipmap と Play 掲載画像には PNG が必要。
 - fog of war の暗幕はトークン `fog` を用い、全ヘクスをソースに追加した上で `fill-opacity` を feature-state（`revealed`）で切り替える表現とする（未開示=`fog` トークンの不透明度・開示=0。plan §8）。
 - HUD などゲーム世界観のパネルは独自トーンを許可するが、ボタン・トグル・エラー表示は Material 3 コンポーネントを用いる。
 - 偽装検出時のユーザー通知は「罰しない」トーン（error 色は使うが文言は非難的でなく「この区間は報酬対象外です」）。
+- **初回資材付与（チュートリアル）の通知**（[Issue #184](https://github.com/rokusoudo-product/terra-town/issues/184)）: 初回起動時に開始時の資材（`spec.md` §7.1・`docs/tutorial.md`）を付与したことを、Material 3 の `SnackBar` で知らせる（例:「はじめの資材として 木50・石10 を受け取りました」）。色はカラートークン表の `info`（用途「情報・チュートリアル」）を用いる。破壊的操作ではないため確認ステップ・Undo は不要（本書「画面一覧と状態」の破壊的操作規則の対象外）。
