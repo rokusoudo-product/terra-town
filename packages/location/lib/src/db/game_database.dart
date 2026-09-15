@@ -112,7 +112,8 @@ class Inventories extends Table {
   /// スキーマ上は素直な整数列とする。
   IntColumn get amount => integer().withDefault(const Constant(0))();
 
-  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt =>
+      dateTime().withDefault(currentDateAndTime)();
 
   @override
   Set<Column> get primaryKey => {resourceKey};
@@ -148,8 +149,9 @@ class Buildings extends Table {
 
   /// 建築状態軸（terrain.md §1.1）。本テーブルに行がある時点で常に [built]
   /// だが、明示的な列として保持する理由は [BuildingConstructionState] のドキュメント参照。
-  TextColumn get constructionState => textEnum<BuildingConstructionState>()
-      .withDefault(Constant(BuildingConstructionState.built.name))();
+  TextColumn get constructionState =>
+      textEnum<BuildingConstructionState>()
+          .withDefault(Constant(BuildingConstructionState.built.name))();
 
   /// このマスが属する行政区画（`DistrictId.value` と対応）。パック範囲外・
   /// 未帰属の場合は null（`core` の `RegionPack.districtOf` が null を返す場合に対応）。
@@ -159,8 +161,8 @@ class Buildings extends Table {
 
   @override
   List<Set<Column>> get uniqueKeys => [
-    {hexId}, // 1マス1建物（buildings.md §3）
-  ];
+        {hexId}, // 1マス1建物（buildings.md §3）
+      ];
 }
 
 /// `district_progress` テーブル（T034）。
@@ -182,9 +184,11 @@ class DistrictProgresses extends Table {
   RealColumn get conquestRate => real().withDefault(const Constant(0.0))();
 
   /// 発展度。具体的な算出式は balance 検討で確定する仮の実数値。
-  RealColumn get developmentScore => real().withDefault(const Constant(0.0))();
+  RealColumn get developmentScore =>
+      real().withDefault(const Constant(0.0))();
 
-  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt =>
+      dateTime().withDefault(currentDateAndTime)();
 
   @override
   Set<Column> get primaryKey => {districtId};
@@ -291,8 +295,8 @@ class QuestDailies extends Table {
 
   @override
   List<Set<Column>> get uniqueKeys => [
-    {questDate, questKey}, // 同じ日に同じクエストを重複生成しない
-  ];
+        {questDate, questKey}, // 同じ日に同じクエストを重複生成しない
+      ];
 }
 
 /// `settings` テーブル（T034・プライバシーゾーン等）。
@@ -312,7 +316,8 @@ class Settings extends Table {
   /// JSON 文字列にエンコードして保持する想定。
   TextColumn get value => text()();
 
-  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt =>
+      dateTime().withDefault(currentDateAndTime)();
 
   @override
   Set<Column> get primaryKey => {key};
@@ -389,33 +394,33 @@ class GameDatabase extends _$GameDatabase {
   /// （列追加＋バックフィル等）に切り替えること。
   @override
   MigrationStrategy get migration => MigrationStrategy(
-    onCreate: (Migrator m) async {
-      await m.createAll();
-    },
-    onUpgrade: (Migrator m, int from, int to) async {
-      if (from < 2) {
-        await m.deleteTable(disclosedHexes.actualTableName);
-        await m.createTable(disclosedHexes);
-      }
-      // v2 → v3（Issue #159）: collection テーブルに §5 の必須項目
-      // （kind・name・is_bonus・collect_method・bonus_granted）を追加する。
-      // すべて ADD COLUMN で既存行（poi_id・discovered_at）を保持したまま
-      // 追加できる（[Collections] クラスdoc「v2→v3マイグレーションでの
-      // nullable化」参照。is_bonus のみ NOT NULL DEFAULT false、他は nullable）。
-      // テーブル再作成方式は使わない（disclosed_hex の v1→v2 と異なり、
-      // 既存の poi_id・discovered_at を保持する必要があるため）。
-      if (from < 3) {
-        await m.addColumn(collections, collections.kind);
-        await m.addColumn(collections, collections.name);
-        await m.addColumn(collections, collections.isBonus);
-        await m.addColumn(collections, collections.collectMethod);
-        await m.addColumn(collections, collections.bonusGranted);
-      }
-    },
-    // 将来のスキーマ変更（列追加・テーブル追加等）はさらに schemaVersion を
-    // 上げたうえで、ここに onUpgrade のステップを追加すること
-    // （https://drift.simonbinder.eu/docs/advanced-features/migrations/ の
-    // stepByStep 方式を推奨。実データが載ったバージョンからの移行では
-    // 上記のテーブル再作成方式を使わないこと）。
-  );
+        onCreate: (Migrator m) async {
+          await m.createAll();
+        },
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            await m.deleteTable(disclosedHexes.actualTableName);
+            await m.createTable(disclosedHexes);
+          }
+          // v2 → v3（Issue #159）: collection テーブルに §5 の必須項目
+          // （kind・name・is_bonus・collect_method・bonus_granted）を追加する。
+          // すべて ADD COLUMN で既存行（poi_id・discovered_at）を保持したまま
+          // 追加できる（[Collections] クラスdoc「v2→v3マイグレーションでの
+          // nullable化」参照。is_bonus のみ NOT NULL DEFAULT false、他は nullable）。
+          // テーブル再作成方式は使わない（disclosed_hex の v1→v2 と異なり、
+          // 既存の poi_id・discovered_at を保持する必要があるため）。
+          if (from < 3) {
+            await m.addColumn(collections, collections.kind);
+            await m.addColumn(collections, collections.name);
+            await m.addColumn(collections, collections.isBonus);
+            await m.addColumn(collections, collections.collectMethod);
+            await m.addColumn(collections, collections.bonusGranted);
+          }
+        },
+        // 将来のスキーマ変更（列追加・テーブル追加等）はさらに schemaVersion を
+        // 上げたうえで、ここに onUpgrade のステップを追加すること
+        // （https://drift.simonbinder.eu/docs/advanced-features/migrations/ の
+        // stepByStep 方式を推奨。実データが載ったバージョンからの移行では
+        // 上記のテーブル再作成方式を使わないこと）。
+      );
 }

@@ -96,7 +96,9 @@ SaveDataDocument parseSaveDataDocument(
   }
 
   if (decoded is! Map<String, dynamic>) {
-    throw const SaveDataFormatException('セーブデータのトップレベルはオブジェクトである必要があります');
+    throw const SaveDataFormatException(
+      'セーブデータのトップレベルはオブジェクトである必要があります',
+    );
   }
 
   final formatVersion = _requireInt(decoded, 'format_version');
@@ -153,7 +155,9 @@ SaveDataDocument parseSaveDataDocument(
         .map((row) => _decodeBuilding(_asRow(row, 'building')))
         .toList(growable: false),
     districtProgresses: (tablesField['district_progress'] as List)
-        .map((row) => _decodeDistrictProgress(_asRow(row, 'district_progress')))
+        .map(
+          (row) => _decodeDistrictProgress(_asRow(row, 'district_progress')),
+        )
         .toList(growable: false),
     collections: (tablesField['collection'] as List)
         .map((row) => _decodeCollection(_asRow(row, 'collection')))
@@ -193,9 +197,8 @@ String encodeSaveDataDocument({
       'disclosed_hex': disclosedHexes.map(_encodeDisclosedHex).toList(),
       'inventory': inventories.map(_encodeInventory).toList(),
       'building': buildings.map(_encodeBuilding).toList(),
-      'district_progress': districtProgresses
-          .map(_encodeDistrictProgress)
-          .toList(),
+      'district_progress':
+          districtProgresses.map(_encodeDistrictProgress).toList(),
       'collection': collections.map(_encodeCollection).toList(),
       'quest_daily': questDailies.map(_encodeQuestDaily).toList(),
       'settings': settings.map(_encodeSetting).toList(),
@@ -226,10 +229,7 @@ DisclosedHexesCompanion _decodeDisclosedHex(Map<String, dynamic> json) {
     ),
     packVersion: Value(_requireString(json, 'pack_version')),
     discoveredAt: Value(
-      _decodeDateTime(
-        _requireField(json, 'discovered_at'),
-        '$table.discovered_at',
-      ),
+      _decodeDateTime(_requireField(json, 'discovered_at'), '$table.discovered_at'),
     ),
   );
 }
@@ -301,7 +301,9 @@ Map<String, dynamic> _encodeDistrictProgress(DistrictProgressRow row) => {
   'updated_at': _encodeDateTime(row.updatedAt),
 };
 
-DistrictProgressesCompanion _decodeDistrictProgress(Map<String, dynamic> json) {
+DistrictProgressesCompanion _decodeDistrictProgress(
+  Map<String, dynamic> json,
+) {
   const table = 'district_progress';
   return DistrictProgressesCompanion(
     districtId: Value(_requireString(json, 'district_id')),
@@ -344,10 +346,7 @@ CollectionsCompanion _decodeCollection(Map<String, dynamic> json) {
     ),
     bonusGranted: Value(_optionalInt(json, 'bonus_granted')),
     discoveredAt: Value(
-      _decodeDateTime(
-        _requireField(json, 'discovered_at'),
-        '$table.discovered_at',
-      ),
+      _decodeDateTime(_requireField(json, 'discovered_at'), '$table.discovered_at'),
     ),
   );
 }

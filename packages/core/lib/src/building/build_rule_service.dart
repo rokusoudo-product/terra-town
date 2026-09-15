@@ -43,8 +43,8 @@ enum BuildDenialReason {
 
 /// [evaluateBuild] の戻り値。
 ///
-/// `canBuild` と `denialReason` は排他的（[evaluateHexOpening] の
-/// [HexOpeningEvaluation] と同じ設計）。`missingResources` は
+/// `canBuild` と `denialReason` は排他的（`evaluateHexOpening` の
+/// `HexOpeningEvaluation` と同じ設計）。`missingResources` は
 /// [BuildDenialReason.insufficientResources] のときのみ非空になる。
 class BuildEvaluation {
   BuildEvaluation._({
@@ -116,7 +116,7 @@ class BuildEvaluation {
 /// 5. [BuildingType.museum] のみ: [BuildDenialReason.notAdjacentToResidential]
 /// 6. [BuildDenialReason.insufficientResources]
 ///
-/// この順序は [evaluateHexOpening] と同じ考え方で、UI表示のためだけの
+/// この順序は `evaluateHexOpening` と同じ考え方で、UI表示のためだけの
 /// 決め事であり、拒否理由が単一である限り結果に影響しない。
 ///
 /// ## 採石場（[BuildingType.quarry]）に隣接制約は無い
