@@ -27,11 +27,12 @@ related:
 **実装したのは歩行距離換算（§2.2）のみ。自然回復（§2.1・1P/日）は実装していない**
 （§6参照）。上限50P（超過分は切り捨て・§4）は歩行距離換算にもそのまま適用する。
 
-数値（1.5km=1P・上限50P）は代表決定により確定した値だが、正本は引き続き
-`specs/001-mvp/balance.csv`（Issue #36・T106・**未作成**）であり、同ファイル作成時は
-`packages/core/lib/src/economy/opening_point_accrual_service.dart` の
-`openingPointDistanceMillimetersPerPoint`・`openingPointStockCap` の差し替え元をそちらに
-変更すること。**本 Issue（#143）のスコープでは `balance.csv` は作らない。**
+数値（1.5km=1P・上限50P）は代表決定により確定した値であり、正本は
+`specs/001-mvp/balance.yaml`（`opening_point.distance_per_point`・`opening_point.stock_cap`。
+Issue #36・T106・2026-09-15作成）である。`openingPointDistanceMillimetersPerPoint`・
+`openingPointStockCap` の値が balance.yaml と一致することは
+`packages/core/test/balance/balance_yaml_test.dart` で照合する（本 Issue #143 時点では
+balance.yaml は未作成だった）。
 
 ## 2. 全体の流れ
 

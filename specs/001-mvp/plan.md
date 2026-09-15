@@ -4,7 +4,7 @@ doc: plan.md (TDD 相当 / 実装計画)
 feature: 001-mvp
 status: approved            # 承認ゲート② 通過（2026-07-25 代表承認・advisor=Fable 5 検証済み）
 created: 2026-07-25
-updated: 2026-09-11   # §9 に「③歩数センサー突合は利用者が設定で無効化できる」を追記（Issue #135・2026-09-11代表決定・文言は起票時に代表承認済みのものをそのまま反映）。直前の改定: §7 NFR-1 を「プレイ中（サービス稼働中）に限り高精度GPSを使う」へ改定（Issue #123・PR #128 の実機検証を受けた改定案を2026-09-11代表承認）。直前の改定: Issue #111対応（§3.5 のヘクス数上限を 30,000 → 約14,000 へ実データ実測に基づき改定）および §8 の未計測3項目のうち2項目を解消（手動パン/ズームfps・実際の地域パックでのMBTiles読込）。2026-09-11代表承認。直前の改定: Issue #96対応（§3.3・§6・2026-09-10代表承認）。ゲート②承認自体は2026-07-25のまま
+updated: 2026-09-15   # 数値の正本を balance.csv から balance.yaml に更新（Issue #36・2026-09-15代表決定。§0-15・§2・§16）。直前の改定: §9 に「③歩数センサー突合は利用者が設定で無効化できる」を追記（Issue #135・2026-09-11代表決定・文言は起票時に代表承認済みのものをそのまま反映）。直前の改定: §7 NFR-1 を「プレイ中（サービス稼働中）に限り高精度GPSを使う」へ改定（Issue #123・PR #128 の実機検証を受けた改定案を2026-09-11代表承認）。直前の改定: Issue #111対応（§3.5 のヘクス数上限を 30,000 → 約14,000 へ実データ実測に基づき改定）および §8 の未計測3項目のうち2項目を解消（手動パン/ズームfps・実際の地域パックでのMBTiles読込）。2026-09-11代表承認。直前の改定: Issue #96対応（§3.3・§6・2026-09-10代表承認）。ゲート②承認自体は2026-07-25のまま
 gate: "② plan 承認 → 次工程 tasks.md（/speckit.tasks）へ"
 related: ["specs/001-mvp/spec.md", "docs/terrain.md", "docs/architecture.md", "DESIGN.md"]
 advisor_reviewed: 2026-07-25   # Flutter+MapLibre構成を検証。地域パック方式・資材事前計算の2点を必須修正として反映
@@ -12,7 +12,7 @@ advisor_reviewed: 2026-07-25   # Flutter+MapLibre構成を検証。地域パッ�
 
 # terra-town — MVP 実装計画（plan.md / ゲート②）
 
-> 本書は spec-kit フローの `plan.md`（技術スタック・アーキテクチャ）に相当する。`spec.md`（何を・なぜ）を前提に、**どう作るか**を確定する。数値の正本は将来 `specs/001-mvp/balance.csv`。UIデザインは `DESIGN.md`、環境構成図は `docs/architecture.md`。
+> 本書は spec-kit フローの `plan.md`（技術スタック・アーキテクチャ）に相当する。`spec.md`（何を・なぜ）を前提に、**どう作るか**を確定する。数値の正本は `specs/001-mvp/balance.yaml`（Issue #36・2026-09-15作成）。UIデザインは `DESIGN.md`、環境構成図は `docs/architecture.md`。
 >
 > **ゲート②承認事項**: 本 plan.md ＋ `docs/architecture.md`（環境構成図）＋ `DESIGN.md` の3点。
 
@@ -56,7 +56,7 @@ terra-town/
 │   │                         #   抽象: PositionProvider / TileId / Distance / TerrainType / RegionPack
 │   └── location/             # terra_town_location：GPS・地図・測位。core の抽象を実装（location → core の一方向）
 ├── tools/pack-builder/       # 地域パック生成パイプライン（Planetiler/osmium）※ビルド時のみ・実行時サーバではない
-├── specs/001-mvp/            # spec.md / plan.md / tasks.md / balance.csv
+├── specs/001-mvp/            # spec.md / plan.md / tasks.md / balance.yaml
 ├── docs/architecture.md      # 環境構成図（Mermaid）
 └── DESIGN.md
 ```
@@ -272,7 +272,7 @@ terra-town/
 
 > **2026-09-09 確定**: 「Flutter 地図プラグインの最終選定」は `maplibre_gl` 0.27.0（pub.dev 版）で確定した（§14 R1・research.md §6.1）。未確定リストから除外する。
 
-- 距離しきい値・balance.csv 数値。
+- 距離しきい値・不正対策の仮値の最終確定（9/20の実歩行検証後に `balance.yaml` へ追加予定。plan.md §7・Issue #36 2026-09-15代表決定コメント §3）。`balance.yaml` 自体は Issue #36 で作成済み。
 - 地域パックの静的ホスティング先（GitHub Releases / R2 等）の最終選定。
 - DESIGN.md のカラートークン確定値（本ゲート②で方向、実装で微調整）。
 
