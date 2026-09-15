@@ -54,7 +54,8 @@ void main() {
         expect(
           leaf.unit,
           isNot(equals('null')),
-          reason: '${leaf.path}.unit が文字列 "null" になっている（YAMLの null を'
+          reason:
+              '${leaf.path}.unit が文字列 "null" になっている（YAMLの null を'
               '意図しているなら quote を外すこと）。',
         );
       }
@@ -71,7 +72,8 @@ void main() {
           expect(
             childValue,
             isNot(isA<YamlMap>()),
-            reason: '${leaf.path} の子に YamlMap が含まれている。'
+            reason:
+                '${leaf.path} の子に YamlMap が含まれている。'
                 '_collectLeaves は葉の中を再帰しないため照合漏れになる可能性がある。',
           );
           expect(
@@ -85,6 +87,21 @@ void main() {
   });
 
   group('code とコードの定数の照合（2026-09-15 代表決定コメント §2）', () {
+    // 建物の建設コスト（buildings.construction_cost）は8建物×3資材=24項目と
+    // 数が多いため、buildingConstructionCostLv1（BuildingType -> BuildingCost）
+    // から code文字列（`buildingConstructionCostLv1.<enum名>.<資材>`）と
+    // 実際の値を機械的に生成する。balance.yaml 側は個別に code を手書きしている
+    // （typo検出のため）が、コード側は本物の定数マップを直接読むことで
+    // 二重管理を避ける（Issue #191）。
+    final buildingCostActuals = <String, num>{
+      for (final entry in buildingConstructionCostLv1.entries) ...{
+        'buildingConstructionCostLv1.${entry.key.name}.wood': entry.value.wood,
+        'buildingConstructionCostLv1.${entry.key.name}.stone':
+            entry.value.stone,
+        'buildingConstructionCostLv1.${entry.key.name}.iron': entry.value.iron,
+      },
+    };
+
     // code文字列 -> balance.yaml の value を、コード側の定数と同じ単位の
     // num に変換する関数。km/mm のような単位換算はここで行う。
     final conversions = <String, num Function(_BalanceLeaf leaf)>{
@@ -97,6 +114,10 @@ void main() {
       'SpeedFilter.defaultThresholdKmh': (leaf) => leaf.value as num,
       'startingResourceWoodAmount': (leaf) => leaf.value as num,
       'startingResourceStoneAmount': (leaf) => leaf.value as num,
+      'buildingUpgradeCostMultiplierLv2': (leaf) => leaf.value as num,
+      'buildingUpgradeCostMultiplierLv3': (leaf) => leaf.value as num,
+      for (final code in buildingCostActuals.keys)
+        code: (leaf) => leaf.value as num,
     };
 
     // コード側の実際の値（テスト対象の定数そのものを直接参照する）。
@@ -110,12 +131,15 @@ void main() {
       'SpeedFilter.defaultThresholdKmh': SpeedFilter.defaultThresholdKmh,
       'startingResourceWoodAmount': startingResourceWoodAmount,
       'startingResourceStoneAmount': startingResourceStoneAmount,
+      'buildingUpgradeCostMultiplierLv2': buildingUpgradeCostMultiplierLv2,
+      'buildingUpgradeCostMultiplierLv3': buildingUpgradeCostMultiplierLv3,
+      ...buildingCostActuals,
     };
 
     test('balance.yaml の code はすべて既知の定数に対応する（typo・更新漏れ検出）', () {
-      final codesInYaml = _collectLeaves(balance)
-          .where((leaf) => leaf.code != null)
-          .toList();
+      final codesInYaml = _collectLeaves(
+        balance,
+      ).where((leaf) => leaf.code != null).toList();
       expect(codesInYaml, isNotEmpty);
       for (final leaf in codesInYaml) {
         expect(
@@ -130,10 +154,9 @@ void main() {
     });
 
     test('conversions に登録した定数は、balance.yaml のいずれかの項目から参照されている', () {
-      final codesInYaml = _collectLeaves(balance)
-          .map((leaf) => leaf.code)
-          .whereType<String>()
-          .toSet();
+      final codesInYaml = _collectLeaves(
+        balance,
+      ).map((leaf) => leaf.code).whereType<String>().toSet();
       for (final code in conversions.keys) {
         expect(
           codesInYaml.contains(code),
@@ -152,6 +175,9 @@ void main() {
       'SpeedFilter.defaultThresholdKmh',
       'startingResourceWoodAmount',
       'startingResourceStoneAmount',
+      'buildingUpgradeCostMultiplierLv2',
+      'buildingUpgradeCostMultiplierLv3',
+      ...buildingCostActuals.keys,
     ]) {
       test('$code は balance.yaml の値と一致する', () {
         final leaf = _findLeafByCode(balance, code);

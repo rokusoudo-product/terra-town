@@ -33,11 +33,17 @@
 ///                     （T100・実装済み。Issue #125）・RewardPolicy（モック検出・
 ///                     速度・歩数の段階的ペナルティを1か所に集約する判定。
 ///                     T099・T101・実装済み。Issue #126）
+///   - src/building/   BuildingType（3系統8種。T082）・建築可否判定
+///                     （T083・Issue #191）・建設/アップグレードコスト計算
+///                     （T084・Issue #191）。人口・産出（T085〜T088）は未実装
 library;
 
 export 'src/terra_town_core_base.dart';
 export 'src/antispoof/reward_policy.dart';
 export 'src/antispoof/speed_filter.dart';
+export 'src/building/build_cost_service.dart';
+export 'src/building/build_rule_service.dart';
+export 'src/building/building_type.dart';
 export 'src/disclosure/disclosure_service.dart';
 export 'src/disclosure/hex_locator.dart';
 export 'src/economy/inventory.dart';

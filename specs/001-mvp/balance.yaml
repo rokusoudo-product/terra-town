@@ -159,43 +159,52 @@ privacy:
 # ---------------------------------------------------------------------------
 buildings:
   # 建設コスト（Lv.1・木/石/鉄）。docs/buildings.md §4.1
+  # code: packages/core/lib/src/building/build_cost_service.dart の
+  # buildingConstructionCostLv1（BuildingType -> BuildingCost）を
+  # `buildingConstructionCostLv1.<BuildingType.name>.<wood|stone|iron>` の
+  # 形式で参照する（Issue #191）。balance.yaml のキー名（house/apartment/
+  # field/ranch/factory/quarry/resort/museum）と BuildingType の enum 名
+  # （field→cropField・ranch→livestockFarm・factory→factoryBuilding、
+  # それ以外は同名）が一致しない箇所があるので注意。
   construction_cost:
     house:
-      wood: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 20, unit: 個, status: 仮, code: buildingConstructionCostLv1.house.wood, source: docs/buildings.md §4.1}
+      stone: {value: 10, unit: 個, status: 仮, code: buildingConstructionCostLv1.house.stone, source: docs/buildings.md §4.1}
+      iron: {value: 0, unit: 個, status: 仮, code: buildingConstructionCostLv1.house.iron, source: docs/buildings.md §4.1}
 
     apartment:
-      wood: {value: 40, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 40, unit: 個, status: 仮, code: buildingConstructionCostLv1.apartment.wood, source: docs/buildings.md §4.1}
+      stone: {value: 30, unit: 個, status: 仮, code: buildingConstructionCostLv1.apartment.stone, source: docs/buildings.md §4.1}
+      iron: {value: 20, unit: 個, status: 仮, code: buildingConstructionCostLv1.apartment.iron, source: docs/buildings.md §4.1}
 
     field:
-      wood: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 10, unit: 個, status: 仮, code: buildingConstructionCostLv1.cropField.wood, source: docs/buildings.md §4.1}
+      stone: {value: 0, unit: 個, status: 仮, code: buildingConstructionCostLv1.cropField.stone, source: docs/buildings.md §4.1}
+      iron: {value: 0, unit: 個, status: 仮, code: buildingConstructionCostLv1.cropField.iron, source: docs/buildings.md §4.1}
 
     ranch:
-      wood: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 0, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 20, unit: 個, status: 仮, code: buildingConstructionCostLv1.livestockFarm.wood, source: docs/buildings.md §4.1}
+      stone: {value: 10, unit: 個, status: 仮, code: buildingConstructionCostLv1.livestockFarm.stone, source: docs/buildings.md §4.1}
+      iron: {value: 0, unit: 個, status: 仮, code: buildingConstructionCostLv1.livestockFarm.iron, source: docs/buildings.md §4.1}
 
     factory:
-      wood: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 20, unit: 個, status: 仮, code: buildingConstructionCostLv1.factoryBuilding.wood, source: docs/buildings.md §4.1}
+      stone: {value: 30, unit: 個, status: 仮, code: buildingConstructionCostLv1.factoryBuilding.stone, source: docs/buildings.md §4.1}
+      iron: {value: 30, unit: 個, status: 仮, code: buildingConstructionCostLv1.factoryBuilding.iron, source: docs/buildings.md §4.1}
 
     quarry:
       wood:
         value: 20
         unit: 個
         status: 仮
+        code: buildingConstructionCostLv1.quarry.wood
         source: "Issue #36 2026-09-15 代表決定コメント §4"
         note: 2026-09-15 代表決定で 30 から 20 に変更（docs/buildings.md 旧値は写しのため修正済み）。
       stone:
         value: 0
         unit: 個
         status: 確定
+        code: buildingConstructionCostLv1.quarry.stone
         source: docs/buildings.md §4.1・§6.3
         note: >-
           石0は仮値ではなく設計要件（2026-09-09 代表決定・Issue #72）。
@@ -205,18 +214,19 @@ buildings:
         value: 0
         unit: 個
         status: 確定
+        code: buildingConstructionCostLv1.quarry.iron
         source: docs/buildings.md §4.1・§6.3
         note: 鉄0も石0と同じ理由で設計要件（balance調整の対象外）。
 
     resort:
-      wood: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 10, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 30, unit: 個, status: 仮, code: buildingConstructionCostLv1.resort.wood, source: docs/buildings.md §4.1}
+      stone: {value: 20, unit: 個, status: 仮, code: buildingConstructionCostLv1.resort.stone, source: docs/buildings.md §4.1}
+      iron: {value: 10, unit: 個, status: 仮, code: buildingConstructionCostLv1.resort.iron, source: docs/buildings.md §4.1}
 
     museum:
-      wood: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      stone: {value: 30, unit: 個, status: 仮, source: docs/buildings.md §4.1}
-      iron: {value: 20, unit: 個, status: 仮, source: docs/buildings.md §4.1}
+      wood: {value: 30, unit: 個, status: 仮, code: buildingConstructionCostLv1.museum.wood, source: docs/buildings.md §4.1}
+      stone: {value: 30, unit: 個, status: 仮, code: buildingConstructionCostLv1.museum.stone, source: docs/buildings.md §4.1}
+      iron: {value: 20, unit: 個, status: 仮, code: buildingConstructionCostLv1.museum.iron, source: docs/buildings.md §4.1}
 
   # アップグレード段階（Lv.1〜Lv.3）。docs/buildings.md §4.2
   upgrade:
@@ -225,12 +235,14 @@ buildings:
         value: 1.5
         unit: 倍
         status: 仮
+        code: buildingUpgradeCostMultiplierLv2
         source: docs/buildings.md §4.2
         note: 初期建設コスト（木・石・鉄それぞれ）に対する倍率。
       lv3:
         value: 2
         unit: 倍
         status: 仮
+        code: buildingUpgradeCostMultiplierLv3
         source: docs/buildings.md §4.2
 
     effect_multiplier:
