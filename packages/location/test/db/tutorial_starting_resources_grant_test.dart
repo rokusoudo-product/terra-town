@@ -35,6 +35,12 @@ class _ThrowsOnSecondAddInventoryRepository implements InventoryRepository {
 
   @override
   Future<Map<Resource, int>> readAll() => _delegate.readAll();
+
+  // Issue #192・T089 で InventoryRepository に追加された subtract。本フェイクは
+  // add の失敗だけを検証対象とするため、単に委譲する。
+  @override
+  Future<void> subtract(Resource resource, int amount) =>
+      _delegate.subtract(resource, amount);
 }
 
 /// [LocationPointIdSource] のフェイク（`save_data_transfer_service_test.dart` と
