@@ -2,6 +2,15 @@
 .dart_tool/
 .packages
 build/
+# 上記の build/ は Flutter のビルド出力（app/build/・packages/*/build/等）を
+# 無視する意図だが、末尾スラッシュのみでパス区切りが無いパターンは
+# 深さに関わらず「build」という名前のディレクトリ全てにマッチしてしまう
+# （gitignore の仕様）。建設タブの正規のソースディレクトリ
+# `app/lib/features/build/`・そのテスト `app/test/features/build/`
+# （Issue #192・T089・issue本文で明示されたパス）が巻き込まれて追跡不能に
+# なっていたため、明示的に除外を解除する。
+!app/lib/features/build/
+!app/test/features/build/
 .flutter-plugins
 .flutter-plugins-dependencies
 *.dart_tool

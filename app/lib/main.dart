@@ -7,9 +7,10 @@ import 'package:terra_town_location/terra_town_location.dart';
 
 import 'design/app_theme.dart';
 import 'design/color_tokens.dart';
+import 'features/build/build_screen.dart';
+import 'features/build/build_selection_controller.dart';
 import 'features/collection/collection_screen.dart';
 import 'features/collection/region_pack_loader.dart';
-import 'features/inventory/inventory_screen.dart';
 import 'features/map/map_screen.dart';
 import 'features/settings/save_data_transfer_adapters.dart';
 import 'features/settings/settings_screen.dart';
@@ -106,10 +107,11 @@ class _MyAppState extends State<MyApp> {
 /// 以外の中身（4状態の実装）は Issue #25 のスコープ外。tasks.md の各画面タスク
 /// （T075・T089・T093・T103）に委ねる。
 ///
-/// ## 建設タブ（2026-09-13・Issue #150）
-/// 建設UI本体（建物を建てる操作・T089）はまだ無いため、現時点では
-/// [InventoryScreen]（所持資材の一覧）のみを表示する。T089 実装時に
-/// 本タブの中身を差し替える。
+/// ## 建設タブ（2026-09-13・Issue #150／2026-09-16・Issue #192）
+/// [BuildScreen]（建物カード＋所持資材の一覧）を表示する。建物を選ぶと
+/// [_buildSelectionController] に選択を記録した上で地図タブへ切り替え、
+/// 実際に建てる場所を選ぶ操作は地図タブ（`MapScreen`）に委ねる
+/// （`build_selection_controller.dart` クラスdoc参照）。
 ///
 /// ## 図鑑タブ（2026-09-14・Issue #161・T075）
 /// [CollectionScreen]（名所図鑑）を表示する。建設タブと同じく、既存の
@@ -148,20 +150,28 @@ class _RootScaffoldState extends State<RootScaffold> {
 
   /// ゲーム状態DB（Issue #135 で `app` から初めて開く）。設定タブ（[SettingsScreen]）
   /// が [RewardSettingsRepository] 経由で読み書きするほか、地図タブ（[MapScreen]）が
-  /// 開示済みヘクスの永続化（`disclosed_hex`・T060・Issue #137）に、建設タブ
-  /// （[InventoryScreen]）が [InventoryRepository] 経由で所持資材の読み取りに使う、
-  /// 単一の共有インスタンス。`LazyDatabase` のためこのフィールド初期化自体は
-  /// ディスクI/Oを起こさない（[MyApp.gameDatabaseBuilder] のドキュメント参照）。
+  /// 開示済みヘクスの永続化（`disclosed_hex`・T060・Issue #137）と建設
+  /// （`building`・Issue #192）に、建設タブ（`BuildScreen`）が
+  /// [InventoryRepository] 経由で所持資材の読み取りに使う、単一の共有インスタンス。
+  /// `LazyDatabase` のためこのフィールド初期化自体はディスクI/Oを起こさない
+  /// （[MyApp.gameDatabaseBuilder] のドキュメント参照）。
   late final GameDatabase _gameDatabase =
       (widget.gameDatabaseBuilder ?? GameDatabase.defaultConnection)();
   late final RewardSettingsRepository _rewardSettingsRepository =
       RewardSettingsRepository(_gameDatabase);
 
-  /// 建設タブ（[InventoryScreen]）が所持資材を読み出すためのリポジトリ。
+  /// 建設タブ（[BuildScreen]）が所持資材を読み出すためのリポジトリ。
   /// `InventoryRepository` は Issue #143 で追加済みの既存クラスをそのまま使う
   /// （新しい Repository は作らない・Issue #150 提案内容3）。
   late final InventoryRepository _inventoryRepository =
       InventoryRepository(_gameDatabase);
+
+  /// 建設タブ横断の「今選んでいる建物」状態（Issue #192・T089）。
+  /// [BuildScreen]（選ぶ側）と [MapScreen]（建てる場所を選ぶ側・ハイライト
+  /// 表示側）の両方に同じインスタンスを渡す
+  /// （`build_selection_controller.dart` クラスdoc参照）。
+  final BuildSelectionController _buildSelectionController =
+      BuildSelectionController();
 
   /// 図鑑タブ（[CollectionScreen]）が収集記録を読み出すためのリポジトリ。
   /// `CollectionRepository` は Issue #159 で追加済みの既存クラスをそのまま使う
@@ -215,6 +225,7 @@ class _RootScaffoldState extends State<RootScaffold> {
 
   @override
   void dispose() {
+    _buildSelectionController.dispose();
     unawaited(_gameDatabase.close());
     super.dispose();
   }
@@ -244,8 +255,20 @@ class _RootScaffoldState extends State<RootScaffold> {
       0 => MapScreen(
           resolveMbtilesPath: widget.mapPathResolver,
           gameDatabase: _gameDatabase,
+          buildSelection: _buildSelectionController,
         ),
-      1 => InventoryScreen(inventoryRepository: _inventoryRepository),
+      1 => BuildScreen(
+          inventoryRepository: _inventoryRepository,
+          onSelectBuildingToPlace: (buildingType) {
+            // 建設タブで建物を選んだら、地図タブへ切り替えて場所を選んでもらう
+            // （Issue #192 本文「建設タブ→地図で場所を選ぶ→確認」）。選択の
+            // 記録（`select`）→タブ切り替えの順で行う——`MapScreen` は
+            // `initState` 時点で `buildSelection.value` を読むため、先に
+            // 値を確定させてから作り直す必要がある。
+            _buildSelectionController.select(buildingType);
+            setState(() => _selectedIndex = 0);
+          },
+        ),
       2 => CollectionScreen(
           collectionRepository: _collectionRepository,
           loadRegionPack: widget.loadRegionPack ?? defaultLoadRegionPack,
