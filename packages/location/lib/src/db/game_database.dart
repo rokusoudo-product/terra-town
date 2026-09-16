@@ -5,9 +5,7 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:terra_town_core/terra_town_core.dart'
-    show CollectMethod, TerrainType;
-
-import 'building_type.dart';
+    show BuildingType, CollectMethod, TerrainType;
 
 part 'game_database.g.dart';
 

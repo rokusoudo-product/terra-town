@@ -28,11 +28,14 @@
 ///     CollectionRepository・LandmarkAwareDisclosedHexRepository（`collection`
 ///     テーブルの読み書き・徒歩経路での名所収集記録の同一トランザクション化。
 ///     T070・実装済み。Issue #159）もここに置く。
+///     `BuildingType`（`building` テーブルが使う建物種別）は Issue #191で
+///     `terra_town_core` に一本化されたため、本ライブラリは再エクスポートしない。
+///     必要な呼び出し側は `package:terra_town_core/terra_town_core.dart` から
+///     直接インポートすること。
 library;
 
 import 'package:terra_town_core/terra_town_core.dart';
 
-export 'src/db/building_type.dart';
 export 'src/db/collection_repository.dart';
 export 'src/db/disclosed_hex_repository.dart';
 export 'src/db/game_database.dart';
