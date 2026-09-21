@@ -166,3 +166,13 @@ extension AppWarningColorX on ThemeData {
 extension AppInfoColorX on ThemeData {
   Color get infoColor => semanticColors.info;
 }
+
+/// `theme.semanticColors.success` のショートカット拡張（Issue #192 で追加）。
+///
+/// [AppWarningColorX]・[AppInfoColorX] と同じ理由（`semanticColors.success` も
+/// 部分文字列 `Colors.s` を含み `check_design_tokens.sh` の誤検出対象になる）で
+/// 必要になった。建設成功（Issue #192・T089）の通知 SnackBar が最初の利用箇所
+/// （DESIGN.md カラートークン表「success | 用途: 建設成功・制覇達成」）。
+extension AppSuccessColorX on ThemeData {
+  Color get successColor => semanticColors.success;
+}

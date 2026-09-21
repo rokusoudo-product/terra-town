@@ -65,4 +65,41 @@ class InventoryRepository {
           ),
         );
   }
+
+  /// [resource] の所持数を [amount] だけ減算する（Issue #192・建設コストの支払い）。
+  ///
+  /// [amount] が0以下の場合は何もしない。**呼び出し側が事前に十分な所持数が
+  /// あることを確認済みであることを前提とする**（`BuildingConstructionService`
+  /// はトランザクション内で `evaluateBuild`/`missingResourcesFor` により再確認
+  /// してから本メソッドを呼ぶ）。それでも所持数が [amount] に満たない場合は
+  /// [StateError] を投げる——`add` の上限クランプと異なり、ここは黙って0に
+  /// クランプしない。クランプすると「再確認のはずが実は不足していた」という
+  /// バグを検知できずに握りつぶしてしまうため、あえて例外にして
+  /// トランザクション全体をロールバックさせる（`_database.transaction` は
+  /// 例外発生時に自動的にロールバックする。`HexOpeningSpendService` と同じ
+  /// 「トランザクション内の失敗は両方ロールバック」という設計方針）。
+  ///
+  /// [add] と同じく、呼び出し側が `_database.transaction` の中で呼べば
+  /// 同じトランザクションに含まれる。
+  Future<void> subtract(Resource resource, int amount) async {
+    if (amount <= 0) return;
+    final key = resourceKeyOf(resource);
+    final current = await (_database.select(_database.inventories)
+          ..where((t) => t.resourceKey.equals(key)))
+        .getSingleOrNull();
+    final currentAmount = current?.amount ?? 0;
+    if (currentAmount < amount) {
+      throw StateError(
+        '資材が不足しています（resource: $resource, held: $currentAmount, '
+        'requested: $amount）。呼び出し側が事前確認を怠っている可能性があります。',
+      );
+    }
+    await _database.into(_database.inventories).insertOnConflictUpdate(
+          InventoriesCompanion(
+            resourceKey: Value(key),
+            amount: Value(currentAmount - amount),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+  }
 }

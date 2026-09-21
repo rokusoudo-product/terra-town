@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:terra_town_core/terra_town_core.dart' show GeoPosition;
 
+import 'buildable_highlight_layer.dart';
 import 'current_location_marker.dart';
 import 'fog_of_war_layer.dart';
 import 'landmark_layer.dart';
@@ -129,6 +130,9 @@ class MapView extends StatefulWidget {
     this.terrainTintLayer,
     this.terrainTintFillLayerId = TerrainTintController.defaultFillLayerId,
     this.terrainTintLineLayerId = TerrainTintController.defaultLineLayerId,
+    this.buildableHighlightLayer,
+    this.buildableHighlightLayerId = BuildableHighlightController.defaultLayerId,
+    this.onBuildableHighlightLayerReady,
     this.landmarkAssets,
     this.landmarkSourceId = LandmarkLayerController.defaultSourceId,
     this.landmarkLayerId = LandmarkLayerController.defaultLayerId,
@@ -220,6 +224,25 @@ class MapView extends StatefulWidget {
 
   /// 地形タイプ別色分けの line（縁取り）レイヤー ID。
   final String terrainTintLineLayerId;
+
+  /// 建設タブで選んだ建物の「建てられるマス」ハイライトの設定値（Issue #192・T089）。
+  /// `app`（composition root）が DESIGN.md の `success` トークンから導出して注入する
+  /// （Issue #57 の注入方式。`location` はここでも配色を知らない）。
+  ///
+  /// null の場合、ハイライトレイヤー自体を追加しない（[terrainTintLayer] と同じ
+  /// 「無ければ追加しない」方針）。非 null でも、[fogOfWarLayer]・
+  /// [fogHexFeatureCollection] のいずれかが null で fog 自体を追加しない場合は
+  /// 同時に追加しない（[terrainTintLayer] と同じ理由。fog と同じソースを参照する
+  /// 設計のため）。
+  final BuildableHighlightLayer? buildableHighlightLayer;
+
+  /// 建てられるマスのハイライトの fill レイヤー ID。
+  final String buildableHighlightLayerId;
+
+  /// ハイライトレイヤーの追加が成功した直後に、ハイライト対象の更新窓口となる
+  /// [BuildableHighlightController] を渡す。
+  final void Function(BuildableHighlightController controller)?
+      onBuildableHighlightLayerReady;
 
   /// 名所ピンレイヤー（T071・Issue #160）のラスタ画像・GeoJSON一式。
   ///
@@ -653,6 +676,28 @@ class _MapViewState extends State<MapView> {
               belowLayerId: widget.fogLayerId,
             );
             _log('地形タイプ別色分けレイヤーを追加しました');
+          }
+
+          // 【Issue #192】建設タブで選んだ建物の「建てられるマス」ハイライト。
+          // terrainTintLayer と同じくfogのソースを参照するだけで新しいソースは
+          // 追加しない（両者は独立した feature-state キーを使うため競合しない。
+          // `buildable_highlight_layer.dart` クラスdoc「`revealed`・`terrain_type`
+          // との独立性」参照）。fog が失敗した場合は本レイヤーも追加しない
+          // （catch 節に落ちて widget.onLayersFailed が呼ばれる）。
+          final buildableHighlightLayer = widget.buildableHighlightLayer;
+          if (buildableHighlightLayer != null) {
+            final buildableHighlightController =
+                await BuildableHighlightController.install(
+              controller,
+              buildableHighlightLayer,
+              sourceId: fogController.sourceId,
+              layerId: widget.buildableHighlightLayerId,
+              belowLayerId: widget.fogLayerId,
+            );
+            _log('建てられるマスのハイライトレイヤーを追加しました');
+            widget.onBuildableHighlightLayerReady?.call(
+              buildableHighlightController,
+            );
           }
         } catch (e, stackTrace) {
           // 【本Issueが解消しようとしているリスクそのもの】plan.md §8「未計測」＝

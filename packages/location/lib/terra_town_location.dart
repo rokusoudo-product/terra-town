@@ -36,12 +36,16 @@ library;
 
 import 'package:terra_town_core/terra_town_core.dart';
 
+export 'src/db/buildable_hex_evaluator.dart';
+export 'src/db/building_construction_service.dart';
+export 'src/db/building_repository.dart';
 export 'src/db/collection_repository.dart';
 export 'src/db/disclosed_hex_repository.dart';
 export 'src/db/game_database.dart';
 export 'src/db/landmark_aware_disclosed_hex_repository.dart';
 export 'src/db/region_pack_connection.dart';
 export 'src/db/reward_settings_repository.dart';
+export 'src/map/buildable_highlight_layer.dart';
 export 'src/map/current_location_marker.dart';
 export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';

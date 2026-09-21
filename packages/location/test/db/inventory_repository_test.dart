@@ -71,6 +71,56 @@ void main() {
           .getSingle();
       expect(row.amount, 1);
     });
+
+    // 【Issue #192・T089】建設コストの支払いに使う subtract。
+    group('subtract（建設コストの支払い・Issue #192）', () {
+      test('所持数が足りていれば減算できる', () async {
+        await repository.add(Resource.wood, 10);
+
+        await repository.subtract(Resource.wood, 4);
+
+        expect(await repository.amountOf(Resource.wood), 6);
+      });
+
+      test('amountが0以下なら何もしない', () async {
+        await repository.add(Resource.wood, 10);
+
+        await repository.subtract(Resource.wood, 0);
+        await repository.subtract(Resource.wood, -1);
+
+        expect(await repository.amountOf(Resource.wood), 10);
+      });
+
+      test('所持数を超える減算は StateError を投げ、値は変化しない', () async {
+        await repository.add(Resource.wood, 3);
+
+        await expectLater(
+          repository.subtract(Resource.wood, 4),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(
+          await repository.amountOf(Resource.wood),
+          3,
+          reason: '失敗した減算は所持数に反映されてはならない（黙ってクランプしない）',
+        );
+      });
+
+      test('ちょうど所持数ぶんの減算は成功し0になる', () async {
+        await repository.add(Resource.stone, 5);
+
+        await repository.subtract(Resource.stone, 5);
+
+        expect(await repository.amountOf(Resource.stone), 0);
+      });
+
+      test('行が無い資材（所持数0）からの減算は StateError を投げる', () async {
+        await expectLater(
+          repository.subtract(Resource.iron, 1),
+          throwsA(isA<StateError>()),
+        );
+      });
+    });
   });
 
   group('InventoryRepository（アプリ再起動を模したファイルDBでの永続化）', () {
