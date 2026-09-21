@@ -9,6 +9,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:terra_town_core/terra_town_core.dart' show GeoPosition;
 
 import 'buildable_highlight_layer.dart';
+import 'building_layer.dart';
 import 'current_location_marker.dart';
 import 'fog_of_war_layer.dart';
 import 'landmark_layer.dart';
@@ -133,6 +134,10 @@ class MapView extends StatefulWidget {
     this.buildableHighlightLayer,
     this.buildableHighlightLayerId = BuildableHighlightController.defaultLayerId,
     this.onBuildableHighlightLayerReady,
+    this.buildingAssets,
+    this.buildingSourceId = BuildingLayerController.defaultSourceId,
+    this.buildingLayerId = BuildingLayerController.defaultLayerId,
+    this.onBuildingLayerReady,
     this.landmarkAssets,
     this.landmarkSourceId = LandmarkLayerController.defaultSourceId,
     this.landmarkLayerId = LandmarkLayerController.defaultLayerId,
@@ -243,6 +248,26 @@ class MapView extends StatefulWidget {
   /// [BuildableHighlightController] を渡す。
   final void Function(BuildableHighlightController controller)?
       onBuildableHighlightLayerReady;
+
+  /// 建物レイヤー（T090・Issue #193）の仮アイコン画像・GeoJSON一式。
+  ///
+  /// 【`Future` で受け取る理由】[landmarkAssets] と同じ（`app` 側の Material
+  /// アイコン合成〔`app/lib/map/building_layer_factory.dart`〕が `dart:ui` の
+  /// ラスタライズを伴い非同期になるため）。featureCollection 自体も
+  /// `BuildingRepository.findAll()`（drift・非同期）に依存するため、画像生成と
+  /// 合わせて1つの `Future` にまとめている。null の場合は fog of war と同じく
+  /// 建物レイヤー自体を追加しない。
+  final Future<BuildingLayerAssets>? buildingAssets;
+
+  /// 建物レイヤーの GeoJSON ソース ID。
+  final String buildingSourceId;
+
+  /// 建物レイヤーの symbol レイヤー ID。
+  final String buildingLayerId;
+
+  /// 建物レイヤーのソース/レイヤー追加が成功した直後に、新規建設の反映
+  /// （`refresh`）窓口となる [BuildingLayerController] を渡す。
+  final void Function(BuildingLayerController controller)? onBuildingLayerReady;
 
   /// 名所ピンレイヤー（T071・Issue #160）のラスタ画像・GeoJSON一式。
   ///
@@ -710,6 +735,44 @@ class _MapViewState extends State<MapView> {
           _log('失敗: fog of war または地形タイプ別色分けレイヤー追加でエラー: $e');
           developer.log(
             'fog of war または地形タイプ別色分けレイヤー追加に失敗しました',
+            name: 'terra_town_location.map_view',
+            error: e,
+            stackTrace: stackTrace,
+            level: 1000,
+          );
+          widget.onLayersFailed?.call(e, stackTrace);
+        }
+      }
+
+      // 【T090（建物レイヤー・Issue #193）】fog と同じく、ベースレイヤー追加の
+      // 直後に建物のソース/レイヤーを追加する。terrainTintLayer（地形の色分け。
+      // 上のtry節）より後に追加することで、建物アイコンが地形の塗りより上に
+      // 見える描画順にする（Issue #193 本文「地形の色分けより上」）。次に続く
+      // 名所ピンより前（＝下）に追加することで、万一同じヘクスに名所と建物が
+      // 重なっても名所ピンが上に見えるようにする（Issue #193 本文「名所ピンと
+      // 重ならないよう配置を確認」）。名所ピンと異なり fog のソースは参照しない
+      // （建物は独自の GeoJSON ソースを持つ）ため、fog の成否とは独立した
+      // try/catch にしている。buildingAssets が null の場合は何もしない
+      // （landmarkAssets と同じ「両方揃ったら追加」の考え方）。
+      final buildingAssetsFuture = widget.buildingAssets;
+      if (buildingAssetsFuture != null) {
+        try {
+          final assets = await buildingAssetsFuture;
+          final buildingController = await BuildingLayerController.install(
+            controller,
+            assets.images,
+            assets.featureCollection,
+            sourceId: widget.buildingSourceId,
+            layerId: widget.buildingLayerId,
+          );
+          final buildingCount =
+              (assets.featureCollection['features'] as List?)?.length ?? 0;
+          _log('建物レイヤーのソース/レイヤーを追加しました（件数=$buildingCount）');
+          widget.onBuildingLayerReady?.call(buildingController);
+        } catch (e, stackTrace) {
+          _log('失敗: 建物レイヤーのソース/レイヤー追加でエラー: $e');
+          developer.log(
+            '建物レイヤーのソース/レイヤー追加に失敗しました',
             name: 'terra_town_location.map_view',
             error: e,
             stackTrace: stackTrace,

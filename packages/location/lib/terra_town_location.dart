@@ -46,6 +46,8 @@ export 'src/db/landmark_aware_disclosed_hex_repository.dart';
 export 'src/db/region_pack_connection.dart';
 export 'src/db/reward_settings_repository.dart';
 export 'src/map/buildable_highlight_layer.dart';
+export 'src/map/building_hex_center.dart';
+export 'src/map/building_layer.dart';
 export 'src/map/current_location_marker.dart';
 export 'src/map/fog_hex_source.dart';
 export 'src/map/fog_of_war_layer.dart';
