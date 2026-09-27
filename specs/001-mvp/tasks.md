@@ -278,6 +278,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - [ ] T115 [P] `specs/001-mvp/spec.md` の受け入れ基準チェックボックスを実装状況に合わせて更新
 - [x] T116 🔴 **チュートリアル（開始時の資材）の付与**を実装（spec.md §7.1・`docs/tutorial.md`・Issue #184）。初回起動時に木50・石10（正本は `balance.yaml`〔#36〕の `starting_resources`）を付与し、`settings` テーブルに印 `tutorial.initial_resources_granted` を立てる。印が無い既存データの端末にも1回付与し、付与したことを利用者に通知する（DESIGN.md）。**T110（plan.md §15 のバーティカルスライス完了判定）の前提条件**——現行の地形産出だけでは30分歩いても最も安い建物が建たないため（Issue #36）、この付与がないと T110 の実機確認が成立しない。 **2026-09-16 完了**: Issue #188 / PR #190。Pixel 7a（既存データあり・印なし）で、初回起動で木1→51・石0→10・印の書き込み・SnackBar 表示、再起動で増えないことを実機確認済み。
 - [ ] T117 チュートリアルの**案内の画面**（何をどの順で案内するか）を実装（spec.md §7.1・MVP 後・Issue #184 の対象外部分を別 Issue で扱う）
+- [ ] T118 [US2] **名所の収集判定を「名所のヘクス＋隣接6ヘクス」に広げる**（`docs/landmark_objects.md` §3.3・spec.md FR-3・Issue #202）。`packages/core` の `evaluateLandmarkCollection` を、開示ヘクスの隣接6ヘクス（`RegionPack.neighborsOf`）に乗る名所も対象にするよう変更し、`collect_method` はその開示の手段（walk/point）に従う。1つの名所は1回だけ収集する。実装は別 Issue で行う。
 
 ---
 
