@@ -8,6 +8,7 @@ import 'package:terra_town_location/terra_town_location.dart';
 import '../../design/color_tokens.dart';
 import '../../design/spacing.dart';
 import '../../map/buildable_highlight_layer_factory.dart';
+import '../../map/building_layer_factory.dart';
 import '../../map/current_location_follow_button.dart';
 import '../../map/current_location_marker_factory.dart';
 import '../../map/debug/disclosure_debug_panel.dart';
@@ -382,6 +383,16 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
   BuildingConstructionService? _buildingConstructionService;
   BuildableHighlightController? _buildableHighlightController;
 
+  /// 建物レイヤー（Issue #193・T090）。`_buildingRepository`・
+  /// `_regionPackConnection` は建築成功のたびに全件を読み直して
+  /// [BuildingLayerController.refresh] を呼ぶ（[_refreshBuildingLayer]）ために
+  /// フィールドとして保持する（[_buildableHexEvaluator] 等のための
+  /// `BuildingRepository` とは別インスタンスだが、`disclosedHexRepository` と
+  /// 同様に内部状態を持たない薄いラッパーのため二重管理にはならない）。
+  BuildingRepository? _buildingRepository;
+  BuildingLayerController? _buildingLayerController;
+  Future<BuildingLayerAssets>? _buildingAssets;
+
   /// `feature_id`（fog 地物のid）→ `core` の [HexId] の逆引き表
   /// （[_hexIdByFeatureId] の逆写像）。建てられるマスのハイライト
   /// （[BuildableHighlightController.setHighlighted]）に featureId が必要なため、
@@ -505,6 +516,20 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         buildingRepository: buildingRepository,
         inventoryRepository: inventoryRepositoryForBuild,
       );
+
+      // 建物レイヤー（Issue #193・T090）。画像生成（Material アイコン合成。
+      // `building_layer_factory.dart` クラスdoc参照）は `dart:ui` の
+      // ラスタライズを伴い非同期、featureCollection の組み立ても
+      // `BuildingRepository.findAll()`（drift）を待つ必要があるため非同期。
+      // 両方を1つの `Future` にまとめて `MapView.buildingAssets` に渡す
+      // （`landmarkAssets` と同じ設計。`_loadBuildingFeatureCollection` 参照）。
+      _buildingRepository = buildingRepository;
+      _buildingAssets = buildBuildingIconImages().then((images) async {
+        return BuildingLayerAssets(
+          images: images,
+          featureCollection: await _loadBuildingFeatureCollection(),
+        );
+      });
       // 建設タブで既に建物が選ばれた状態でこのウィジェットが作られた場合
       // （「建設タブで選ぶ→地図タブに切り替わる」という通常の流れ。
       // `build_selection_controller.dart` クラスdoc参照）は、ハイライト
@@ -701,6 +726,44 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
     if (selection != null) {
       unawaited(_computeAndApplyBuildHighlight(selection));
     }
+  }
+
+  /// [MapView.onBuildingLayerReady] から呼ぶ（Issue #193・T090）。
+  ///
+  /// 名所ピン（[_onLandmarkLayerReady]）と異なり、[MapView] に渡す
+  /// `buildingAssets`（[_buildingAssets]）の featureCollection は install
+  /// 時点で既に全建物を含んでいるため、本コールバックでは
+  /// [_buildingLayerController] を保持するだけでよい（起動時の追加復元手順は
+  /// 不要）。
+  void _onBuildingLayerReady(BuildingLayerController controller) {
+    _buildingLayerController = controller;
+  }
+
+  /// 建物レイヤーの GeoJSON FeatureCollection を、現在の `building` テーブルの
+  /// 全件から組み立て直す（Issue #193・T090）。初回表示（[initState] の
+  /// `_buildingAssets`）と、建築成功直後の再構築（[_refreshBuildingLayer]）の
+  /// 両方から呼ぶ共通処理。
+  Future<Map<String, dynamic>> _loadBuildingFeatureCollection() async {
+    final connection = _regionPackConnection;
+    final repository = _buildingRepository;
+    if (connection == null || repository == null) {
+      return const {'type': 'FeatureCollection', 'features': <dynamic>[]};
+    }
+    final buildings = await repository.findAll();
+    final hexCenters = hexCentersFromRegionPack(
+      connection,
+      buildings.map((row) => row.hexId),
+    );
+    return buildBuildingFeatureCollection(buildings, hexCenters);
+  }
+
+  /// 建築成功直後に建物レイヤーを再構築する（Issue #193 受け入れ基準「建てた
+  /// 建物が、再起動なしでヘクス中心に種別ごとの仮アイコンで表示される」）。
+  /// [_handleBuildHexTapped] の成功時に呼ぶ。
+  Future<void> _refreshBuildingLayer() async {
+    final controller = _buildingLayerController;
+    if (controller == null) return;
+    await controller.refresh(await _loadBuildingFeatureCollection());
   }
 
   /// [BuildSelectionController]（`widget.paths.buildSelection`）の変化を拾う
@@ -905,6 +968,8 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
         // `InventoryScreen`/`BuildScreen` 自身の定期ポーリングが反映する。
         widget.paths.buildSelection?.clear();
         _showBuildSuccessSnackBar(buildingLabel);
+        // 建てた建物を再起動なしで地図に反映する（Issue #193 受け入れ基準）。
+        unawaited(_refreshBuildingLayer());
       }),
     );
   }
@@ -1022,6 +1087,12 @@ class _DisclosureAwareMapViewState extends State<_DisclosureAwareMapView> {
       // terrainTintLayer と同じく fog と同じソースの feature-state を使う。
       buildableHighlightLayer: buildBuildableHighlightLayer(),
       onBuildableHighlightLayerReady: _onBuildableHighlightLayerReady,
+      // 建物レイヤー（Issue #193・T090）。画像生成・featureCollection の組み立て
+      // 完了を `MapView` 側で待ってから追加される（`buildingAssets` クラスdoc
+      // 参照）。地形の色分けより上・名所ピンより下の描画順は `MapView`
+      // （`_addRegionPackLayers`）側の追加順で決まる。
+      buildingAssets: _buildingAssets,
+      onBuildingLayerReady: _onBuildingLayerReady,
       // 名所ピンレイヤー（Issue #160・T071）。ラスタ画像の生成完了を
       // `MapView` 側で待ってから追加される（`landmarkAssets` クラスdoc参照）。
       landmarkAssets: _landmarkAssets,

@@ -141,6 +141,12 @@ class BuildingSpec {
 }
 
 /// `docs/buildings.md` §2 の掲載順（住宅系→生産系→娯楽系）と同じ順で並べる。
+///
+/// 【Issue #193・T090 での再利用】地図上の建物レイヤーの仮アイコン
+/// （`app/lib/map/building_layer_factory.dart`）も、この [icon] をそのまま使う。
+/// 建設タブのカードと地図上のアイコンで種別ごとのグリフが食い違わないよう、
+/// 「種別→アイコングリフ」の対応をここ1箇所にまとめている。本リストの要素を
+/// 減らす・[icon] を差し替える際は地図側の見た目にも影響することに注意。
 const buildingSpecs = <BuildingSpec>[
   BuildingSpec(
     buildingType: BuildingType.house,

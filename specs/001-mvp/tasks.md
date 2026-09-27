@@ -225,7 +225,7 @@ gate: "ゲート② plan.md 承認済み（2026-07-25）→ 本 tasks.md → 実
 - [ ] T087 [US3] 娯楽系建物の効果を実装（人口が増えやすくなる＋産出効率が少し上がる）
 - [ ] T088 [US3] **地形一次産出と建物定常産出の合算ルール**を実装（spec.md §6 の2層構造。数値は `specs/001-mvp/balance.yaml`（`yield_aggregation`）に委譲）
 - [x] T089 [US3] `app/lib/features/build/build_screen.dart` に建設UIを実装（建築可能ヘクスのハイライト・コスト表示・`DESIGN.md` 準拠） **2026-09-16 完了**: Issue #192 / PR #198。建設タブで建物を選ぶ→地図で建てられるマスをハイライト→確認シート→1トランザクションで建設。Pixel 7a で畑を建てて木51→41・`building` 1行・再起動後も保持・霧タップの退行なしを実機確認済み。
-- [ ] T090 [US3] 建物の地図表示を実装（`packages/location/lib/src/map/building_layer.dart`・1マス1建物）
+- [x] T090 [US3] 建物の地図表示を実装（`packages/location/lib/src/map/building_layer.dart`・1マス1建物） **2026-09-22 完了**: Issue #193 / PR #199。仮アイコン（Material のグリフ＋系統色の円）でヘクス中心に表示。Pixel 7a で既存の畑の表示・建設直後に再起動なしで増えること・再起動後も表示されることを実機確認済み。正式なスプライトは IMAGE_WORKFLOW で別途。
 - [ ] T091 [US3] `packages/core/lib/src/district/district_progress_service.dart` に区画帰属判定（**ヘクス重心が区画ポリゴン内か** — plan.md §5）と制覇率集計を実装
 - [ ] T092 [US3] 区画の発展度を実装（**制覇率×人口規模の複合** — #7 代表回答）。※MVP は集計・表示まで。発展度ボーナスは将来
 - [ ] T093 [P] [US3] `app/lib/features/district/district_screen.dart` に区画一覧・制覇率表示を実装
