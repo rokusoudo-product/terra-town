@@ -124,37 +124,47 @@ void main() {
       expect(platform.removeFeatureStateCalls, isEmpty);
     });
 
-    test('差分だけを更新する（増えた分だけset、消えた分だけremove）', () async {
+    test('差分だけを更新する（増えた分だけtrue、外れた分だけfalse）', () async {
       await highlightController.setHighlighted({1, 2, 3});
       platform.setFeatureStateCalls.clear();
 
       await highlightController.setHighlighted({2, 3, 4});
 
-      final setIds = platform.setFeatureStateCalls
+      final added = platform.setFeatureStateCalls
+          .where((c) => (c['state'] as Map)['buildable'] == true)
           .map((c) => c['featureId'])
           .toSet();
-      expect(setIds, {'4'}, reason: '新たに加わった4だけsetする');
+      expect(added, {'4'}, reason: '新たに加わった4だけtrueにする');
 
-      expect(platform.removeFeatureStateCalls, hasLength(1));
-      final removeCall = platform.removeFeatureStateCalls.single;
-      expect(removeCall['featureId'], '1', reason: '外れた1だけremoveする');
+      final cleared = platform.setFeatureStateCalls
+          .where((c) => (c['state'] as Map)['buildable'] == false)
+          .map((c) => c['featureId'])
+          .toSet();
+      expect(cleared, {'1'}, reason: '外れた1だけfalseにする');
+
       expect(
-        removeCall['stateKey'],
-        'buildable',
-        reason: 'buildableキーだけを消し、revealedは触らない',
+        platform.removeFeatureStateCalls,
+        isEmpty,
+        reason: 'Issue #204: Android では削除が再描画に反映されないため使わない',
       );
     });
 
-    test('clearは全てのハイライトをremoveFeatureStateで解除する', () async {
+    test('clearは全てのハイライトをbuildable:falseで解除する（Issue #204）', () async {
       await highlightController.setHighlighted({1, 2});
-      platform.removeFeatureStateCalls.clear();
+      platform.setFeatureStateCalls.clear();
 
       await highlightController.clear();
 
-      expect(platform.removeFeatureStateCalls, hasLength(2));
-      for (final call in platform.removeFeatureStateCalls) {
-        expect(call['stateKey'], 'buildable');
+      expect(platform.setFeatureStateCalls, hasLength(2));
+      final ids = platform.setFeatureStateCalls
+          .map((c) => c['featureId'])
+          .toSet();
+      expect(ids, {'1', '2'});
+      for (final call in platform.setFeatureStateCalls) {
+        expect(call['state'], {'buildable': false});
+        expect(call['sourceId'], 'terra_town_fog');
       }
+      expect(platform.removeFeatureStateCalls, isEmpty);
     });
   });
 }

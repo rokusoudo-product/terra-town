@@ -125,11 +125,18 @@ class BuildableHighlightController {
       });
     }
     for (final featureId in toRemove) {
-      await _controller.removeFeatureState(
-        sourceId,
-        featureId: featureId.toString(),
-        stateKey: 'buildable',
-      );
+      // 【Issue #204】解除は `removeFeatureState` ではなく `buildable: false` の
+      // 明示設定で行う。2026-09-22 の実機確認（Pixel 7a）で、建設成功後に
+      // `removeFeatureState` を呼んでもハイライトが画面に残り続け、アプリを
+      // 再起動すると消えることを確認した（プラグインはエラーを返さず、
+      // Android の GeoJSON ソースでは feature-state の削除が再描画に反映され
+      // ないため）。`fill-opacity` の式は
+      // `['case', ['boolean', ['feature-state','buildable'], false], 不透明度, 0]`
+      // であり、false を設定すれば削除と同じ見た目になる（かつ再描画される）。
+      // `revealed`・`terrain_type` には触れない点も従来どおり。
+      await _controller.setFeatureState(sourceId, featureId.toString(), {
+        'buildable': false,
+      });
     }
 
     _highlighted
