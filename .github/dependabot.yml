@@ -1,0 +1,52 @@
+# 依存関係の自動更新（AI×Security Conference 2026 の持ち帰り）。
+# 方針: 常に最新を保つ。ただし新しい版は公開から7日待ってから入れる（cooldown）。
+# セキュリティ更新には cooldown はかからない（Dependabot の仕様）。
+version: 2
+updates:
+  # Flutter / Dart（core・location・app の3パッケージ）
+  - package-ecosystem: "pub"
+    directories:
+      - "/packages/core"
+      - "/packages/location"
+      - "/app"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      pub-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # tools/pack-builder（requirements.txt / requirements-dev.txt）
+  - package-ecosystem: "pip"
+    directory: "/tools/pack-builder"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    ignore:
+      # h3 は Dart 側 h3_dart との互換確認済みの版から不用意に上げない（requirements.txt・research.md §8）
+      - dependency-name: "h3"
+        update-types: ["version-update:semver-major"]
+    groups:
+      pip-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions（.github/workflows/ を自動で探す）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
