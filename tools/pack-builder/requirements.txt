@@ -10,4 +10,4 @@ numpy==2.5.3
 # 依存は numpy・shapely・packaging のみ（geopandas 等の重い依存は使わない。
 # extract_districts.py は topojson.Topology.to_geojson() のみ使用しており
 # geopandas を要する to_gdf() は使わない）。
-topojson==1.10
+topojson==2.2
