@@ -2,10 +2,10 @@
 # バージョンは 2026-09-08 時点で動作確認済みのものを固定している。
 # H3 は v3/v4 でAPIが異なるため、Dart側 h3_dart との互換確認済みバージョンから
 # 不用意に上げないこと（research.md §8 参照）。
-osmium==4.3.1
+osmium==4.3.2
 h3==4.5.0
-shapely==2.1.2
-numpy==2.5.3
+shapely==2.2.0
+numpy==2.5.4
 # Issue #86（T041）: 行政区域ポリゴンのトポロジ保持簡略化に使用。
 # 依存は numpy・shapely・packaging のみ（geopandas 等の重い依存は使わない。
 # extract_districts.py は topojson.Topology.to_geojson() のみ使用しており
